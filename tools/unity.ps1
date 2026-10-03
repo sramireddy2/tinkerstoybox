@@ -16,13 +16,14 @@
   .\tools\unity.ps1 test -Filter "Toybox.Tests.PerspectiveTests"      # regex on the full test name
   .\tools\unity.ps1 exec -Method Toybox.EditorTools.ProjectSetup.Run
   .\tools\unity.ps1 exec -Method Toybox.EditorTools.Shots.Capture -UnityArgs '-toyboxLevel','3'
+  .\tools\unity.ps1 playcheck                                          # Play Mode smoke run: the bot autoplays a level
   .\tools\unity.ps1 build
   .\tools\unity.ps1 status
   .\tools\unity.ps1 stop
 #>
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet('compile', 'test', 'exec', 'build', 'stop', 'status')]
+    [ValidateSet('compile', 'test', 'exec', 'build', 'playcheck', 'stop', 'status')]
     [string]$Command,
     [string]$Filter = '',
     [string]$Method = '',
@@ -53,6 +54,7 @@ $serverLog = Join-Path $serverDir 'server.log'
 # (PowerShell would fold the printed lines into it). They report through these instead.
 $script:ok = $false
 $script:hadCompileErrors = $false
+$script:hadShaderErrors = $false
 $script:serverPid = 0
 
 function Quote([string]$s) { '"' + $s + '"' }
@@ -132,15 +134,45 @@ function Start-Server {
     Write-ServerLogTail
 }
 
-function Invoke-Server {
+function Get-ServerLogLength {
+    if (Test-Path $serverLog) { return (Get-Item $serverLog).Length }
+    return 0
+}
+
+# Shader compile errors only ever show up in the editor log, so surface the ones logged since $offset.
+function Write-NewShaderErrors([long]$offset) {
+    $script:hadShaderErrors = $false
+    if (-not (Test-Path $serverLog)) { return }
+    $text = ''
+    try {
+        $stream = [System.IO.File]::Open($serverLog, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        try {
+            if ($offset -gt $stream.Length) { $offset = 0 }
+            $null = $stream.Seek($offset, [System.IO.SeekOrigin]::Begin)
+            $reader = New-Object System.IO.StreamReader($stream)
+            $text = $reader.ReadToEnd()
+        }
+        finally { $stream.Dispose() }
+    }
+    catch { return }
+    $errors = @($text -split "`r?`n" | Where-Object { $_ -match "^Shader error in '" } | Sort-Object -Unique)
+    if ($errors.Count -gt 0) {
+        $script:hadShaderErrors = $true
+        Write-Output "SHADER ERRORS ($($errors.Count)):"
+        $errors | Select-Object -First 20 | ForEach-Object { Write-Output "  $_" }
+    }
+}
+
+function Invoke-Server([string]$serverCommand = $Command, [string]$serverMethod = $Method, [string[]]$serverArgs = $UnityArgs) {
     $script:ok = $false
     Find-Server
     if ($script:serverPid -eq 0) { Start-Server }
     if ($script:serverPid -eq 0) { return }
     $target = $script:serverPid
+    $logOffset = Get-ServerLogLength
 
     $id = [guid]::NewGuid().ToString('N').Substring(0, 12)
-    Send-Request @{ id = $id; command = $Command; filter = $Filter; method = $Method; args = [string[]]$UnityArgs }
+    Send-Request @{ id = $id; command = $serverCommand; filter = $Filter; method = $serverMethod; args = [string[]]$serverArgs }
     $responsePath = Join-Path $serverDir "res-$id.json"
     $deadline = (Get-Date).AddMinutes($TimeoutMin)
     while (-not (Test-Path $responsePath)) {
@@ -159,7 +191,34 @@ function Invoke-Server {
     Start-Sleep -Milliseconds 50
     $response = Get-Content $responsePath -Raw | ConvertFrom-Json
     foreach ($line in $response.lines) { Write-Output $line }
-    $script:ok = [bool]$response.ok
+    Write-NewShaderErrors $logOffset
+    $script:ok = [bool]$response.ok -and -not $script:hadShaderErrors
+}
+
+# Enters Play Mode in the batch server, lets the game autoplay a level through the real Update loop,
+# and reports what Toybox.EditorTools.PlayCheck wrote. The caller's mutex is held for the whole
+# session so no other request is served while the editor is playing.
+function Invoke-PlayCheck {
+    $resultPath = Join-Path $outDir 'playcheck\result.txt'
+    if (Test-Path $resultPath) { Remove-Item $resultPath -Force }
+    Invoke-Server 'exec' 'Toybox.EditorTools.PlayCheck.Run' (@('-toyboxExclusive') + $UnityArgs)
+    if (-not $script:ok) { return }
+    $script:ok = $false
+
+    $deadline = (Get-Date).AddSeconds(180)
+    while (-not (Test-Path $resultPath) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    if (-not (Test-Path $resultPath)) {
+        Write-Output 'No result after 180 s - asking the editor to leave Play Mode.'
+        Invoke-Server 'exec' 'Toybox.EditorTools.PlayCheck.Abort' @()
+        $script:ok = $false
+        $deadline = (Get-Date).AddSeconds(60)
+        while (-not (Test-Path $resultPath) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    }
+    if (-not (Test-Path $resultPath)) { Write-Output 'PLAYCHECK: NO RESULT - the editor may still be in Play Mode'; return }
+    Start-Sleep -Milliseconds 300
+    $lines = Get-Content $resultPath
+    $lines | ForEach-Object { Write-Output $_ }
+    $script:ok = [bool]($lines -match '^PLAYCHECK: OK')
 }
 
 function Invoke-Cold {
@@ -271,6 +330,9 @@ try {
     elseif ($Command -eq 'build' -or $Cold) {
         Stop-Server
         Invoke-Cold
+    }
+    elseif ($Command -eq 'playcheck') {
+        Invoke-PlayCheck
     }
     else {
         Invoke-Server

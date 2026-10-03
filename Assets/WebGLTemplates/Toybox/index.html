@@ -7,24 +7,27 @@
     <meta name="description" content="Tinker's Toybox - a forced-perspective puzzle platformer where a tiny action figure resizes the playroom.">
     <title>{{{ PRODUCT_NAME }}}</title>
     <style>
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1035; }
-      #unity-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #1b1035; outline: none; }
-      #loader { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
-        background: radial-gradient(circle at 50% 40%, #3b2a86 0%, #1b1035 70%); color: #fff7e6;
-        font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; transition: opacity .5s ease; }
+      /* Loading screen per docs/ART_BIBLE.md 10.5: Paper background, the four-pane mark as an Ink spinner, a Cherry bar. */
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #FFFDF7; }
+      #unity-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #FFFDF7; outline: none; }
+      #loader { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px;
+        background: #FFFDF7; color: #2B2140; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; transition: opacity .32s ease; }
       #loader.done { opacity: 0; pointer-events: none; }
-      #loader h1 { margin: 0; font-size: clamp(28px, 6vw, 64px); letter-spacing: .02em; text-shadow: 0 4px 0 #ef476f, 0 8px 0 rgba(0,0,0,.25); }
-      #bar { width: min(420px, 70vw); height: 16px; border-radius: 999px; background: rgba(255,255,255,.14); overflow: hidden; }
-      #fill { width: 0%; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #ffd166, #ef476f, #9b5de5, #06d6a0); transition: width .2s ease; }
-      #note { font-size: 14px; opacity: .7; }
+      #mark { width: 56px; height: 56px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; animation: turn 1.6s cubic-bezier(.6, 0, .4, 1) infinite; }
+      #mark i { background: #2B2140; border-radius: 6px; }
+      @keyframes turn { 0% { transform: rotate(0deg); } 50%, 100% { transform: rotate(90deg); } }
+      #bar { width: min(360px, 64vw); height: 10px; border-radius: 999px; background: rgba(43, 33, 64, .12); overflow: hidden; }
+      #fill { width: 0%; height: 100%; border-radius: 999px; background: #FF2E55; transition: width .18s ease; }
+      #note { font-size: 14px; font-weight: 600; letter-spacing: .04em; min-height: 1.2em; }
+      @media (prefers-reduced-motion: reduce) { #mark { animation: none; } }
     </style>
   </head>
   <body>
     <canvas id="unity-canvas" tabindex="-1"></canvas>
     <div id="loader">
-      <h1>Tinker's Toybox</h1>
+      <div id="mark"><i></i><i></i><i></i><i></i></div>
       <div id="bar"><div id="fill"></div></div>
-      <div id="note">Unpacking the toybox...</div>
+      <div id="note"></div>
     </div>
     <script src="Build/{{{ LOADER_FILENAME }}}"></script>
     <script>
