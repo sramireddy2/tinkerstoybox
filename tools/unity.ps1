@@ -317,7 +317,10 @@ if ($Command -ne 'stop') {
 }
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-$mutex = New-Object System.Threading.Mutex($false, 'TinkersToyboxUnityBatch')
+# One mutex per project folder, so a build running in a clone of the project does not block this one.
+$sha = New-Object System.Security.Cryptography.SHA1Managed
+$rootHash = [System.BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($root.ToLowerInvariant()))).Replace('-', '').Substring(0, 12)
+$mutex = New-Object System.Threading.Mutex($false, "TinkersToyboxUnityBatch-$rootHash")
 $owned = $false
 try {
     try { $owned = $mutex.WaitOne([TimeSpan]::FromMinutes(180)) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
