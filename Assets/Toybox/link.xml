@@ -1,0 +1,4 @@
+<linker>
+  <!-- Levels and gadgets are discovered by reflection, so nothing in the game assembly may be stripped. -->
+  <assembly fullname="Toybox" preserve="all"/>
+</linker>

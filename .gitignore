@@ -1,8 +1,53 @@
+# --- Unity ---
+/[Ll]ibrary/
+/[Ll]ibrary
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+# Burst output dropped next to the project during WebGL builds
+/Data/
+# Scratch folder the performance-test package creates during builds (game resources live in Assets/Toybox/Resources)
+/Assets/Resources/
+/Assets/Resources.meta
+/[Rr]ecordings/
+*.csproj
+*.sln
+*.slnx
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.unityproj
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+sysinfo.txt
+crashlytics-build.properties
+/.vs/
+/.vscode/
+/.idea/
+/.utmp/
+
+# --- tooling output ---
+/tools/out/
+
+# --- legacy web prototype ---
 node_modules/
 dist/
 .vite/
+coverage/
+
+# --- misc ---
 *.log
 .DS_Store
 Thumbs.db
 .claude/
-coverage/
