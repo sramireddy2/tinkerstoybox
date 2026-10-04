@@ -354,6 +354,7 @@ namespace Toybox.Tests
                 Assert.IsFalse(Bool(asset, "m_ReflectionProbeBlending"), name);
                 Assert.IsFalse(Bool(asset, "m_ReflectionProbeBoxProjection"), name);
                 Assert.IsTrue(asset.useSRPBatcher, name);
+                Assert.IsFalse(Bool(asset, "m_SupportsDynamicBatching"), name + ": the editor logs an error while this is on");
                 Assert.AreEqual(ColorGradingMode.LowDynamicRange, asset.colorGradingMode, name);
                 Assert.AreEqual(32, asset.colorGradingLutSize, name);
             }

@@ -286,8 +286,12 @@ namespace Toybox.EditorTools
             lines.AddRange(Report);
             Directory.CreateDirectory(OutputPath);
             File.WriteAllLines(ResultPath, lines);
+            bool ok = Problems.Count == 0;
             Report.Clear();
             Problems.Clear();
+
+            // A check in the windowed editor (tools/editor-check.ps1) closes that editor when it is done.
+            if (ToyboxArgs.Has("-toyboxQuit")) EditorApplication.Exit(ok ? 0 : 1);
         }
 
         static void IgnoreLog(string condition, string stackTrace, LogType type) { }
@@ -298,6 +302,13 @@ namespace Toybox.EditorTools
             if (type == LogType.Warning)
             {
                 if (Report.Count < 60) Report.Add("  warning: " + condition);
+                return;
+            }
+            // The windowed editor's own search indexer throws on the first start of a project that has no
+            // index yet. It never touches the game.
+            if (type == LogType.Exception && stackTrace.Contains("UnityEditor.Search.") && !stackTrace.Contains("Toybox."))
+            {
+                Report.Add("  ignored (the editor's search indexer): " + condition.Split('\n')[0]);
                 return;
             }
             if (Problems.Count < 30) Problems.Add(type + ": " + condition);

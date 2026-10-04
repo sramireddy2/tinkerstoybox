@@ -39,11 +39,22 @@ physics engine at that size — with mass to match.
 
 ## Opening the project
 
-Open the repository root in **Unity 6000.6.4f1** (Unity Hub → Add → project from disk), then open
-`Assets/Toybox/Scenes/Main.unity` and press Play. Keep the project **outside OneDrive / Dropbox** —
-synced folders make Unity's file operations fail in odd ways.
+Open the repository root in **Unity 6000.6.4f1** (Unity Hub → Add → project from disk) and press Play:
+the game starts on its title screen whichever scene is open. Keep the project **outside OneDrive /
+Dropbox** — synced folders make Unity's file operations fail in odd ways.
 
-Everything is built from C#: levels, toys and environments are code, not hand-placed scene content.
+The **Toybox** menu in the editor has the rest:
+
+| Menu item | What it does |
+|---|---|
+| Play Game | Enters Play Mode on the title screen |
+| Level Launcher | A window listing every level, each with **Play** and **Watch bot** (the built-in solver plays it) |
+| Build WebGL | Makes the browser build into `Build/WebGL` |
+| Capture Shots | Renders stills of a level without entering Play Mode |
+| Run Project Setup | Regenerates the scene, materials, fonts and render settings from code |
+
+Everything is built from C#: levels, toys and environments are code, not hand-placed scene content, so
+the Main scene holds a single `Bootstrap` object and the Hierarchy fills in when the game runs.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the engine contract.
 
 ## Command-line tooling (Windows PowerShell)
@@ -60,6 +71,13 @@ Compiles the game's C# with Unity's own compiler in a few seconds, without start
 
 Runs the EditMode tests through a background headless editor. The simulation is stepped manually, so
 each level ships with a test in which a scripted bot actually solves it — no Play Mode needed.
+
+```powershell
+.\tools\editor-check.ps1 -Level 1,2,3
+```
+
+Opens the project in the real, windowed Unity editor (on a private copy), enters Play Mode on each
+level, lets the bot solve it and closes the editor again.
 
 ```powershell
 .\tools\unity.ps1 build

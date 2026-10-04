@@ -170,8 +170,9 @@ namespace Toybox.EditorTools
             SetupUtil.SetField(asset, "m_ConservativeEnclosingSphere", true);
             SetupUtil.SetField(asset, "m_SoftShadowQuality", tier.SoftShadowQuality);
 
-            // (7.3 also asks for dynamic batching; URP 17.6 has retired it - the field is still serialized
-            // but nothing reads it - so there is nothing to switch on.)
+            // (7.3 also asks for dynamic batching; URP 17.6 has retired it. The field is still serialized,
+            // and the windowed editor logs an error on every pipeline start while it is on - so: off.)
+            SetupUtil.SetField(asset, "m_SupportsDynamicBatching", false);
             SetupUtil.SetField(asset, "m_UseSRPBatcher", true);
             SetupUtil.SetField(asset, "m_MixedLightingSupported", false);
             SetupUtil.SetField(asset, "m_SupportsLightCookies", false);
