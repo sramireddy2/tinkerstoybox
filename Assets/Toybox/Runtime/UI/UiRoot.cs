@@ -67,8 +67,10 @@ namespace Toybox.UI
                 root.Scaler = go.AddComponent<CanvasScaler>();
                 root.Scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
                 root.Scaler.referenceResolution = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
-                root.Scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-                root.Scaler.matchWidthOrHeight = 1f;
+                // Expand keeps the whole 1920x1080 reference frame on screen at any aspect: identical to
+                // matching height on 16:9 and wider, and it stops wide elements (the logo) from running
+                // off the sides of a narrow or portrait window.
+                root.Scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.Expand;
                 root.Scaler.referencePixelsPerUnit = 100f;
             }
             if (takesClicks) go.AddComponent<GraphicRaycaster>();

@@ -690,7 +690,7 @@ namespace Toybox.Tests
             CanvasScaler scaler = hud.Root.Scaler;
             Assert.AreEqual(CanvasScaler.ScaleMode.ScaleWithScreenSize, scaler.uiScaleMode);
             Assert.AreEqual(new Vector2(1920f, 1080f), scaler.referenceResolution);
-            Assert.AreEqual(1f, scaler.matchWidthOrHeight, "match height");
+            Assert.AreEqual(CanvasScaler.ScreenMatchMode.Expand, scaler.screenMatchMode, "the reference frame fits at any aspect");
             Assert.AreSame(presentation.Context.Root, hud.Root.transform.parent, "under the presentation root");
             Assert.AreEqual(0, hud.Root.GetComponentsInChildren<Collider>(true).Length, "nothing of it joins the simulation");
             foreach (Graphic graphic in hud.Root.GetComponentsInChildren<Graphic>(true))
