@@ -16,7 +16,8 @@ namespace Toybox.EditorTools
     /// A smoke check of the real thing: opens the Main scene, enters Play Mode, lets the Bootstrap create
     /// the GameRunner, turns autoplay on and watches the bot solve the first level through the real
     /// Update loop, takes pictures through the game's own camera, leaves Play Mode again and writes what it
-    /// saw to tools/out/playcheck/result.txt.
+    /// saw to tools/out/playcheck/result.txt. -toyboxPlain plays with the debug look; -toyboxUrl "?level=3"
+    /// gives Play Mode the query string a page address would carry.
     ///
     /// CAUTION: Run returns as soon as Play Mode has been requested; the check itself takes many editor
     /// frames (about 15 seconds). While it runs, the editor is in Play Mode and must not be asked to run
@@ -75,6 +76,12 @@ namespace Toybox.EditorTools
             Game.Current?.Dispose();
 
             EditorSceneManager.OpenScene(ProjectSetup.ScenePath, OpenSceneMode.Single);
+            // The editor has no page address; this is what the runner starts with instead.
+            string url = ToyboxArgs.Get("-toyboxUrl", "");
+            if (ToyboxArgs.Has("-toyboxPlain")) url += (url.Contains("?") ? "&" : "?") + "plain=1";
+            SessionState.SetString(LaunchOptions.EditorOverrideKey, url);
+            // The check starts from nothing: no saved progress or settings of this machine, and none left behind.
+            SessionState.SetBool(PrefStores.EditorMemoryKey, true);
             SessionState.SetString(StateKey, "entering");
             SessionState.SetFloat(DeadlineKey, (float)(EditorApplication.timeSinceStartup + TimeoutSeconds));
             SessionState.SetInt("Toybox.PlayCheck.Mode", (int)Physics.simulationMode);
@@ -152,8 +159,14 @@ namespace Toybox.EditorTools
             Report.Add("simulation scene '" + game.Scene.name + "' loaded=" + game.Scene.isLoaded + " valid=" + game.Scene.IsValid() +
                        "; active scene '" + SceneManager.GetActiveScene().name + "'; scenes loaded " + SceneManager.sceneCount);
             Report.Add("camera " + (runner.Rig != null && runner.Rig.Camera != null ? "in scene '" + runner.Rig.Camera.gameObject.scene.name + "'" : "MISSING") +
-                       "; hud " + (runner.Hud != null ? "present" : "MISSING") +
+                       "; flow " + runner.Flow.State + "; plain " + runner.Launch.Plain +
                        "; pointer locked " + runner.Human.PointerLocked + "; focused " + runner.Human.Frame.Focused);
+            var names = new List<string>();
+            if (runner.Presentation != null)
+                foreach (IPresenter presenter in runner.Presentation.Presenters) names.Add(presenter.GetType().Name);
+            Report.Add("presenters (" + names.Count + "): " + string.Join(", ", names));
+            if (runner.Presentation == null) Problems.Add("the runner has no presentation");
+            else if (names.Count == 0) Problems.Add("no presenter is active");
             Report.Add("physics while playing: mode " + Physics.simulationMode + ", gravity " + Physics.gravity.y.ToString("0.##", CultureInfo.InvariantCulture));
 
             frames = 0;
@@ -206,7 +219,8 @@ namespace Toybox.EditorTools
                            " s (" + (ticks / Mathf.Max(elapsed, 0.01f)).ToString("0", CultureInfo.InvariantCulture) + " ticks/s), longest frame " +
                            (longestFrame * 1000f).ToString("0", CultureInfo.InvariantCulture) + " ms; loads " + loads + ", completions " + completions +
                            "; autoplay error: " + (runner.AutoplayError ?? "none") + "; scenes loaded " + SceneManager.sceneCount +
-                           "; HUD drawn " + (runner.Hud != null ? runner.Hud.DrawCount : 0) + " times");
+                           (runner.Hud != null ? "; debug HUD drawn " + runner.Hud.DrawCount + " times" : "") +
+                           "; presentation frames " + (runner.Presentation != null ? runner.Presentation.Context.FrameCount : 0));
                 if (!wrapped) Problems.Add("autoplay did not complete the level within " + WatchSeconds + " s (player at " + game.Player.Position + ")");
                 Leave();
             }
@@ -219,12 +233,7 @@ namespace Toybox.EditorTools
                 Problems.Add("no camera to take " + file + " with");
                 return;
             }
-            if (target == null)
-            {
-                target = new RenderTexture(1280, 720, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB) { antiAliasing = 4, hideFlags = HideFlags.HideAndDontSave };
-                target.Create();
-            }
-            Shots.Shoot(runner.Rig.Camera, target, Path.Combine(OutputPath, file));
+            Shots.Shoot(runner.Rig.Camera, 1280, 720, Path.Combine(OutputPath, file));
         }
 
         static void Leave()
@@ -237,8 +246,15 @@ namespace Toybox.EditorTools
         static void Finish()
         {
             SessionState.SetString(StateKey, "");
+            SessionState.EraseString(LaunchOptions.EditorOverrideKey);
+            SessionState.EraseBool(PrefStores.EditorMemoryKey);
             EditorApplication.update -= Pump;
             Application.logMessageReceived -= OnLog;
+            // Leaving Play Mode makes the engine stop calling log listeners until somebody subscribes again
+            // (seen: the batch server no longer echoed "[Toybox]" lines after a play check, until the next
+            // script reload). Subscribing tells it there are listeners; the server's own is still in the list.
+            Application.logMessageReceived += IgnoreLog;
+            Application.logMessageReceived -= IgnoreLog;
 
             modeBefore = (SimulationMode)SessionState.GetInt("Toybox.PlayCheck.Mode", (int)Physics.simulationMode);
             gravityBefore = SessionState.GetVector3("Toybox.PlayCheck.Gravity", Physics.gravity);
@@ -273,6 +289,8 @@ namespace Toybox.EditorTools
             Report.Clear();
             Problems.Clear();
         }
+
+        static void IgnoreLog(string condition, string stackTrace, LogType type) { }
 
         static void OnLog(string condition, string stackTrace, LogType type)
         {

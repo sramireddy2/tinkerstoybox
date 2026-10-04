@@ -35,6 +35,8 @@ namespace Toybox.Engine
         // A prop heavier than the player that has sunk this far into the capsule (per unit of player scale)
         // is squeezing them against something. It passes through instead (see LetHeavyPropsPass).
         const float CrushDepth = 0.15f;
+        /// <summary>Ticks a GrabPose takes to stand a tumbled prop up: 0.15 s.</summary>
+        public const int PoseTicks = 9;
 
         readonly Game game;
         readonly Collider[] candidates = new Collider[256];
@@ -44,6 +46,11 @@ namespace Toybox.Engine
         float grabScale, grabDistance;
         Quaternion baseRotation = Quaternion.identity;
         Quaternion stepRotation = Quaternion.identity;
+        // GrabPose: the hold eases baseRotation from the tilt at the grab to the pose the prop asks for.
+        Quaternion poseFrom = Quaternion.identity, poseTo = Quaternion.identity;
+        int poseTick = PoseTicks;
+        Prop focus;
+        int focusStamp = -1;
         Vector3 placedCenter;
         Quaternion placedRotation = Quaternion.identity;
         float placedScale;
@@ -58,6 +65,34 @@ namespace Toybox.Engine
         public float HoldDistance { get; private set; }
         /// <summary>False while no free spot exists on the view ray and the prop stays where it last fitted.</summary>
         public bool PlacementValid { get; private set; }
+        /// <summary>The held prop's scale when it was grabbed (0 while nothing is held).</summary>
+        public float GrabScale => Held != null ? grabScale : 0f;
+        /// <summary>Distance from the eye to the held prop's center when it was grabbed.</summary>
+        public float GrabDistance => Held != null ? grabDistance : 0f;
+
+        /// <summary>
+        /// The focus candidate: the prop a grab would take right now, or null - also while something is held.
+        /// It is worked out at most once per tick (on first use after the tick, from the view at that
+        /// moment) and remembered until the next one, so presentation code may ask every frame.
+        /// </summary>
+        public Prop Focus
+        {
+            get
+            {
+                if (Held != null) return null;
+                if (focusStamp != game.TickCount)
+                {
+                    focusStamp = game.TickCount;
+                    focus = game.Level != null ? FindTarget() : null;
+                    FocusQueries++;
+                }
+                if (focus != null && (focus.Removed || !focus.Grabbable)) focus = null;
+                return focus;
+            }
+        }
+
+        /// <summary>How many times <see cref="Focus"/> has actually searched (it is cached per tick).</summary>
+        public int FocusQueries { get; private set; }
 
         internal PerspectiveGrabber(Game game) => this.game = game;
 
@@ -161,6 +196,9 @@ namespace Toybox.Engine
             HoldDistance = distance;
             baseRotation = Quaternion.Inverse(Quaternion.Euler(0f, game.Player.Yaw, 0f)) * prop.Rotation;
             stepRotation = Quaternion.identity;
+            poseFrom = baseRotation;
+            poseTo = PoseTarget(baseRotation, prop.GrabPose);
+            poseTick = Quaternion.Angle(poseFrom, poseTo) < 0.01f ? PoseTicks : 0;
             placedCenter = prop.Center;
             placedRotation = prop.Rotation;
             placedScale = prop.Scale;
@@ -180,6 +218,12 @@ namespace Toybox.Engine
         {
             Prop prop = Held;
             if (prop == null) return;
+            // Let go early, the prop is still put down the way its GrabPose wants it.
+            if (poseTick < PoseTicks)
+            {
+                poseTick = PoseTicks;
+                baseRotation = poseTo;
+            }
             UpdatePlacement();
             Held = null;
             float distance = Vector3.Distance(game.Player.Eye, prop.Center);
@@ -199,6 +243,7 @@ namespace Toybox.Engine
         public void RotateHeld(int yawSteps, int pitchSteps)
         {
             if (Held == null) return;
+            if (!Held.AllowPitch) pitchSteps = 0;
             if (yawSteps != 0)
                 stepRotation = Quaternion.AngleAxis(YawStepDegrees * yawSteps, Vector3.up) * stepRotation;
             if (pitchSteps != 0)
@@ -255,6 +300,12 @@ namespace Toybox.Engine
 
             if (Held != null)
             {
+                if (poseTick < PoseTicks)
+                {
+                    poseTick++;
+                    float t = (float)poseTick / PoseTicks;
+                    baseRotation = poseTick >= PoseTicks ? poseTo : Quaternion.Slerp(poseFrom, poseTo, t * t * (3f - 2f * t));
+                }
                 UpdatePlacement();
                 game.Events.RaisePropHeld(HoldEvent(Held, Vector3.Distance(game.Player.Eye, Held.Center)));
             }
@@ -280,6 +331,32 @@ namespace Toybox.Engine
             Held = null;
             presented = false;
             passingThroughPlayer.Clear();
+            focus = null;
+            focusStamp = -1;
+            poseTick = PoseTicks;
+        }
+
+        // Where a GrabPose takes a rotation (given in the yaw frame, in which up is still up): the smallest
+        // turn that stands the chosen axis of the prop upright, which leaves its heading alone.
+        static Quaternion PoseTarget(Quaternion rotation, GrabPose pose)
+        {
+            if (pose == GrabPose.Keep) return rotation;
+            Vector3 axis = Vector3.up;
+            if (pose == GrabPose.Snap90)
+            {
+                // Whichever of the prop's own six axes points most nearly up.
+                Vector3 up = Quaternion.Inverse(rotation) * Vector3.up;
+                float x = Mathf.Abs(up.x), y = Mathf.Abs(up.y), z = Mathf.Abs(up.z);
+                if (y >= x && y >= z) axis = new Vector3(0f, Mathf.Sign(up.y), 0f);
+                else if (x >= z) axis = new Vector3(Mathf.Sign(up.x), 0f, 0f);
+                else axis = new Vector3(0f, 0f, Mathf.Sign(up.z));
+            }
+            Vector3 current = rotation * axis;
+            float dot = Vector3.Dot(current, Vector3.up);
+            if (dot > 0.999999f) return rotation;
+            // Upside down there is no smallest turn: roll it over about its own forward axis.
+            if (dot < -0.9999f) return Quaternion.AngleAxis(180f, rotation * Vector3.forward) * rotation;
+            return Quaternion.FromToRotation(current, Vector3.up) * rotation;
         }
 
         PropHoldEvent HoldEvent(Prop prop, float distance) => new PropHoldEvent

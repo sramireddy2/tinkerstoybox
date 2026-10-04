@@ -62,6 +62,7 @@ namespace Toybox.Engine
         SimScene world;
 
         GameObject levelRoot;
+        GameObject environmentRoot;
         int nextPropId;
         float accumulator;
         bool ticking;
@@ -95,6 +96,12 @@ namespace Toybox.Engine
         public LevelContext Context { get; private set; }
         public bool LevelCompleted { get; private set; }
         public float KillY => Level != null ? Level.KillY : -30f;
+        /// <summary>
+        /// The room the loaded level stands in, solved around the level after its Build (ART_BIBLE 6.2):
+        /// preset, sun, window, shell and furniture. Its colliders are in the simulation (Default layer);
+        /// the render side builds the visuals from the same data. Null while no level is loaded.
+        /// </summary>
+        public EnvironmentDescriptor Environment { get; private set; }
 
         /// <summary>Ticks since the Game was created.</summary>
         public int TickCount { get; private set; }
@@ -114,6 +121,10 @@ namespace Toybox.Engine
             Physics.defaultSolverIterations = SolverIterations;
             Physics.defaultSolverVelocityIterations = SolverVelocityIterations;
             Physics.defaultMaxDepenetrationVelocity = MaxDepenetrationVelocity;
+            // Without this PhysX gives a flat contact (two friction anchors) twice the friction its
+            // coefficient says: a box with 0.6 on a level deck would not move under a push of 0.9 g. Levels
+            // compute slides and topples from the coefficient, so it has to be the coefficient.
+            Physics.improvedPatchFriction = true;
             Layers.Configure();
 
             seed = options.Seed;
@@ -168,6 +179,9 @@ namespace Toybox.Engine
                 return;
             }
 
+            // Outside the deferral below, so listeners hear it while the old level still exists.
+            if (Level != null) Events.RaiseLevelUnloading(LevelEventNow());
+
             Events.BeginDefer();
             try
             {
@@ -184,6 +198,8 @@ namespace Toybox.Engine
                 Context = new LevelContext(this, levelRoot.transform);
                 Player.ResetState();
 
+                // Room surfaces a level builds take the dip of its environment unless it says otherwise.
+                Toybox.Art.Materials.Dip = Toybox.Art.Palette.DipOf(level.Environment);
                 Context.BeginBuild();
                 // What the level subscribes to belongs to the level and ends with it.
                 GameEvents.Scope outer = Events.Record(Context.Subscriptions);
@@ -195,6 +211,10 @@ namespace Toybox.Engine
                 {
                     Events.Record(outer);
                 }
+
+                // The room is solved around what the level built, so levels author around their own origin.
+                Physics.SyncTransforms();
+                BuildEnvironment(level);
 
                 Physics.SyncTransforms();
                 Player.Teleport(Context.SpawnPosition, Context.SpawnYaw, Context.SpawnPitch);
@@ -260,12 +280,19 @@ namespace Toybox.Engine
                 Context?.RunUpdates(Sim.Dt);
 
                 contactScaler.Prepare(world.Physics, Player, props);
+                for (int i = 0; i < props.Count; i++)
+                    if (!props[i].Removed) props[i].BeginStep();
                 world.Physics.Simulate(Sim.Dt);
 
                 Player.PostPhysics();
                 Grabber.PostPhysics();
                 for (int i = 0; i < props.Count; i++)
-                    if (!props[i].Removed) props[i].RefreshCollisionMode();
+                {
+                    Prop prop = props[i];
+                    if (prop.Removed) continue;
+                    prop.RefreshCollisionMode();
+                    if (prop.EndStep(out PropImpactEvent impact)) Events.RaisePropImpact(impact);
+                }
                 for (int i = 0; i < triggers.Count; i++)
                 {
                     triggers[i].Evaluate(this);
@@ -344,6 +371,7 @@ namespace Toybox.Engine
         public void Dispose()
         {
             if (disposed) return;
+            if (Level != null && !ticking) Events.RaiseLevelUnloading(LevelEventNow());
             disposed = true;
             try
             {
@@ -373,6 +401,7 @@ namespace Toybox.Engine
             if (prop == null || prop.Removed) return;
             Grabber.Forget(prop);
             if (prop.Mover != null) movers.Remove(prop.Mover);
+            if (prop.DriveMover != null) movers.Remove(prop.DriveMover);
             prop.Destroy();
             // It leaves every trigger now, so that no level code is handed a destroyed prop.
             for (int i = 0; i < triggers.Count; i++) triggers[i].Forget(this, prop);
@@ -410,8 +439,31 @@ namespace Toybox.Engine
 
             if (levelRoot != null) Sim.Destroy(levelRoot);
             levelRoot = null;
+            if (environmentRoot != null) Sim.Destroy(environmentRoot);
+            environmentRoot = null;
+            Environment = null;
             Level = null;
             LevelCompleted = false;
+        }
+
+        // The level's own static geometry decides where the room goes; then the room's colliders join the
+        // simulation, because a held toy lands on colliders and must land the same way in a headless test.
+        void BuildEnvironment(LevelDefinition level)
+        {
+            EnvironmentPreset preset = EnvironmentPreset.Find(level.Environment);
+            if (preset == null)
+            {
+                Debug.LogWarning("[Toybox] Level '" + level.Slug + "' asks for the unknown environment '" + level.Environment +
+                                 "'; it gets none. The presets are: " + string.Join(", ", EnvironmentPreset.Keys) + ".");
+                preset = EnvironmentPreset.None;
+            }
+            Bounds bounds = EnvironmentSolver.StaticBounds(levelRoot.transform, Context.SpawnPosition);
+            Environment = EnvironmentSolver.Solve(preset, bounds, level.GroundY, level.EnvironmentVisit);
+            if (Environment.Boxes.Count == 0) return;
+
+            environmentRoot = new GameObject("Environment") { hideFlags = HideFlags.DontSave };
+            environmentRoot.transform.SetParent(Root.transform, false);
+            EnvironmentSolver.CreateColliders(Environment, environmentRoot.transform);
         }
 
         // A used PhysX scene does not replay like a new one, so each level starts in a new one. The player
@@ -451,6 +503,7 @@ namespace Toybox.Engine
             readonly Vector3 gravity;
             readonly int solverIterations, solverVelocityIterations;
             readonly float maxDepenetrationVelocity;
+            readonly bool improvedPatchFriction;
             readonly bool[] ignoredLayerPairs;
 
             PhysicsSettings(bool[] ignoredLayerPairs)
@@ -460,6 +513,7 @@ namespace Toybox.Engine
                 solverIterations = Physics.defaultSolverIterations;
                 solverVelocityIterations = Physics.defaultSolverVelocityIterations;
                 maxDepenetrationVelocity = Physics.defaultMaxDepenetrationVelocity;
+                improvedPatchFriction = Physics.improvedPatchFriction;
                 this.ignoredLayerPairs = ignoredLayerPairs;
             }
 
@@ -479,6 +533,7 @@ namespace Toybox.Engine
                 Physics.defaultSolverIterations = solverIterations;
                 Physics.defaultSolverVelocityIterations = solverVelocityIterations;
                 Physics.defaultMaxDepenetrationVelocity = maxDepenetrationVelocity;
+                Physics.improvedPatchFriction = improvedPatchFriction;
                 for (int a = 0; a < 32; a++)
                     for (int b = a; b < 32; b++)
                         Physics.IgnoreLayerCollision(a, b, ignoredLayerPairs[a * 32 + b]);

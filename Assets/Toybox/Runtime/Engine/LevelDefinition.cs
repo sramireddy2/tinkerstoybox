@@ -54,8 +54,24 @@ namespace Toybox.Engine
         /// <summary>One-line objective.</summary>
         public virtual string Blurb => "";
         public virtual string[] Hints => Array.Empty<string>();
-        /// <summary>Name of the environment preset the render layer dresses the level with.</summary>
-        public virtual string Environment => "default";
+        /// <summary>
+        /// Key of the environment preset the level stands in (ART_BIBLE 6.4): "sunny-rug", "block-hall",
+        /// "pegboard-workbench", "cardboard-box", "high-shelf", "night-light", or "none". The default is the
+        /// art bible's level-to-preset table for the campaign levels 1-15, "sunny-rug" for any other level
+        /// with a [Level] attribute, and "none" (no room, no colliders) for ad-hoc levels without one.
+        /// </summary>
+        public virtual string Environment => EnvironmentPreset.KeyForLevel(Id, Info != null);
+        /// <summary>
+        /// Height of the play plane: where the preset puts its floor, rug, bench top or shelf top
+        /// (ART_BIBLE 6.2, LEVELS 0.4 request 6). A level with pits declares the bottom of the deepest
+        /// one, or the room's floor would close them.
+        /// </summary>
+        public virtual float GroundY => 0f;
+        /// <summary>
+        /// How many earlier levels of the campaign use the same preset. Each repeat visit lowers the sun by
+        /// 2 degrees and swings it by 6, so no two levels share a light (ART_BIBLE 6.2).
+        /// </summary>
+        public virtual int EnvironmentVisit => EnvironmentPreset.VisitForLevel(Id, Environment);
         /// <summary>Anything that falls below this height respawns.</summary>
         public virtual float KillY => -30f;
 

@@ -13,6 +13,20 @@ namespace Toybox.Engine
         Kinematic,
     }
 
+    /// <summary>What a grab does to the prop's orientation (LEVELS 0.4, request 1).</summary>
+    public enum GrabPose
+    {
+        /// <summary>The prop keeps the tilt it was picked up with.</summary>
+        Keep,
+        /// <summary>
+        /// Over the first 0.15 s of the hold, pitch and roll ease to the nearest multiple of 90 degrees:
+        /// whichever of the prop's own axes points most nearly up is stood up straight. The heading is kept.
+        /// </summary>
+        Snap90,
+        /// <summary>Over the first 0.15 s of the hold the prop eases onto its authored up axis. The heading is kept.</summary>
+        Upright,
+    }
+
     public sealed class PropOptions
     {
         public string Name;
@@ -29,6 +43,17 @@ namespace Toybox.Engine
         public PropBody Body = PropBody.Dynamic;
         public float MinScale = 0.02f, MaxScale = 80f;
         public string[] Tags;
+        /// <summary>What a grab does to a tumbled prop's tilt.</summary>
+        public GrabPose GrabPose = GrabPose.Keep;
+        /// <summary>
+        /// Dynamic props only: the prop stays put (kinematic) at its authored pose until it is grabbed for
+        /// the first time, and is an ordinary dynamic prop from then on. A respawn freezes it again.
+        /// </summary>
+        public bool FrozenUntilGrabbed;
+        /// <summary>False: the pitch key (F) does nothing while this prop is held.</summary>
+        public bool AllowPitch = true;
+        /// <summary>The prop cannot tip over: rotation about X and Z is frozen while it is dynamic.</summary>
+        public bool KeepUpright;
     }
 
     /// <summary>
@@ -43,9 +68,17 @@ namespace Toybox.Engine
         /// </summary>
         public const float MinMass = 0.01f;
 
+        /// <summary>
+        /// A change of velocity within one physics step of at least this much (units per second), beyond what
+        /// gravity and damping account for, is an impact and raises PropImpact. Resting contact is 0.37.
+        /// </summary>
+        public const float ImpactSpeed = 1.5f;
+
         // A prop thinner than this (half extent), or one that moves more than its own half thickness per
         // tick, would tunnel through thin geometry with discrete collision detection.
         const float ThinHalfExtent = 0.1f;
+        // After an impact the same prop reports no other for this many ticks (a crate rattling to rest).
+        const int ImpactCooldownTicks = 6;
 
         readonly Game game;
         readonly HashSet<string> tags = new HashSet<string>();
@@ -53,6 +86,12 @@ namespace Toybox.Engine
         readonly Quaternion spawnRotation;
         readonly float spawnScale;
         readonly float baseMinHalfExtent;
+        readonly bool frozenUntilGrabbed;
+        readonly Mover kinematicMover;
+        Mover driveMover;
+        Vector3 stepVelocity, stepForce;
+        bool stepTracked;
+        int impactCooldown;
 
         /// <summary>Creation index within the level; gives props a deterministic order.</summary>
         public int Id { get; }
@@ -65,8 +104,13 @@ namespace Toybox.Engine
         public Collider[] Colliders { get; }
         public PhysicsMaterial Material { get; }
         public PropBody BodyKind { get; }
-        /// <summary>Drives the body when BodyKind is Kinematic; null otherwise.</summary>
-        public Mover Mover { get; }
+        /// <summary>
+        /// Drives the body: always there when BodyKind is Kinematic, and for a Dynamic prop while it is
+        /// <see cref="Driven"/>. Null otherwise.
+        /// </summary>
+        public Mover Mover => kinematicMover ?? (Driven ? driveMover : null);
+        /// <summary>The mover of BeginDrive, once there has been one (it stays registered with the Game).</summary>
+        internal Mover DriveMover => driveMover;
 
         public float Density { get; }
         /// <summary>Collider volume at scale 1.</summary>
@@ -83,6 +127,15 @@ namespace Toybox.Engine
         public bool Grabbable { get; set; }
         public float MinScale { get; set; }
         public float MaxScale { get; set; }
+        public GrabPose GrabPose { get; set; }
+        /// <summary>False: the pitch key does nothing while this prop is held.</summary>
+        public bool AllowPitch { get; set; }
+        /// <summary>Rotation about X and Z is frozen while the prop is dynamic.</summary>
+        public bool KeepUpright { get; }
+        /// <summary>True while a FrozenUntilGrabbed prop waits for its first grab (it is kinematic meanwhile).</summary>
+        public bool Frozen { get; private set; }
+        /// <summary>True between BeginDrive and EndDrive: a gadget moves the prop through <see cref="Mover"/>.</summary>
+        public bool Driven { get; private set; }
 
         /// <summary>Absolute uniform scale; 1 is the authored size.</summary>
         public float Scale { get; private set; }
@@ -143,6 +196,9 @@ namespace Toybox.Engine
             Grabbable = options.Grabbable ?? options.Body != PropBody.Kinematic;
             MinScale = options.MinScale;
             MaxScale = options.MaxScale;
+            GrabPose = options.GrabPose;
+            AllowPitch = options.AllowPitch;
+            KeepUpright = options.KeepUpright;
             BodyKind = options.Body;
             if (options.Tags != null)
                 foreach (string tag in options.Tags) tags.Add(tag);
@@ -156,8 +212,9 @@ namespace Toybox.Engine
             Body.solverIterations = Physics.defaultSolverIterations;
             Body.solverVelocityIterations = Physics.defaultSolverVelocityIterations;
             Body.maxDepenetrationVelocity = Physics.defaultMaxDepenetrationVelocity;
+            if (KeepUpright) Body.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
             if (BodyKind != PropBody.Dynamic) Body.isKinematic = true;
-            if (BodyKind == PropBody.Kinematic) Mover = new Mover(Body);
+            if (BodyKind == PropBody.Kinematic) kinematicMover = new Mover(Body);
             BodyId = Body.GetEntityId();
 
             PropRef reference = toy.GetComponent<PropRef>();
@@ -170,6 +227,9 @@ namespace Toybox.Engine
             spawnPosition = position;
             spawnRotation = rotation;
             spawnScale = Scale;
+
+            frozenUntilGrabbed = options.FrozenUntilGrabbed && BodyKind == PropBody.Dynamic;
+            if (frozenUntilGrabbed) Freeze();
         }
 
         public bool HasTag(string tag) => tags.Contains(tag);
@@ -210,14 +270,99 @@ namespace Toybox.Engine
             Physics.SyncTransforms();
         }
 
-        /// <summary>Back to the pose and scale the level gave it. A held prop is released first.</summary>
+        /// <summary>
+        /// Back to the pose and scale the level gave it. A held prop is released first, a drive ends, and a
+        /// FrozenUntilGrabbed prop is frozen again.
+        /// </summary>
         public void Respawn()
         {
             if (Removed) return;
             if (Held) game.Grabber.Forget(this);
+            if (Driven) EndDrive(Vector3.zero);
             SetPose(spawnPosition, spawnRotation);
             SetScale(spawnScale);
+            if (frozenUntilGrabbed) Freeze();
             game.Events.RaisePropRespawned(new PropEvent { Prop = this });
+        }
+
+        /// <summary>
+        /// A gadget takes over a Dynamic prop (LEVELS 0.4, request 2): the body becomes kinematic and is moved
+        /// through the returned <see cref="Mover"/> - call MoveTo every tick, exactly as for AddKinematic
+        /// geometry - so whatever rides it inherits its velocity. While driven the prop is ground for the
+        /// player whatever its mass (the light-prop rules only apply to simulated bodies), triggers go on
+        /// sensing it, and it can still be grabbed: a grab ends the drive, so check <see cref="Driven"/>
+        /// every tick. Returns null, and changes nothing, if the prop is held or removed. Throws for Fixed
+        /// and Kinematic props.
+        /// </summary>
+        public Mover BeginDrive()
+        {
+            if (BodyKind != PropBody.Dynamic)
+                throw new System.InvalidOperationException(this + " is " + BodyKind + "; only a Dynamic prop can be driven.");
+            if (Removed || Held) return null;
+            if (Driven) return driveMover;
+
+            Frozen = false;
+            if (!Body.isKinematic)
+            {
+                Body.linearVelocity = Vector3.zero;
+                Body.angularVelocity = Vector3.zero;
+            }
+            if (driveMover == null)
+            {
+                // The Mover makes the body kinematic itself.
+                driveMover = new Mover(Body);
+                game.Register(driveMover);
+            }
+            else
+            {
+                Body.collisionDetectionMode = CollisionDetectionMode.Discrete;
+                Body.isKinematic = true;
+            }
+            driveMover.Suspended = false;
+            Driven = true;
+            return driveMover;
+        }
+
+        /// <summary>
+        /// Hands a driven prop back to the simulation with the given velocity (usually the mover's last
+        /// one, so a carried prop keeps going). Does nothing if the prop is not being driven.
+        /// </summary>
+        public void EndDrive(Vector3 velocity)
+        {
+            if (!Driven) return;
+            Driven = false;
+            driveMover.Suspended = true;
+            if (Removed || Held) return;
+            Body.isKinematic = false;
+            // Mass, inertia and the collision mode at the current scale; wakes the body.
+            SetScale(Scale);
+            Body.linearVelocity = velocity;
+            Body.angularVelocity = Vector3.zero;
+            RefreshCollisionMode();
+        }
+
+        /// <summary>Releases a FrozenUntilGrabbed prop without a grab; it is dynamic from now on.</summary>
+        public void Unfreeze()
+        {
+            if (!Frozen) return;
+            Frozen = false;
+            if (Removed || Held || Driven) return;
+            Body.isKinematic = false;
+            SetScale(Scale);
+        }
+
+        void Freeze()
+        {
+            if (Held || Driven) return;
+            if (!Body.isKinematic)
+            {
+                Body.linearVelocity = Vector3.zero;
+                Body.angularVelocity = Vector3.zero;
+                // Continuous modes are not valid on kinematic bodies; switch before changing the kind.
+                Body.collisionDetectionMode = CollisionDetectionMode.Discrete;
+                Body.isKinematic = true;
+            }
+            Frozen = true;
         }
 
         /// <summary>
@@ -229,9 +374,16 @@ namespace Toybox.Engine
             if (Held == held) return;
             Held = held;
             // A held prop follows the view, not the level's path.
-            if (Mover != null) Mover.Suspended = held;
+            if (kinematicMover != null) kinematicMover.Suspended = held;
             if (held)
             {
+                // The first grab thaws a frozen prop, and a grab takes a driven one away from its gadget.
+                Frozen = false;
+                if (Driven)
+                {
+                    Driven = false;
+                    driveMover.Suspended = true;
+                }
                 if (!Body.isKinematic)
                 {
                     Body.linearVelocity = Vector3.zero;
@@ -273,10 +425,62 @@ namespace Toybox.Engine
             if (Body.collisionDetectionMode != mode) Body.collisionDetectionMode = mode;
         }
 
+        /// <summary>Right before the physics step: remembers the velocity the step starts from.</summary>
+        internal void BeginStep()
+        {
+            stepTracked = !Held && !Body.isKinematic;
+            if (!stepTracked) return;
+            stepVelocity = Body.linearVelocity;
+            // What level code pushes it with this tick (wind, a launcher) is not a collision either.
+            stepForce = Body.GetAccumulatedForce(Sim.Dt);
+        }
+
+        /// <summary>
+        /// Right after the physics step: did the prop hit something? Whatever the step did to the velocity
+        /// beyond gravity, applied forces and damping came from contacts. No physics callback is involved, so the answer
+        /// depends on nothing but the simulation's own state.
+        /// </summary>
+        internal bool EndStep(out PropImpactEvent impact)
+        {
+            impact = default;
+            if (impactCooldown > 0) impactCooldown--;
+            if (!stepTracked || Held || Body.isKinematic) return false;
+
+            Vector3 expected = stepVelocity + stepForce * (Sim.Dt / Body.mass);
+            if (Body.useGravity) expected += Physics.gravity * Sim.Dt;
+            expected *= Mathf.Clamp01(1f - Body.linearDamping * Sim.Dt);
+            Vector3 change = Body.linearVelocity - expected;
+            float speed = change.magnitude;
+            if (speed < ImpactSpeed || impactCooldown > 0) return false;
+            impactCooldown = ImpactCooldownTicks;
+
+            Vector3 normal = change / speed;
+            // The spot of the prop that faces what pushed it: the nearest point of its colliders to a point
+            // well outside it on that side.
+            Vector3 center = Center;
+            Vector3 probe = center - normal * (Radius * 2f + 0.01f);
+            Vector3 point = center - normal * Radius;
+            float best = float.MaxValue;
+            for (int i = 0; i < Colliders.Length; i++)
+            {
+                Collider collider = Colliders[i];
+                if (collider == null || !collider.enabled || collider.isTrigger) continue;
+                Vector3 nearest = collider.ClosestPoint(probe);
+                float distance = (nearest - probe).sqrMagnitude;
+                if (distance >= best) continue;
+                best = distance;
+                point = nearest;
+            }
+            impact = new PropImpactEvent { Prop = this, Speed = speed, Mass = Body.mass, Point = point, Normal = normal };
+            return true;
+        }
+
         internal void Destroy()
         {
             Removed = true;
             Held = false;
+            Driven = false;
+            Frozen = false;
             Sim.Destroy(GameObject);
             Sim.Destroy(Material);
         }

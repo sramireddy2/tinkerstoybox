@@ -1,14 +1,64 @@
 using System.Collections.Generic;
 using System.Globalization;
 using Toybox.Engine;
+using Toybox.Platform;
 using UnityEngine;
 
 namespace Toybox.UI
 {
     /// <summary>
+    /// Puts the <see cref="DebugHud"/> on screen and feeds it the state it shows. It is the stand-in HUD:
+    /// active with the plain look and for as long as no presenter provides the game's HUD and menus. While
+    /// it is the HUD, a click starts the game from the title and resumes it from a pause (GameRunner does
+    /// that when Presentation.HudProvided is false).
+    /// </summary>
+    [Presenter(1000, ProvidesHud = true, Fallback = true)]
+    public sealed class DebugHudPresenter : IPresenter
+    {
+        PresentationContext context;
+        GameObject holder;
+
+        public DebugHud Hud { get; private set; }
+
+        public void Attach(Game game, PresentationContext presentationContext)
+        {
+            context = presentationContext;
+            holder = new GameObject("Debug HUD") { hideFlags = HideFlags.DontSave };
+            holder.transform.SetParent(context.Root, false);
+            Hud = holder.AddComponent<DebugHud>();
+            Hud.Bind(game);
+            Push();
+        }
+
+        public void Frame(float dt, float alpha) => Push();
+
+        void Push()
+        {
+            if (Hud == null) return;
+            Hud.Autoplay = context.Autoplay;
+            FlowState state = context.State;
+            // The prompt also goes away while the right-button fallback is in use.
+            bool pointerFree = !context.Autoplay && !context.PointerLocked && !context.LookHeld;
+            Hud.ClickToPlay = state == FlowState.Title || state == FlowState.Paused || (state == FlowState.Playing && pointerFree);
+            Hud.Prompt = state == FlowState.Paused ? "Paused - click to resume" : "Click to play";
+            GameFlow flow = context.Flow;
+            if (flow != null && state == FlowState.LevelComplete)
+                Hud.BannerNote = flow.Levels.After(flow.LevelId) == flow.LevelId ? "once more from the top" : "next level coming up";
+        }
+
+        public void Dispose()
+        {
+            if (Hud != null) Hud.Unbind();
+            Hud = null;
+            if (holder != null) Sim.Destroy(holder);
+            holder = null;
+        }
+    }
+
+    /// <summary>
     /// A minimal IMGUI overlay: crosshair, level title and objective, timed messages, the scale of the
-    /// held prop, the click-to-play prompt and the level-complete banner. Temporary - a later milestone
-    /// replaces it. It reads Game state and listens to Game events; the two flags come from the runner.
+    /// held prop, the click-to-play prompt and the level-complete banner. Temporary - the game's own HUD
+    /// replaces it. It reads Game state and listens to Game events; the flags come from its presenter.
     /// </summary>
     public sealed class DebugHud : MonoBehaviour
     {
@@ -40,6 +90,8 @@ namespace Toybox.UI
         public bool ClickToPlay;
         /// <summary>Show that a bot is playing.</summary>
         public bool Autoplay;
+        /// <summary>The headline of the click-to-play prompt.</summary>
+        public string Prompt = "Click to play";
         /// <summary>Second line of the level-complete banner (what happens next), set by the runner.</summary>
         public string BannerNote;
 
@@ -119,8 +171,8 @@ namespace Toybox.UI
                 target = null;
                 return;
             }
-            // Once per rendered frame, not per GUI event: it costs a few physics queries.
-            target = game.Level != null && !game.Grabber.IsHolding ? game.Grabber.FindTarget() : null;
+            // The grabber works the focus out at most once per tick, however many frames ask.
+            target = game.Level != null ? game.Grabber.Focus : null;
             float now = Time.unscaledTime;
             messages.RemoveAll(m => m.Until <= now);
         }
@@ -207,7 +259,7 @@ namespace Toybox.UI
         void DrawClickToPlay(float width, float height)
         {
             Box(new Rect(0f, height * 0.56f, width, 96f), new Color(Ink.r, Ink.g, Ink.b, 0.6f));
-            Label(new Rect(0f, height * 0.56f + 8f, width, 46f), "Click to play", bigStyle, TextAnchor.MiddleCenter, Paper);
+            Label(new Rect(0f, height * 0.56f + 8f, width, 46f), Prompt ?? "Click to play", bigStyle, TextAnchor.MiddleCenter, Paper);
             Label(new Rect(0f, height * 0.56f + 54f, width, 20f),
                 "WASD move  -  Space jump  -  Shift run  -  Click or E grab and drop  -  Q or wheel turn  -  F flip  -  R restart",
                 smallStyle, TextAnchor.MiddleCenter, Paper);

@@ -23,8 +23,11 @@ namespace Toybox.Engine
         public const float TurnRate = 360f;
 
         const float AimTolerance = 0.03f;
-        // Inside this distance from a walk target the bot eases off, so tight tolerances do not overshoot.
-        const float SlowRadius = 0.6f;
+        /// <summary>
+        /// Inside this distance from a walk target, per unit of player scale, the bot eases off, so tight
+        /// tolerances do not overshoot.
+        /// </summary>
+        public const float SlowRadius = 0.6f;
 
         readonly Game game;
         InputFrame frame;
@@ -87,7 +90,8 @@ namespace Toybox.Engine
                 frame.LookYaw = turn;
                 // Move straight at the target even while still turning toward it.
                 float remaining = (error - turn) * Mathf.Deg2Rad;
-                float throttle = Mathf.Clamp(distance / SlowRadius, 0.25f, 1f);
+                // The radius goes with the player's size: a shrunken player overshoots a tight tolerance otherwise.
+                float throttle = Mathf.Clamp(distance / (SlowRadius * Player.Scale), 0.25f, 1f);
                 frame.MoveX = Mathf.Sin(remaining) * throttle;
                 frame.MoveZ = Mathf.Cos(remaining) * throttle;
                 frame.Sprint = sprint;

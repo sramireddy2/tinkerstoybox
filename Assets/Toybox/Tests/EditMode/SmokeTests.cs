@@ -9,9 +9,22 @@ namespace Toybox.Tests
         public void ProjectSetupProducedPipelineAndShippableMaterial()
         {
             Assert.IsNotNull(UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline, "URP asset is not assigned");
-            var lit = Resources.Load<Material>("Materials/ToyLit");
-            Assert.IsNotNull(lit, "Resources/Materials/ToyLit is missing - run ProjectSetup");
-            Assert.AreEqual("Universal Render Pipeline/Lit", lit.shader.name);
+            // ART_BIBLE 3.8: each of the game's five shaders ships through a template material under
+            // Resources; the plain look keeps URP Lit on a sixth.
+            AssertTemplate("ToyLit", "Toybox/ToyLit");
+            AssertTemplate("RoomLit", "Toybox/RoomLit");
+            AssertTemplate("Sticker", "Toybox/Sticker");
+            AssertTemplate("Flat", "Toybox/Flat");
+            AssertTemplate("MacroBand", "Toybox/MacroBand");
+            AssertTemplate("PlainLit", "Universal Render Pipeline/Lit");
+        }
+
+        static void AssertTemplate(string name, string shader)
+        {
+            var material = Resources.Load<Material>("Materials/" + name);
+            Assert.IsNotNull(material, "Resources/Materials/" + name + " is missing - run ProjectSetup");
+            Assert.IsNotNull(material.shader, name + " has no shader");
+            Assert.AreEqual(shader, material.shader.name, "Resources/Materials/" + name);
         }
 
         [Test]

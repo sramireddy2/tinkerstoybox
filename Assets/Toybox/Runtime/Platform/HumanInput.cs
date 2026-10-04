@@ -20,8 +20,8 @@ namespace Toybox.Platform
     /// </summary>
     public sealed class HumanInput : IInputSource
     {
-        /// <summary>Degrees of view rotation per pixel of mouse movement.</summary>
-        public const float DefaultSensitivity = 0.1f;
+        /// <summary>Degrees of view rotation per pixel of mouse movement, before the player changes the setting.</summary>
+        public const float DefaultSensitivity = Settings.DefaultMouseSensitivity;
 
         // Wheel notches that have not reached a tick yet. More than this is a runaway wheel, not intent.
         const int MaxPendingYawSteps = 12;
@@ -37,8 +37,14 @@ namespace Toybox.Platform
         int yawPending;
         bool wasLooking;
 
-        public float Sensitivity = DefaultSensitivity;
+        /// <summary>Degrees of view rotation per pixel of mouse movement: the player's setting.</summary>
+        public float Sensitivity => Settings.MouseSensitivity;
         public bool InvertY;
+        /// <summary>
+        /// Whether a click on a free pointer captures it. On while the game is being played; the runner turns
+        /// it off while a menu wants the clicks for itself.
+        /// </summary>
+        public bool CaptureOnClick = true;
 
         public HumanInput(IInputDevices devices = null)
         {
@@ -71,7 +77,7 @@ namespace Toybox.Platform
 
             bool locked = devices.PointerLocked;
             bool click = frame.ClickPressed;
-            if (!locked && click)
+            if (!locked && click && CaptureOnClick)
             {
                 // The click that captures the mouse is not also a grab.
                 devices.PointerLocked = true;
@@ -147,7 +153,13 @@ namespace Toybox.Platform
             wasLooking = false;
         }
 
-        /// <summary>Gives the mouse back (the runner is shutting down).</summary>
+        /// <summary>Asks for the mouse (play resumes). A browser may refuse outside a click; a click then captures it.</summary>
+        public void CapturePointer()
+        {
+            if (!devices.PointerLocked) devices.PointerLocked = true;
+        }
+
+        /// <summary>Gives the mouse back (a menu opens, the runner is shutting down).</summary>
         public void ReleasePointer()
         {
             // Unconditionally: the devices also have to show the cursor again if they hid it for a lock

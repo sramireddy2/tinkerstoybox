@@ -307,7 +307,9 @@ if ($Command -eq 'build') {
 }
 
 # Compiler errors are found in seconds without Unity, so check them before queueing for the editor.
-if ($Command -ne 'stop') {
+# A build or a cold run starts a fresh editor that compiles everything itself (and regenerates the
+# reference lists the typecheck relies on), so the gate is skipped there.
+if ($Command -ne 'stop' -and $Command -ne 'build' -and -not $Cold) {
     $typecheck = & (Join-Path $PSScriptRoot 'typecheck.ps1')
     if ($LASTEXITCODE -eq 1) {
         $typecheck | ForEach-Object { Write-Output $_ }

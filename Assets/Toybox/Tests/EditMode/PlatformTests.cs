@@ -13,6 +13,8 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using Object = UnityEngine.Object;
+// The test assembly also sees URP, which has a Volume of its own.
+using Volume = Toybox.Engine.Volume;
 
 namespace Toybox.Tests
 {
@@ -28,8 +30,8 @@ namespace Toybox.Tests
     /// </summary>
     public class PlatformTests
     {
-        // Pixels per degree at the centre of a 1080p screen with the rig's 60 degree vertical field of view.
-        const float PixelsPerDegree = 540f / 0.57735f * Mathf.Deg2Rad;
+        // Pixels per degree at the centre of a 1080p screen with the default 70 degree vertical field of view.
+        const float PixelsPerDegree = 540f / 0.70021f * Mathf.Deg2Rad;
 
         // An open yard with one block to pick up. The exit is far away, so nothing completes by accident.
         sealed class YardLevel : LevelDefinition
@@ -71,7 +73,8 @@ namespace Toybox.Tests
             host = new GameObject("Test Game Runner") { hideFlags = HideFlags.DontSave };
             runner = host.AddComponent<GameRunner>();
             devices = new FakeDevices();
-            runner.Begin(LaunchOptions.FromUrl(url), new RunnerOptions { Devices = devices, Levels = levels, Present = present });
+            // These tests are about playing; the title has tests of its own (GameFlowTests).
+            runner.Begin(LaunchOptions.FromUrl(url), new RunnerOptions { Devices = devices, Levels = levels, Present = present, SkipTitle = true, Store = new MemoryStore() });
             return runner;
         }
 
@@ -308,7 +311,8 @@ namespace Toybox.Tests
         [Test]
         public void UrlAutoplaySolvesTheRealFirstLevel_ThroughUnevenFramesAndHumanNoise()
         {
-            Begin("https://example.github.io/tinkerstoybox/?level=sandbox&autoplay=1", null, present: true);
+            // plain: the debug HUD's per-frame queries are part of this test, whatever HUD the game has.
+            Begin("https://example.github.io/tinkerstoybox/?level=sandbox&autoplay=1&plain=1", null, present: true);
             Game game = runner.Game;
             Assert.IsTrue(runner.Autoplay);
             Assert.AreEqual("sandbox", game.Level.Slug);
@@ -470,7 +474,9 @@ namespace Toybox.Tests
                     Assert.IsFalse(float.IsNaN(player.Position.x + player.Position.y + player.Position.z), "frame " + frame + ": the player is nowhere");
                     Assert.IsFalse(float.IsNaN(player.Yaw + player.Pitch), "frame " + frame + ": the view is nowhere");
                     Assert.LessOrEqual(Mathf.Abs(player.Pitch), Player.MaxPitch);
-                    Vector3 camera = runner.Rig.Camera.transform.position;
+                    // At the eye - but for the shake of a heavy toy coming down, which is the picture's alone.
+                    Toybox.Render.ImpactShake shake = runner.Presentation != null ? runner.Presentation.Get<Toybox.Render.ImpactShake>() : null;
+                    Vector3 camera = runner.Rig.Camera.transform.position - (shake != null ? shake.Offset : Vector3.zero);
                     Assert.Less(Vector3.Distance(camera, player.EyeAt(game.Alpha)), 1e-3f, "frame " + frame + ": the camera is at the eye");
                     if (!runner.Autoplay) Assert.AreSame(runner.Human, game.Input, "frame " + frame + ": a human steers when autoplay is off");
                     else if (game.Level != null) Assert.AreNotSame(runner.Human, game.Input, "frame " + frame + ": the bot steers when autoplay is on");
@@ -695,7 +701,9 @@ namespace Toybox.Tests
                 Assert.IsNotNull(created.Game);
                 Assert.AreSame(Game.Current, created.Game);
                 Assert.IsNotNull(created.Rig, "the build gets a camera");
-                Assert.IsNotNull(created.Hud, "and a HUD");
+                Assert.IsNotNull(created.Presentation, "and its presenters");
+                Assert.Greater(created.Presentation.Presenters.Count, 0, "at the very least the plain look or the game's own");
+                Assert.AreEqual(FlowState.Title, created.Flow.State, "without a page address the game opens on the title");
                 Assert.AreEqual("", Application.absoluteURL, "the editor has no page address");
                 Assert.AreEqual(created.Levels.First, created.LevelId, "without a page address the first registered level loads");
                 Assert.IsNotNull(created.Game.Level);
@@ -760,8 +768,8 @@ namespace Toybox.Tests
                         foreach (string word in forbidden)
                         {
                             if (!line.Contains(word)) continue;
-                            // The one sanctioned fallback: ToyMaterials loads its template from Resources first.
-                            if (word == "Shader.Find(" && Path.GetFileName(file) == "ToyMaterials.cs") continue;
+                            // The one sanctioned fallback: Materials loads its templates from Resources first.
+                            if (word == "Shader.Find(" && Path.GetFileName(file) == "Materials.cs") continue;
                             offences.Add(Path.GetFileName(file) + ":" + (i + 1) + " " + word);
                         }
                     }
@@ -772,7 +780,9 @@ namespace Toybox.Tests
             // And what the build needs at runtime is where the runtime looks for it.
             Assert.IsNotNull(Resources.Load<Material>("Materials/ToyLit"), "the template material must ship in Resources");
             Assert.IsNotNull(Resources.Load<Material>("Materials/ToyLit").shader);
-            StringAssert.Contains("Universal Render Pipeline", Resources.Load<Material>("Materials/ToyLit").shader.name);
+            // The toy template becomes the game's own shader; the plain look stays URP Lit for good.
+            Assert.IsNotNull(Resources.Load<Material>("Materials/PlainLit"), "the plain look's template must ship in Resources");
+            StringAssert.Contains("Universal Render Pipeline", Resources.Load<Material>("Materials/PlainLit").shader.name);
             Assert.IsTrue(File.Exists(Path.Combine(Application.dataPath, "Toybox", "link.xml")), "levels are found by reflection");
         }
 

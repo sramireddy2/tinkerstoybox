@@ -23,6 +23,12 @@ namespace Toybox.Engine
         public float Time => Game.Time;
         /// <summary>Ticks since the level was loaded (Game.LevelTicks).</summary>
         public int Ticks => Game.LevelTicks;
+        /// <summary>The level that is being built.</summary>
+        public LevelDefinition Level => Game.Level;
+        /// <summary>The dip of the level's environment preset: the four tones its room surfaces are made of.</summary>
+        public Toybox.Art.Dip Dip => Toybox.Art.Palette.DipOf(Game.Level != null ? Game.Level.Environment : null);
+        /// <summary>The level's play plane (LevelDefinition.GroundY).</summary>
+        public float GroundY => Game.Level != null ? Game.Level.GroundY : 0f;
         /// <summary>
         /// The level's subscriptions to game.Events. Everything level or gadget code subscribes while the
         /// level is built or during a tick is recorded here and unsubscribed when the level is unloaded.

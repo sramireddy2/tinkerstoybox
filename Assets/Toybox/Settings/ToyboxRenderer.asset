@@ -1,5 +1,39 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!114 &-4739627467960430880
+MonoBehaviour:
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b00045f12942b46c698459096c89274e, type: 3}
+  m_Name: MacroBand
+  m_EditorClassIdentifier: Unity.RenderPipelines.Universal.Runtime::UnityEngine.Rendering.Universal.FullScreenPassRendererFeature
+  m_Active: 1
+  injectionPoint: 550
+  fetchColorBuffer: 1
+  requirements: 0
+  passMaterial: {fileID: 2100000, guid: 5402d62504f75ee4d96ca2625e5f2b5d, type: 2}
+  passIndex: 0
+  bindDepthStencilAttachment: 0
+  m_Version: 1
+--- !u!114 &-4515771910393361594
+MonoBehaviour:
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dc516cf96a8986d46b6e340e03c7c0b3, type: 3}
+  m_Name: Sticker
+  m_EditorClassIdentifier: Toybox::Toybox.Render.StickerFeature
+  m_Active: 1
+  material: {fileID: 2100000, guid: cc2f4ca280ebdc943a714cf6a43c8e21, type: 2}
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -24,19 +58,21 @@ MonoBehaviour:
     probeSamplingDebugMesh: {fileID: 0}
     probeSamplingDebugTexture: {fileID: 0}
     probeVolumeBlendStatesCS: {fileID: 0}
-  m_RendererFeatures: []
-  m_RendererFeatureMap: 
+  m_RendererFeatures:
+  - {fileID: -4739627467960430880}
+  - {fileID: -4515771910393361594}
+  m_RendererFeatureMap: e0ce88f4ed7539be460b51825fc154c1l
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   m_AssetVersion: 3
   m_PrepassLayerMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 4294966271
   m_OpaqueLayerMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 4294966271
   m_TransparentLayerMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 4294966271
   m_DefaultStencilState:
     overrideStencilState: 0
     stencilReference: 0
@@ -48,8 +84,8 @@ MonoBehaviour:
   m_RenderingMode: 0
   m_DepthPrimingMode: 0
   m_CopyDepthMode: 1
-  m_DepthAttachmentFormat: 0
+  m_DepthAttachmentFormat: 92
   m_DepthTextureFormat: 0
   m_AccurateGbufferNormals: 0
-  m_IntermediateTextureMode: 0
+  m_IntermediateTextureMode: 1
   m_TileOnlyMode: 0

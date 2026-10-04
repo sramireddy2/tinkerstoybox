@@ -1,0 +1,47 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!200 &20000000
+ShaderVariantCollection:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: ToyboxVariants
+  m_Shaders:
+  - first: {fileID: 4800000, guid: 206fec0fc3c786a4380b82e53474f188, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 14
+  - first: {fileID: 4800000, guid: 7a2f6faf8ae3a61479201cac9931f85a, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 4800000, guid: 89d1af3d129f2434cb6c7219338bb1ef, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 8
+      - keywords: _MAIN_LIGHT_SHADOWS
+        passType: 13
+      - keywords: _MAIN_LIGHT_SHADOWS _SHADOWS_SOFT
+        passType: 13
+      - keywords: _MAIN_LIGHT_SHADOWS_CASCADE _SHADOWS_SOFT
+        passType: 13
+  - first: {fileID: 4800000, guid: b307cfd47bfe6304ebc38fc07402305e, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 8
+      - keywords: _MAIN_LIGHT_SHADOWS
+        passType: 13
+      - keywords: _MAIN_LIGHT_SHADOWS _SHADOWS_SOFT
+        passType: 13
+      - keywords: _MAIN_LIGHT_SHADOWS_CASCADE _SHADOWS_SOFT
+        passType: 13
+  - first: {fileID: 4800000, guid: 008fa516a0b26f647a878444109a3d2c, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 14

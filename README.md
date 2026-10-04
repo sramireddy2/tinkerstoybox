@@ -22,6 +22,10 @@ all generated in code.
 | `Space` | Jump |
 | `Shift` | Sprint |
 | `R` | Restart level |
+| `Esc` | Pause (frees the mouse); `Esc` or a click resumes |
+
+Add `?level=3` to the address to start on a level, `&autoplay=1` to watch the built-in bot solve it, and
+`&plain=1` for the plain debug look.
 
 ## How the mechanic works
 

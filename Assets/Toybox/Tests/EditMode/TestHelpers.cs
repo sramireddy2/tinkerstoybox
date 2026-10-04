@@ -138,10 +138,10 @@ namespace Toybox.Tests
 
         /// <summary>A static box given by its center and size.</summary>
         public static GameObject Box(LevelContext ctx, Vector3 center, Vector3 size) =>
-            ctx.AddStatic(BasicToys.Slab(size, ToyMaterials.Wall), center);
+            ctx.AddStatic(BasicToys.Slab(size), center);
 
         public static GameObject Box(LevelContext ctx, Vector3 center, Vector3 size, Quaternion rotation) =>
-            ctx.AddStatic(BasicToys.Slab(size, ToyMaterials.Wall), center, rotation);
+            ctx.AddStatic(BasicToys.Slab(size), center, rotation);
 
         /// <summary>A floor plus four walls: a closed room of the given inner half size and height.</summary>
         public static void Room(LevelContext ctx, float half = 20f, float height = 12f)

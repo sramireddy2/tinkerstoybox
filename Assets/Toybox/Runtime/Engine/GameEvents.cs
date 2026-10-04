@@ -23,6 +23,34 @@ namespace Toybox.Engine
         public float OldScale, NewScale;
         /// <summary>Distance from the eye to the prop's center when it was grabbed / now.</summary>
         public float GrabDistance, DropDistance;
+
+        /// <summary>The prop's scale when it was grabbed (the same value as OldScale).</summary>
+        public float GrabScale => OldScale;
+        /// <summary>The prop's scale now: where the hold has put it, or what it was released at (NewScale).</summary>
+        public float Scale => NewScale;
+        /// <summary>Distance from the eye to the prop's center now (DropDistance).</summary>
+        public float Distance => DropDistance;
+        /// <summary>Scale now relative to the scale at the grab: the "x3.2" of the readout.</summary>
+        public float Factor => OldScale > 0f ? NewScale / OldScale : 1f;
+        /// <summary>The prop's true bounding radius now, in units (what size-to-pitch and the pools go by).</summary>
+        public float Radius => Prop != null ? Prop.BaseRadius * NewScale : 0f;
+    }
+
+    /// <summary>
+    /// A dynamic prop hit something: its velocity changed by more than <see cref="Prop.ImpactSpeed"/> in one
+    /// physics step, beyond what gravity and damping account for.
+    /// </summary>
+    public struct PropImpactEvent
+    {
+        public Prop Prop;
+        /// <summary>Size of the velocity change, in units per second.</summary>
+        public float Speed;
+        /// <summary>The prop's mass at the time.</summary>
+        public float Mass;
+        /// <summary>The spot on the prop's surface that faces what it hit (an estimate: no contact data is read).</summary>
+        public Vector3 Point;
+        /// <summary>Direction of the push the prop received: away from what it hit (up, for a landing).</summary>
+        public Vector3 Normal;
     }
 
     public struct PropEvent
@@ -85,10 +113,16 @@ namespace Toybox.Engine
         public event Action<LevelEvent> LevelLoaded { add => Ch(ref levelLoaded).Add(value); remove => Ch(ref levelLoaded).Remove(value); }
         public event Action<LevelEvent> LevelCompleted { add => Ch(ref levelCompleted).Add(value); remove => Ch(ref levelCompleted).Remove(value); }
         public event Action<LevelEvent> LevelRestarted { add => Ch(ref levelRestarted).Add(value); remove => Ch(ref levelRestarted).Remove(value); }
+        /// <summary>
+        /// Raised right before a loaded level is torn down (another level is being loaded, the level is
+        /// restarted, the Game is disposed), while everything of it still exists. Always delivered at once.
+        /// </summary>
+        public event Action<LevelEvent> LevelUnloading { add => Ch(ref levelUnloading).Add(value); remove => Ch(ref levelUnloading).Remove(value); }
         public event Action<PropHoldEvent> PropGrabbed { add => Ch(ref propGrabbed).Add(value); remove => Ch(ref propGrabbed).Remove(value); }
         public event Action<PropHoldEvent> PropHeld { add => Ch(ref propHeld).Add(value); remove => Ch(ref propHeld).Remove(value); }
         public event Action<PropHoldEvent> PropDropped { add => Ch(ref propDropped).Add(value); remove => Ch(ref propDropped).Remove(value); }
         public event Action<PropEvent> PropRespawned { add => Ch(ref propRespawned).Add(value); remove => Ch(ref propRespawned).Remove(value); }
+        public event Action<PropImpactEvent> PropImpact { add => Ch(ref propImpact).Add(value); remove => Ch(ref propImpact).Remove(value); }
         public event Action<PlayerJumpEvent> PlayerJumped { add => Ch(ref playerJumped).Add(value); remove => Ch(ref playerJumped).Remove(value); }
         public event Action<PlayerLandEvent> PlayerLanded { add => Ch(ref playerLanded).Add(value); remove => Ch(ref playerLanded).Remove(value); }
         public event Action<PlayerRespawnEvent> PlayerRespawned { add => Ch(ref playerRespawned).Add(value); remove => Ch(ref playerRespawned).Remove(value); }
@@ -100,10 +134,12 @@ namespace Toybox.Engine
         public void RaiseLevelLoaded(LevelEvent e) => Ch(ref levelLoaded).Raise(e);
         public void RaiseLevelCompleted(LevelEvent e) => Ch(ref levelCompleted).Raise(e);
         public void RaiseLevelRestarted(LevelEvent e) => Ch(ref levelRestarted).Raise(e);
+        public void RaiseLevelUnloading(LevelEvent e) => Ch(ref levelUnloading).Raise(e);
         public void RaisePropGrabbed(PropHoldEvent e) => Ch(ref propGrabbed).Raise(e);
         public void RaisePropHeld(PropHoldEvent e) => Ch(ref propHeld).Raise(e);
         public void RaisePropDropped(PropHoldEvent e) => Ch(ref propDropped).Raise(e);
         public void RaisePropRespawned(PropEvent e) => Ch(ref propRespawned).Raise(e);
+        public void RaisePropImpact(PropImpactEvent e) => Ch(ref propImpact).Raise(e);
         public void RaisePlayerJumped(PlayerJumpEvent e) => Ch(ref playerJumped).Raise(e);
         public void RaisePlayerLanded(PlayerLandEvent e) => Ch(ref playerLanded).Raise(e);
         public void RaisePlayerRespawned(PlayerRespawnEvent e) => Ch(ref playerRespawned).Raise(e);
@@ -112,9 +148,10 @@ namespace Toybox.Engine
         public void RaiseMessage(MessageEvent e) => Ch(ref message).Raise(e);
         public void RaiseExitLockChanged(ExitEvent e) => Ch(ref exitLockChanged).Raise(e);
 
-        Channel<LevelEvent> levelLoaded, levelCompleted, levelRestarted;
+        Channel<LevelEvent> levelLoaded, levelCompleted, levelRestarted, levelUnloading;
         Channel<PropHoldEvent> propGrabbed, propHeld, propDropped;
         Channel<PropEvent> propRespawned;
+        Channel<PropImpactEvent> propImpact;
         Channel<PlayerJumpEvent> playerJumped;
         Channel<PlayerLandEvent> playerLanded;
         Channel<PlayerRespawnEvent> playerRespawned;

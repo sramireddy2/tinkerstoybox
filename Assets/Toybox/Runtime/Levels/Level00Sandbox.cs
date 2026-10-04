@@ -21,6 +21,11 @@ namespace Toybox.Levels
 
         public override string Blurb => "Cross the gap.";
 
+        // The gap is a kill-plane drop: the room's rug lies 15 below the floors and the plane 2 above it,
+        // so nothing is seen to hit the ground (and the room's floor does not close the gap).
+        public override float GroundY => -15f;
+        public override float KillY => -13f;
+
         public override string[] Hints => new[]
         {
             "The plank is too short to reach across.",
@@ -35,20 +40,20 @@ namespace Toybox.Levels
             ctx.AddStatic(BasicToys.Slab(new Vector3(20f, 1f, 12f)), new Vector3(0f, -0.5f, 24f));
 
             // Walls around both halves, open only downward into the gap.
-            ctx.AddStatic(BasicToys.Slab(new Vector3(1f, 9f, 43f), ToyMaterials.Wall), new Vector3(-10.5f, 3.5f, 9f));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(1f, 9f, 43f), ToyMaterials.Wall), new Vector3(10.5f, 3.5f, 9f));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(22f, 9f, 1f), ToyMaterials.Wall), new Vector3(0f, 3.5f, -12.5f));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(22f, 9f, 1f), ToyMaterials.Wall), new Vector3(0f, 3.5f, 30.5f));
+            ctx.AddStatic(BasicToys.Slab(new Vector3(1f, 9f, 43f)), new Vector3(-10.5f, 3.5f, 9f));
+            ctx.AddStatic(BasicToys.Slab(new Vector3(1f, 9f, 43f)), new Vector3(10.5f, 3.5f, 9f));
+            ctx.AddStatic(BasicToys.Slab(new Vector3(22f, 9f, 1f)), new Vector3(0f, 3.5f, -12.5f));
+            ctx.AddStatic(BasicToys.Slab(new Vector3(22f, 9f, 1f)), new Vector3(0f, 3.5f, 30.5f));
 
             // A lookout in the back left corner with a 25 degree ramp leading up to it.
-            ctx.AddStatic(BasicToys.Slab(new Vector3(4f, 2f, 4f), ToyMaterials.Wall), new Vector3(-8f, 1f, -10f));
-            ctx.AddStatic(BasicToys.Wedge(4.3f, 2f, 4f, ToyMaterials.Wall), new Vector3(-8f, 1f, -5.85f), Quaternion.Euler(0f, 180f, 0f));
+            ctx.AddStatic(BasicToys.Slab(new Vector3(4f, 2f, 4f)), new Vector3(-8f, 1f, -10f));
+            ctx.AddStatic(BasicToys.Ramp(4.3f, 2f, 4f), new Vector3(-8f, 1f, -5.85f), Quaternion.Euler(0f, 180f, 0f));
 
-            plank = ctx.AddProp(BasicToys.Block(new Vector3(1.2f, PlankThickness, PlankLength), ToyMaterials.Orange),
+            plank = ctx.AddProp(BasicToys.Block(new Vector3(1.2f, PlankThickness, PlankLength), Palette.Tangerine),
                 new Vector3(0f, PlankThickness * 0.5f, 2f), new PropOptions { Name = "Plank", Friction = 0.8f });
 
-            ctx.AddProp(BasicToys.Block(0.5f, ToyMaterials.Red), new Vector3(4f, 0.25f, 0f), new PropOptions { Name = "Small Block" });
-            ctx.AddProp(BasicToys.Block(2f, ToyMaterials.Purple), new Vector3(6.5f, 1f, -6f), new PropOptions { Name = "Big Block" });
+            ctx.AddProp(BasicToys.Block(0.5f, Palette.Cherry), new Vector3(4f, 0.25f, 0f), new PropOptions { Name = "Small Block" });
+            ctx.AddProp(BasicToys.Block(2f, Palette.Grape), new Vector3(6.5f, 1f, -6f), new PropOptions { Name = "Big Block" });
             ctx.AddProp(BasicToys.Ball(0.4f), new Vector3(-4f, 0.4f, 1f), new PropOptions { Name = "Ball", Bounciness = 0.6f });
             ctx.AddProp(BasicToys.Cylinder(0.5f, 1.2f), new Vector3(5f, 0.6f, 4f), new PropOptions { Name = "Drum" });
             ctx.AddProp(BasicToys.Wedge(2f, 1f, 1.5f), new Vector3(-5f, 0.5f, 5f), new PropOptions { Name = "Wedge" });

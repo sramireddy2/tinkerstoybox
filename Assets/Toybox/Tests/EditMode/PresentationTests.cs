@@ -7,6 +7,7 @@ using NUnit.Framework;
 using Toybox.EditorTools;
 using Toybox.Engine;
 using Toybox.Platform;
+using Toybox.Render;
 using Toybox.Toys;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -523,6 +524,9 @@ namespace Toybox.Tests
                 Devices = devices,
                 Levels = levels ?? Corridors(0, 1, 2),
                 Present = present,
+                // These tests are about playing; the title has tests of its own (GameFlowTests).
+                SkipTitle = true,
+                Store = new MemoryStore(),
             });
             loads = 0;
             runner.Game.Events.LevelLoaded += e => loads++;
@@ -765,6 +769,7 @@ namespace Toybox.Tests
                 Devices = devices,
                 Levels = new LevelList(new[] { 0 }, id => new CorridorLevel(id, solveFails: true)),
                 Present = false,
+                Store = new MemoryStore(),
             });
             runner.Game.Events.Message += e => messages.Add(e.Text);
 
@@ -808,15 +813,17 @@ namespace Toybox.Tests
             AmbientMode ambientBefore = RenderSettings.ambientMode;
             Color skyBefore = RenderSettings.ambientSkyColor;
 
-            Begin("", present: true);
+            // The plain look, so that this is about the seam and its two stand-ins whatever presenters the game has.
+            Begin("?plain=1", present: true);
             Game game = runner.Game;
             Assert.IsNotNull(runner.Rig);
             Assert.IsNotNull(runner.Hud);
             Camera camera = runner.Rig.Camera;
             Assert.IsTrue(camera.transform.IsChildOf(game.Root.transform), "the camera has to be in the simulation's scene");
             Assert.AreEqual(game.Scene, camera.scene, "outside Play Mode only a camera bound to the preview scene renders it");
-            Assert.AreEqual(LightType.Directional, runner.Rig.Sun.type);
-            Assert.AreNotEqual(LightShadows.None, runner.Rig.Sun.shadows);
+            Light sun = runner.Presentation.Get<PlainLook>().Sun;
+            Assert.AreEqual(LightType.Directional, sun.type);
+            Assert.AreNotEqual(LightShadows.None, sun.shadows);
 
             // The camera sits at the interpolated eye and looks where the player looks.
             devices.PointerLocked = true;

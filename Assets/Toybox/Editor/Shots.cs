@@ -4,10 +4,12 @@ using System.Globalization;
 using System.IO;
 using Toybox.Art;
 using Toybox.Engine;
+using Toybox.Platform;
 using Toybox.Render;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using Object = UnityEngine.Object;
@@ -27,6 +29,12 @@ namespace Toybox.EditorTools
         public string OutputDirectory = "tools/out/shots";
         /// <summary>Also capture the whole level from high above at every time.</summary>
         public bool Overview;
+        /// <summary>The debug look: URP Lit materials, plain lighting, the debug HUD's presenter.</summary>
+        public bool Plain;
+        /// <summary>The quality tier to render at; null for the player's setting (Medium for Auto).</summary>
+        public QualityTier? Quality;
+        /// <summary>The presenters to choose from; null for those of the game assembly.</summary>
+        public IReadOnlyList<PresenterRegistry.Entry> Presenters;
     }
 
     /// <summary>
@@ -36,10 +44,12 @@ namespace Toybox.EditorTools
     ///       -UnityArgs '-toyboxLevel','0','-toyboxTimes','0,2,5','-toyboxSize','1280x720','-toyboxOverview'
     ///
     /// -toyboxLevel id (0), -toyboxTimes seconds of autoplay before each capture ("0"), -toyboxSize WxH
-    /// (1280x720), -toyboxOut directory (tools/out/shots), -toyboxOverview adds a third-person overview.
+    /// (1280x720), -toyboxOut directory (tools/out/shots), -toyboxOverview adds a third-person overview,
+    /// -toyboxPlain renders the debug look, -toyboxQuality low|medium|high picks the tier.
     ///
-    /// It creates a Game exactly like a test does, puts the game's own camera rig on it, lets the bot play
-    /// the level's Solve script and renders through URP into a texture. Files are named
+    /// It creates a Game exactly like a test does, attaches the game's own presentation (the camera rig
+    /// and every active presenter, each given a frame per tick), lets the bot play the level's Solve
+    /// script and renders through URP into a texture. Files are named
     /// levelNN-tSS.png (and levelNN-tSS-overview.png); each is reported as "[Toybox] shot: path".
     /// </summary>
     public static class Shots
@@ -57,6 +67,8 @@ namespace Toybox.EditorTools
                 Times = ParseTimes(ToyboxArgs.Get("-toyboxTimes", "0")),
                 OutputDirectory = ToyboxArgs.Get("-toyboxOut", "tools/out/shots"),
                 Overview = ToyboxArgs.Has("-toyboxOverview"),
+                Plain = ToyboxArgs.Has("-toyboxPlain"),
+                Quality = ParseQuality(ToyboxArgs.Get("-toyboxQuality")),
             };
             ParseSize(ToyboxArgs.Get("-toyboxSize", "1280x720"), ref request.Width, ref request.Height);
             Run(request);
@@ -87,22 +99,23 @@ namespace Toybox.EditorTools
             ShaderUtil.allowAsyncCompilation = false;
 
             Game game = null;
-            CameraRig rig = null;
-            RenderTexture target = null;
+            Presentation presentation = null;
+            bool previousPlain = Materials.Plain;
             try
             {
+                // Before the level is built: materials are made while it builds.
+                Materials.Plain = request.Plain;
                 game = Game.Create(new GameOptions());
                 game.LoadLevel(request.Definition ?? LevelRegistry.Get(request.Level));
-                rig = CameraRig.Create(game);
+                presentation = Presentation.Create(game, new PresentationOptions { Plain = request.Plain, Quality = request.Quality, Presenters = request.Presenters });
+                CameraRig rig = presentation.Rig;
 
-                target = new RenderTexture(request.Width, request.Height, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB)
-                {
-                    name = "Toybox Shot",
-                    antiAliasing = 4,
-                    hideFlags = HideFlags.HideAndDontSave,
-                };
-                target.Create();
-                Warm(rig.Camera, target);
+                // The picture is taken the way the game puts it on the screen: through an HDR target of the
+                // tier's own sample count (see Photograph).
+                int width = request.Width, height = request.Height;
+                int msaa = request.Plain ? 4 : TierSpec.Of(presentation.Context.Quality).Msaa;
+                presentation.Frame(0f, 1f);
+                Warm(rig.Camera, width, height, msaa);
 
                 // The bot only produces input, so the level plays exactly as it does in its test.
                 var bot = new Bot(game);
@@ -136,24 +149,22 @@ namespace Toybox.EditorTools
                             }
                         }
                         game.Tick();
+                        // Presenters animate on real time; here a tick is a frame.
+                        presentation.Frame(Sim.Dt, 1f);
                     }
 
                     string name = "level" + request.Level.ToString("00", CultureInfo.InvariantCulture) + "-t" + TimeLabel(time);
-                    rig.Apply(1f);
-                    files.Add(Shoot(rig.Camera, target, Path.Combine(directory, name + ".png")));
+                    presentation.Frame(0f, 1f);
+                    files.Add(Shoot(rig.Camera, width, height, Path.Combine(directory, name + ".png"), msaa));
                     if (request.Overview)
-                        files.Add(ShootOverview(game, rig, target, Path.Combine(directory, name + "-overview.png")));
+                        files.Add(ShootOverview(game, rig, width, height, msaa, Path.Combine(directory, name + "-overview.png")));
                 }
             }
             finally
             {
-                rig?.Dispose();
+                presentation?.Dispose();
                 game?.Dispose();
-                if (target != null)
-                {
-                    target.Release();
-                    Object.DestroyImmediate(target);
-                }
+                Materials.Plain = previousPlain;
                 ShaderUtil.allowAsyncCompilation = previousAsync;
                 EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             }
@@ -163,47 +174,75 @@ namespace Toybox.EditorTools
         // The very first render after a script reload (the pipeline has just been created) draws every
         // object with the constants of one material - all toys the colour of the floor. From the second
         // render on it is right, so one frame is rendered and thrown away.
-        static void Warm(Camera camera, RenderTexture target)
+        static void Warm(Camera camera, int width, int height, int msaa)
         {
-            RenderTexture previousTarget = camera.targetTexture;
-            try
-            {
-                camera.targetTexture = target;
-                camera.Render();
-            }
-            finally
-            {
-                camera.targetTexture = previousTarget;
-            }
+            Object.DestroyImmediate(Photograph(camera, width, height, msaa));
         }
 
-        internal static string Shoot(Camera camera, RenderTexture target, string path)
+        internal static string Shoot(Camera camera, int width, int height, string path, int msaa = 1)
         {
-            RenderTexture previousTarget = camera.targetTexture;
-            RenderTexture previousActive = RenderTexture.active;
-            // No alpha channel: the PNG must not come out see-through where the camera left alpha at zero.
-            var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            Texture2D image = Photograph(camera, width, height, msaa);
             try
             {
-                camera.targetTexture = target;
-                camera.Render();
-                RenderTexture.active = target;
-                image.ReadPixels(new Rect(0f, 0f, target.width, target.height), 0, 0);
-                image.Apply();
                 File.WriteAllBytes(path, image.EncodeToPNG());
             }
             finally
             {
-                camera.targetTexture = previousTarget;
-                RenderTexture.active = previousActive;
                 Object.DestroyImmediate(image);
             }
             Debug.Log("[Toybox] shot: " + path);
             return path;
         }
 
+        /// <summary>
+        /// One picture of what a camera sees, as the 8-bit sRGB image a screen would show. URP takes the
+        /// format of its intermediate colour target from the camera's target texture, so the camera renders
+        /// into an HDR target of the game's own colour format (B10G11R11) - into an 8-bit one nothing would
+        /// be brighter than 1 and bloom would have nothing to work with - and the result is encoded
+        /// afterwards. No alpha channel: the PNG must not come out see-through where the camera left alpha
+        /// at zero. The caller destroys the texture.
+        /// </summary>
+        public static Texture2D Photograph(Camera camera, int width, int height, int msaa = 1)
+        {
+            GraphicsFormat format = GraphicsFormat.B10G11R11_UFloatPack32;
+            if (!SystemInfo.IsFormatSupported(format, GraphicsFormatUsage.Render)) format = SystemInfo.GetGraphicsFormat(DefaultFormat.HDR);
+            // Textures of its own, destroyed at once: temporary ones would linger in Unity's pool for a
+            // few frames and show up in somebody's object count.
+            var hdr = new RenderTexture(new RenderTextureDescriptor(width, height, format, 24) { msaaSamples = Mathf.Max(1, msaa) })
+            {
+                name = "Toybox Photograph HDR", hideFlags = HideFlags.HideAndDontSave,
+            };
+            var ldr = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB)
+            {
+                name = "Toybox Photograph", hideFlags = HideFlags.HideAndDontSave,
+            };
+            RenderTexture previousTarget = camera.targetTexture;
+            RenderTexture previousActive = RenderTexture.active;
+            var image = new Texture2D(width, height, TextureFormat.RGB24, false);
+            try
+            {
+                camera.targetTexture = hdr;
+                camera.Render();
+                // Linear values into an sRGB target: the encoding a screen would get.
+                Graphics.Blit(hdr, ldr);
+                RenderTexture.active = ldr;
+                image.ReadPixels(new Rect(0f, 0f, width, height), 0, 0);
+                image.Apply();
+            }
+            finally
+            {
+                camera.targetTexture = previousTarget;
+                RenderTexture.active = previousActive;
+                hdr.Release();
+                ldr.Release();
+                Object.DestroyImmediate(hdr);
+                Object.DestroyImmediate(ldr);
+            }
+            return image;
+        }
+
         // The whole level seen from high up, with a marker where the player (who has no body) stands.
-        static string ShootOverview(Game game, CameraRig rig, RenderTexture target, string path)
+        static string ShootOverview(Game game, CameraRig rig, int width, int height, int msaa, string path)
         {
             Bounds bounds = LevelBounds(game);
             var cameraObject = new GameObject("Overview Camera") { hideFlags = HideFlags.DontSave };
@@ -218,7 +257,7 @@ namespace Toybox.EditorTools
                 camera.CopyFrom(rig.Camera);
                 camera.scene = game.Scene;
                 camera.fieldOfView = OverviewFieldOfView;
-                camera.aspect = (float)target.width / target.height;
+                camera.aspect = (float)width / height;
 
                 float distance = FitDistance(bounds, OverviewRotation, OverviewFieldOfView, camera.aspect);
                 float radius = bounds.extents.magnitude;
@@ -227,7 +266,7 @@ namespace Toybox.EditorTools
                 camera.farClipPlane = distance + radius * 1.2f;
                 // From this far away the whole level lies beyond the game's shadow distance.
                 if (urp != null) urp.shadowDistance = distance + radius;
-                return Shoot(camera, target, path);
+                return Shoot(camera, width, height, path, msaa);
             }
             finally
             {
@@ -272,11 +311,11 @@ namespace Toybox.EditorTools
             marker.transform.SetParent(game.Root.transform, false);
             marker.transform.SetPositionAndRotation(player.Position, Quaternion.Euler(0f, player.Yaw, 0f));
 
-            Part(marker, ToyMeshes.Cylinder, new Vector3(0f, player.Height * 0.5f, 0f),
+            Part(marker, MeshKit.Cached("Marker Cylinder", () => MeshKit.Cylinder(0.5f, 1f)), new Vector3(0f, player.Height * 0.5f, 0f),
                 new Vector3(player.Radius * 2f, player.Height, player.Radius * 2f), MarkerColor);
             // A nose at eye height shows which way the player faces.
-            Part(marker, ToyMeshes.Cube, new Vector3(0f, player.EyeHeight, player.Radius * 1.5f),
-                new Vector3(player.Radius * 0.6f, player.Radius * 0.6f, player.Radius * 2f), ToyMaterials.Ink);
+            Part(marker, MeshKit.Cached("Marker Cube", () => MeshKit.Box(Vector3.one)), new Vector3(0f, player.EyeHeight, player.Radius * 1.5f),
+                new Vector3(player.Radius * 0.6f, player.Radius * 0.6f, player.Radius * 2f), Palette.Ink);
             return marker;
         }
 
@@ -287,7 +326,7 @@ namespace Toybox.EditorTools
             part.transform.localPosition = localPosition;
             part.transform.localScale = size;
             part.AddComponent<MeshFilter>().sharedMesh = mesh;
-            part.AddComponent<MeshRenderer>().sharedMaterial = ToyMaterials.Get(ToyMaterialKind.Matte, color);
+            part.AddComponent<MeshRenderer>().sharedMaterial = Materials.Toy(ToyRecipe.PlainProp, color);
         }
 
         /// <summary>"0,2,5" to seconds: sorted, without duplicates or negative values; {0} if nothing is usable.</summary>
@@ -313,6 +352,13 @@ namespace Toybox.EditorTools
             if (!int.TryParse(parts[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int h)) return;
             width = Mathf.Clamp(w, 16, 8192);
             height = Mathf.Clamp(h, 16, 8192);
+        }
+
+        /// <summary>"low", "medium" or "high" (any case) to a tier; null for anything else.</summary>
+        public static QualityTier? ParseQuality(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return null;
+            return Enum.TryParse(text.Trim(), true, out QualityTier tier) && Enum.IsDefined(typeof(QualityTier), tier) ? tier : (QualityTier?)null;
         }
 
         static float[] Normalize(float[] times)

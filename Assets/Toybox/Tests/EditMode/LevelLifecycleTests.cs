@@ -32,6 +32,10 @@ namespace Toybox.Tests
             public Exit Exit;
             public Prop Crate;
 
+            // A registered level stands in a room (sunny-rug by default). Its floor goes below the kill plane,
+            // or it would close the gap the ferry crosses.
+            public override float GroundY => -40f;
+
             public override void Build(LevelContext ctx)
             {
                 // Near floor: z in [-6, 6]. Far floor: z in [16, 28]. The gap is 10 wide.
@@ -39,7 +43,7 @@ namespace Toybox.Tests
                 ctx.AddStatic(BasicToys.Slab(new Vector3(12f, 1f, 12f)), new Vector3(0f, -0.5f, 22f));
 
                 // The ferry's top is flush with the floors; it shuttles between the two edges.
-                Ferry = ctx.AddKinematic(BasicToys.Slab(new Vector3(3f, 0.4f, 3f), ToyMaterials.Teal), new Vector3(0f, -0.2f, 7.5f));
+                Ferry = ctx.AddKinematic(BasicToys.Slab(new Vector3(3f, 0.4f, 3f), Palette.Lagoon), new Vector3(0f, -0.2f, 7.5f));
                 Mover ferry = Ferry;
                 ctx.OnUpdate(dt =>
                 {

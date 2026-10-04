@@ -1,208 +1,140 @@
-using System.IO;
+using System;
+using System.Collections.Generic;
+using System.Reflection;
 using UnityEditor;
-using UnityEditor.Build;
-using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.Universal;
 
 namespace Toybox.EditorTools
 {
     /// <summary>
+    /// Marks a static, parameterless method as one step of the project setup. <see cref="ProjectSetup.Run"/>
+    /// finds every such method in the Toybox.Editor assembly and runs them in ascending order (ties go by
+    /// type name, then method name). A step must be idempotent: running it twice leaves the project as
+    /// running it once does.
+    ///
+    /// Every area keeps its steps in a file of its own, Editor/Setup/&lt;Area&gt;Setup.cs. Orders 0-99 belong
+    /// to CoreSetup; areas use 100 and up, and a later step may replace what an earlier one assigned.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Method, Inherited = false)]
+    public sealed class SetupStepAttribute : Attribute
+    {
+        public int Order { get; }
+
+        public SetupStepAttribute(int order) => Order = order;
+    }
+
+    /// <summary>One discovered setup step.</summary>
+    public sealed class SetupStep
+    {
+        public int Order { get; }
+        /// <summary>"Type.Method", e.g. "CoreSetup.ConfigurePlayer".</summary>
+        public string Name { get; }
+        public MethodInfo Method { get; }
+
+        public SetupStep(int order, MethodInfo method)
+        {
+            Order = order;
+            Method = method;
+            Name = method.DeclaringType.Name + "." + method.Name;
+        }
+
+        public void Invoke() => Method.Invoke(null, null);
+
+        public override string ToString() => Order + " " + Name;
+    }
+
+    /// <summary>
     /// Idempotent project configuration. Everything that would normally be clicked together in the
-    /// editor (render pipeline assets, player settings, layers, the bootstrap scene) is created here so
-    /// the project can be rebuilt from source control alone:
-    ///   Unity -batchmode -quit -executeMethod Toybox.EditorTools.ProjectSetup.Run
+    /// editor (render pipeline assets, player settings, layers, materials, the bootstrap scene) is created
+    /// by setup steps, so the project can be rebuilt from source control alone:
+    ///
+    ///   tools\unity.ps1 exec -Method Toybox.EditorTools.ProjectSetup.Run
+    ///   tools\unity.ps1 exec -Method Toybox.EditorTools.ProjectSetup.Run -UnityArgs '-toyboxSteps','RoomSetup'
+    ///
+    /// This class only finds the steps and runs them; it holds none itself. -toyboxSteps limits the run to
+    /// steps whose name contains the given text (several, separated by commas).
     /// </summary>
     public static class ProjectSetup
     {
         public const string ScenePath = "Assets/Toybox/Scenes/Main.unity";
-        const string SettingsDir = "Assets/Toybox/Settings";
-        const string UrpAssetPath = SettingsDir + "/ToyboxURP.asset";
-        const string RendererPath = SettingsDir + "/ToyboxRenderer.asset";
-        const string ToyLitPath = "Assets/Toybox/Resources/Materials/ToyLit.mat";
-
-        // Physics layers. Kept in sync with Toybox.Layers at runtime.
-        static readonly (int index, string name)[] LayerNames =
-        {
-            (8, "Prop"), (9, "Player"), (10, "Held"), (11, "Trigger"),
-        };
 
         [MenuItem("Toybox/Run Project Setup")]
         public static void Run()
         {
-            Directory.CreateDirectory(SettingsDir);
-            Directory.CreateDirectory(Path.GetDirectoryName(ScenePath));
-            AssetDatabase.Refresh();
-
-            ConfigurePlayer();
-            ConfigureLayers();
-            ConfigurePhysics();
-            ConfigureRenderPipeline();
-            CreateMaterials();
-            CreateMainScene();
-
+            IReadOnlyList<SetupStep> steps = Discover();
+            string only = ToyboxArgs.Get("-toyboxSteps");
+            if (!string.IsNullOrEmpty(only)) steps = Filter(steps, only);
+            int failed = RunSteps(steps);
             AssetDatabase.SaveAssets();
-            Debug.Log("[Toybox] Project setup complete.");
+            if (failed > 0) throw new InvalidOperationException("Project setup: " + failed + " of " + steps.Count + " steps failed (see the errors above).");
+            Debug.Log("[Toybox] Project setup complete (" + steps.Count + " steps).");
         }
 
-        /// <summary>Can be run on its own: unity.ps1 exec -Method Toybox.EditorTools.ProjectSetup.ConfigurePlayer</summary>
-        public static void ConfigurePlayer()
+        /// <summary>Lists the steps without running them: tools\unity.ps1 exec -Method Toybox.EditorTools.ProjectSetup.List</summary>
+        public static void List()
         {
-            PlayerSettings.companyName = "Tinker's Toybox";
-            PlayerSettings.productName = "Tinker's Toybox";
-            PlayerSettings.bundleVersion = "0.1.0";
-            PlayerSettings.colorSpace = ColorSpace.Linear;
-            PlayerSettings.runInBackground = true;
-            PlayerSettings.SplashScreen.show = false;
+            foreach (SetupStep step in Discover()) Debug.Log("[Toybox] setup step: " + step);
+        }
 
-            // GitHub Pages cannot set Content-Encoding headers, so ship gzip with the JS fallback decoder.
-            PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
-            PlayerSettings.WebGL.decompressionFallback = true;
-            PlayerSettings.WebGL.nameFilesAsHashes = true;
-            PlayerSettings.WebGL.dataCaching = true;
-            PlayerSettings.WebGL.template = "PROJECT:Toybox";
-            // Levels and their solve scripts are code. The runner promises that one that fails is reported
-            // and survived (a level that cannot be built, a bot script that goes wrong, a faulty event
-            // listener), and it keeps that promise with catch blocks. "Explicitly thrown only" would turn
-            // the most common bug of all, a null reference, into a hard stop of the page instead.
-            PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.FullWithoutStacktrace;
-            PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.WebGL, ManagedStrippingLevel.Low);
-
-            // 1 = Input System package only.
-            var settings = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/ProjectSettings.asset");
-            if (settings.Length > 0)
+        /// <summary>The setup steps of an assembly (the editor assembly if none is given), in the order they run.</summary>
+        public static List<SetupStep> Discover(Assembly assembly = null)
+        {
+            assembly ??= typeof(ProjectSetup).Assembly;
+            var steps = new List<SetupStep>();
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+            foreach (Type type in assembly.GetTypes())
             {
-                var so = new SerializedObject(settings[0]);
-                var handler = so.FindProperty("activeInputHandler");
-                if (handler != null && handler.intValue != 1)
+                foreach (MethodInfo method in type.GetMethods(flags))
                 {
-                    handler.intValue = 1;
-                    so.ApplyModifiedPropertiesWithoutUndo();
+                    SetupStepAttribute attribute = method.GetCustomAttribute<SetupStepAttribute>();
+                    if (attribute == null) continue;
+                    if (method.GetParameters().Length != 0 || method.IsGenericMethodDefinition)
+                        throw new InvalidOperationException("[SetupStep] " + type.Name + "." + method.Name + " must be a static method without parameters.");
+                    steps.Add(new SetupStep(attribute.Order, method));
                 }
             }
-            AssetDatabase.SaveAssets();
+            steps.Sort((a, b) => a.Order != b.Order ? a.Order.CompareTo(b.Order) : string.CompareOrdinal(a.Name, b.Name));
+            return steps;
         }
 
-        static void ConfigureLayers()
+        /// <summary>The steps whose name contains one of the comma-separated texts.</summary>
+        public static List<SetupStep> Filter(IReadOnlyList<SetupStep> steps, string names)
         {
-            var assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset");
-            if (assets.Length == 0) return;
-            var so = new SerializedObject(assets[0]);
-            var layers = so.FindProperty("layers");
-            if (layers == null) return;
-            foreach (var (index, name) in LayerNames)
-            {
-                var element = layers.GetArrayElementAtIndex(index);
-                if (element.stringValue != name) element.stringValue = name;
-            }
-            so.ApplyModifiedPropertiesWithoutUndo();
-        }
-
-        /// <summary>
-        /// Physics settings that have no runtime API and are read when a physics scene is created.
-        /// (Gravity, solver iterations and the layer matrix are set at runtime by Toybox.Engine.Game.)
-        /// Can be run on its own: unity.ps1 exec -Method Toybox.EditorTools.ProjectSetup.ConfigurePhysics
-        /// </summary>
-        public static void ConfigurePhysics()
-        {
-            var assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/DynamicsManager.asset");
-            if (assets.Length == 0) return;
-            var so = new SerializedObject(assets[0]);
-
-            // Temporal Gauss-Seidel. The mechanic produces mass ratios of thousands to one (mass goes with
-            // scale cubed); with the default solver a heavy body sinks straight through a light one.
-            var solver = so.FindProperty("m_SolverType");
-            if (solver != null) solver.intValue = 1;
-
-            so.ApplyModifiedPropertiesWithoutUndo();
-            AssetDatabase.SaveAssets();
-            Debug.Log("[Toybox] Physics configured: solver type " + (solver != null ? solver.intValue.ToString() : "unavailable") + ".");
-        }
-
-        static void ConfigureRenderPipeline()
-        {
-            var rendererData = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(RendererPath);
-            if (rendererData == null)
-            {
-                rendererData = ScriptableObject.CreateInstance<UniversalRendererData>();
-                rendererData.postProcessData = AssetDatabase.LoadAssetAtPath<PostProcessData>(
-                    UniversalRenderPipelineAsset.packagePath + "/Runtime/Data/PostProcessData.asset");
-                AssetDatabase.CreateAsset(rendererData, RendererPath);
-                ResourceReloader.ReloadAllNullIn(rendererData, UniversalRenderPipelineAsset.packagePath);
-                EditorUtility.SetDirty(rendererData);
-            }
-
-            var urp = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(UrpAssetPath);
-            if (urp == null)
-            {
-                urp = UniversalRenderPipelineAsset.Create(rendererData);
-                AssetDatabase.CreateAsset(urp, UrpAssetPath);
-            }
-
-            urp.supportsHDR = true;
-            urp.msaaSampleCount = 4;
-            urp.shadowDistance = 80f;
-            urp.supportsCameraDepthTexture = true;
-            urp.supportsCameraOpaqueTexture = false;
-            EditorUtility.SetDirty(urp);
-
-            GraphicsSettings.defaultRenderPipeline = urp;
-            int current = QualitySettings.GetQualityLevel();
-            for (int i = 0; i < QualitySettings.names.Length; i++)
-            {
-                QualitySettings.SetQualityLevel(i, false);
-                QualitySettings.renderPipeline = urp;
-            }
-            QualitySettings.SetQualityLevel(current, false);
-
-            ConfigureShadows();
+            string[] wanted = names.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+            var kept = new List<SetupStep>();
+            foreach (SetupStep step in steps)
+                foreach (string name in wanted)
+                    if (step.Name.IndexOf(name.Trim(), StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        kept.Add(step);
+                        break;
+                    }
+            return kept;
         }
 
         /// <summary>
-        /// Shadow settings of the pipeline asset. A first-person view needs cascades (one shadow map spread
-        /// over 80 units is far too coarse at the player's feet), and a light can only cast soft shadows if
-        /// the asset allows them. Can be run on its own:
-        /// unity.ps1 exec -Method Toybox.EditorTools.ProjectSetup.ConfigureShadows
+        /// Runs the steps in the order given, logging "[Toybox] setup: name" before each. A step that throws
+        /// is reported and the rest still run. Returns how many failed.
         /// </summary>
-        public static void ConfigureShadows()
+        public static int RunSteps(IReadOnlyList<SetupStep> steps)
         {
-            var urp = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(UrpAssetPath);
-            if (urp == null) return;
-
-            urp.shadowDistance = 80f;
-            urp.shadowCascadeCount = 4;
-            urp.mainLightShadowmapResolution = 2048;
-
-            // Soft shadows have no public setter.
-            var so = new SerializedObject(urp);
-            SerializedProperty soft = so.FindProperty("m_SoftShadowsSupported");
-            if (soft != null) soft.boolValue = true;
-            so.ApplyModifiedPropertiesWithoutUndo();
-
-            EditorUtility.SetDirty(urp);
-            AssetDatabase.SaveAssets();
-            Debug.Log("[Toybox] Shadows configured: " + urp.shadowCascadeCount + " cascades over " + urp.shadowDistance +
-                      " units, soft shadows " + (urp.supportsSoftShadows ? "on" : "off") + ".");
-        }
-
-        // A shader only ships in a player build if an asset references it, so anything the game looks up
-        // at runtime needs a material under Resources. Shader.Find alone returns null in the build.
-        static void CreateMaterials()
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(ToyLitPath));
-            AssetDatabase.Refresh();
-            if (AssetDatabase.LoadAssetAtPath<Material>(ToyLitPath) == null)
-                AssetDatabase.CreateAsset(new Material(Shader.Find("Universal Render Pipeline/Lit")), ToyLitPath);
-        }
-
-        static void CreateMainScene()
-        {
-            var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            var go = new GameObject("Bootstrap");
-            go.AddComponent<Bootstrap>();
-            EditorSceneManager.SaveScene(scene, ScenePath);
-            EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
+            int failed = 0;
+            foreach (SetupStep step in steps)
+            {
+                Debug.Log("[Toybox] setup: " + step.Name);
+                try
+                {
+                    step.Invoke();
+                }
+                catch (Exception e)
+                {
+                    failed++;
+                    Exception cause = e is TargetInvocationException && e.InnerException != null ? e.InnerException : e;
+                    Debug.LogError("[Toybox] setup FAILED: " + step.Name + ": " + cause.GetType().Name + ": " + cause.Message);
+                    Debug.LogException(cause);
+                }
+            }
+            return failed;
         }
     }
 }
