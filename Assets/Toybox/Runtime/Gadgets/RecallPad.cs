@@ -50,6 +50,7 @@ namespace Toybox.Gadgets
         }
 
         public Vector3 Position => options.Position;
+        public float Radius => options.Radius;
         /// <summary>True while the player's feet are on the disc.</summary>
         public bool PlayerOn { get; private set; }
         /// <summary>How far the wait has got, 0..1.</summary>

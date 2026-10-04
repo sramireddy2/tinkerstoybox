@@ -871,8 +871,9 @@ rates other than 60 Hz they move in tick-sized steps against an interpolated cam
 | 100 | `Render/LightingRig` | look | The one Light (the sun) and every preset-load global of §3.7: ambient, kicker, glint basis, StudioEnv bands, toy glow, haze, window patch, shell box; ambient mirrored into `RenderSettings`; the camera cleared to the haze colour |
 | 110 | `Render/Environment/RoomVisuals` | look | The room from `game.Environment`: shell, island, trim, window and sky card, the 21 furniture kinds filling their collider boxes, hull shadows, light shaft and dust motes (Medium / High), the player's shadow figure |
 | 210 | `Render/PoolSystem` | look | Colour pools (§9.4): the per-frame globals `_PoolPos` / `_PoolTint` / `_PoolCount` / `_PoolGain`, grab drain, release flood, the splash ring (`_Splash`, `_SplashTint`), first-impact dust |
-| 215 | `Render/DimensionCallout` | — | §9.4: after a release at another size (more than 15% off), a dimension line of the toy's true height, the factor and a 1.7-unit figure stand beside it for 1.5 s, in Ink, in the world |
+| 215 | `Render/DimensionCallout` | — | §9.4: after a release at another size (more than 15% off), a dimension line of the toy's true height, the factor and a 1.7-unit figure stand beside it for 1.5 s, in Ink, in the world. Nearer than 2.1 figure heights from the camera the figure is left out (it fades in up to 2.6) and the factor is written for that distance (`FigureAt`, `LabelSizeFor`): a toy made small is let go at arm's length |
 | 220 | `Render/ExitMarks` | — | The four-pane mark at every exit: white × 3 while open, small faint Paper while locked; it faces the camera and thins out as the eye walks into it |
+| 232–248 | `Render/GadgetVisuals/*` | look | What the gadgets' effects look like, one presenter per kind, all built on `GadgetVisual` (finds a level's gadgets through `GadgetList.Of`, rebuilds on level load and tier change): `LaserVisuals` (232), `WindVisuals` (234), `FitLamps` (236: amber waiting, green fits, red blinking wrong size; the gauge's read-out), `WaterVisuals` (238), `PortalView` (240: a second camera on Medium / High, a card on Low and while the door is held), `LaunchCues` (242), `TrainMarks` (244), `BreakDebris` (246), `GadgetCues` (248: the recall pad's wait ring and the accept / refuse / caught rings). `Flat` shader, no lights, no colliders; none of them draws on a held toy. Notes: `tools/out/notes/gadget-visuals.md` |
 | 250 | `Render/HeldLook` | — | Everything about a held toy that is not the render pass: shadow off, border pop, peel slide and breathing, jump flash (writes `StickerLook` for `StickerFeature`); the focus sweep (`_Sweep`); the "every toy sweeps" of level complete; high-visibility rim; toys too thin to cast (`ThinCaster`) cast no shadow; detail-texture warm-up |
 | 252 | `Render/RimFade` | — | §2.5 rule 4: the rim of a toy that stops being grabbable fades in 300 ms (its pool goes in `PoolSystem`) |
 | 255 | `Render/ToySquash` | — | §9.5 impact squash (`_SquashA`) on the first impact after a release |
@@ -1132,6 +1133,57 @@ Seams between the areas that no single file shows:
   for the plain look (`?plain=1`, `PresentationOptions.Plain`), one that needs particular presenters
   passes them (`RunnerOptions.Presenters`, `ShotRequest.Presenters`).
 
+## The campaign so far: phase 1 as built (levels 1–4)
+
+`Levels/Level01CheeseWedge.cs` (+ `Level01Set.cs`, its drawn-only set), `Level02ThimbleChasm.cs`
+(+ `Level02Shapes.cs`), `Level03ShrinkingApple.cs`, `Level04DominoEffect.cs` (+ `Level04Barricade.cs`).
+`LEVELS.md` has an "As built" note at the end of each of these levels and Appendix D with the four side
+by side; the builders' and reviewers' logs are `tools/out/notes/level0N-build.md` / `level0N-review.md`,
+the close-out's `tools/out/notes/phase-1-campaign.md`; contact sheets are in `tools/out/shots/phase-1`.
+
+| Level | Room | Solver's drop | Works | Solve (game s) | Gadgets as built |
+|---|---|---|---|---|---|
+| 1 The Cheese Wedge | `sunny-rug` | wedge 0.4 → 9.46 | 5.5–14 | 12.63 | `SkyCap`, `PropLeash` (crumb) |
+| 2 The Thimble Chasm | `pegboard-workbench`, `GroundY` −9 | thimble 0.8 → 11.62 | 9–13 | 9.28 | `Socket`, `FitGauge`, `HazardZone`, `PropLeash`, `SkyCap` |
+| 3 Shrinking the Apple | `cardboard-box`, `GroundY` −0.1 | apple 11.4 → 0.451 | 0.10–0.64 | 3.77 | `Funnel`, `PressurePlate`, `Door`, `PropLeash`, `HazardZone` × 4 (outside the box) |
+| 4 Domino Effect | `block-hall`, `GroundY` −2.5 | domino 0.5 → 4.105 | 3.2–5.3 | 14.18 | `Breakable`, `PropLeash` × 2 (hall, crumb), `SkyCap` |
+
+What building them taught, and every later level should take over:
+
+- **How far away the toy is picked up from decides what it can become** (`k` = scale / grab distance is
+  fixed for a hold). The script behind `LEVELS.md` treated it as a detail; in the simulation a far
+  pick-up cannot be made to work in levels 1, 2 and 4. The pattern the three share: the toy stands on
+  a pedestal one step from the spawn or on the way; a `PropGrabbed` handler compares
+  `e.OldScale / e.GrabDistance` with the level's measured least `k` and says "It only ever gets as big
+  as it looks. Pick it up from closer." (the same constant text in all three); a `PropLeash` with
+  `Unless` returns a toy that is too small to use to its pedestal, because on a floor it cannot be
+  picked up from nearer than the eye is high.
+- **No attempt ends in silence.** A level judges a let-go toy once, when it has come to rest
+  (`ctx.OnUpdate`, a flag set in `PropDropped` and cleared on the grab), and says in one line what
+  went wrong: fell short, too small, too big, too light, no room, not over the hole. Lines are
+  `public const string` on the level (the tests compare against them) and go through `ctx.Say`.
+- **A let-go the view could not place** leaves the toy at the last pose that was free:
+  `game.Grabber.PlacementValid` is false in the `PropDropped` handler. That happens when the place asked
+  for is nearer than the toy would be at `MinScale` (`near = MinScale / ratio`). Level 3 says so for its
+  pea; Level 1's crumb leash covers it.
+- **Dashed paint is the size language** (LEVELS 0.3): a `RoomLit` decal of the toy at the size that
+  works, on the surface it stops against or stands on. Level 2's is also its `FitGauge` read-out.
+- **A heavy toy that falls is the level's to guard.** `PerspectiveGrabber.LetHeavyPropsPass` only lets
+  a prop pass through the player once it is 0.15 deep, so a house-sized domino toppling sideways onto
+  the player threw them at 35–50 units a second. Level 4 switches the collision off while the domino
+  outweighs the player and moves (`GadgetKit.IgnorePlayer`, on again once `GadgetKit.OverlapsPlayer` is
+  false). Not fixed in the engine: levels 5 to 15 with heavy dynamic toys need the same guard.
+- **Walls may be drawn lower than they are.** Level 4's colliders reach its sky cap; the drawn rows of
+  blocks are low so that the sun reaches the board. Anything opaque between the eye and a held toy still
+  needs a collider, never the other way round.
+- **Words.** Toys are *picked up* and *let go*; text is plain ASCII (the UI font has no dash but the
+  hyphen); a level has three hints, the last one the recipe. `Phase1CampaignTests` holds the four
+  levels to that.
+
+Known limits the levels live with: Level 2 tolerates ±2.9° of yaw from its spawn (±7° two steps on);
+the scale pill at 72% of the screen's height covers the foot of Level 4's held domino; a toy at its
+smallest cannot be put down nearer than `MinScale / ratio`.
+
 ## Where the game departs from the art bible
 
 Decided while putting the areas together and looking at the pictures; each has its reason next to the
@@ -1151,6 +1203,8 @@ code. (The areas' own deviations are in `tools/out/notes/m2-*.md`.)
 | §10.5 pause: blur, then capture | The card shows the sharp frame, the background the blurred one | One texture cannot be both; the frame "as it was" is what the card is for |
 | §3.2 bump height | `TOYBOX_BUMP_UNIT` 0.07 authored units per unit of detail | 1.0 tilts normals by 80°; 0.1 still read as corrugation on painted wood |
 | §7.4 HDR-less devices: clamp the glint gain | Not done | An 8-bit target clamps at 1 by itself; no device to try it on |
+| §9.4 the callout's 1.7-unit figure at the toy's base, always | `DimensionCallout`: no figure nearer than 2.1 figure heights from the camera, and the factor sized for the distance | Level 3 lets its marble go a step and a half from the eye: the figure stood half the picture tall between the player and the flap that falls open |
+| §2.5 rule 3 / the owner's brief: a chrome thimble | Level 2's thimble is anodised Tangerine | Rule 3 itself ("metal toys are anodised candy… the Level 2 thimble is anodised Tangerine"); candy is what says "you can lift this" |
 
 ## Testing and verification
 
@@ -1169,7 +1223,15 @@ code. (The areas' own deviations are in `tools/out/notes/m2-*.md`.)
   steer with `ScriptedInput`, and run a level's own solution with `TestHelpers.PlayLevel(game)`.
   Every test must dispose its Game: only one may exist, and it owns global physics state.
 - `Tests/EditMode/Levels/LevelNNTests.cs` — builds the level, runs `Solve(bot)`, asserts
-  `LevelCompleted` fired before a timeout. A level without a passing solver is not done.
+  `LevelCompleted` fired before a timeout. A level without a passing solver is not done. Levels 1 to 4
+  go much further (64, 43, 55 and 44 cases): the scale window, every stand-and-aim variation that was
+  measured, each bypass and soft-lock that was tried, restarts at awkward moments, and every line the
+  level says.
+- `Tests/EditMode/Levels/Phase1CampaignTests.cs` — the four levels as a campaign, with the real level
+  list: the order, title → level 1, each completion offering the next, the catalogue's cards (title, hero
+  toy, room colour, COLLECTED, best time), progress written to the store and continued in a new
+  session, the bot solving all four in one `Game` forwards and backwards with the same times to the
+  tick, one hero toy per level in view at the start, and one voice across the levels' texts.
 - `Tests/EditMode/PresentationTests.cs` — input latching across frames that run zero, one or three ticks,
   pointer lock and focus loss (`HumanInputTests`, through `FakeDevices`), URL parsing and level order
   (`LaunchOptionsTests`), the runner's level flow, autoplay and camera (`GameRunnerTests`, by calling
@@ -1216,6 +1278,16 @@ code. (The areas' own deviations are in `tools/out/notes/m2-*.md`.)
   Mode happened to be doing - the tier, for one (`ToyDef` re-measures when the tier differs). It
   returns before the check has run, and the editor must not serve anything else while it is in Play
   Mode — the wrapper holds the batch mutex until the result file appears and passes `-toyboxExclusive`.
+  `playcheck -UnityArgs '-toyboxUrl','?level=3&autoplay=1'` plays that level: with autoplay already on
+  in the address the check waits for one load after the completion (the next level), otherwise for two
+  (its own `SetAutoplay` reloads the level first).
+- **One test fails as of 2026-10-04:** `ToyShadingTests.HeldToy_IsDrawnByTheStickerPassAlone_WithBorderAndPeelShadow`.
+  It is right to fail. On the editor's Direct3D 12 device, with MSAA on (Medium, High), the `PeelShadow`
+  pass of `Sticker.shader` (`Blend DstColor Zero`) brightens what it covers by about 1.9 instead of
+  darkening it by 0.78, so the held toy's hard shadow shows as a second pale border; with MSAA off (Low)
+  it is correct. Not the lens blur, not a presenter, not the dynamic-batching flag (each ruled out by
+  measurement; `tools/out/notes/phase-1-campaign.md`). The shader has not been changed; what to try is
+  the same product with the destination as the factor (`Blend Zero SrcColor`).
 - Not covered by anything: the WebGL build - so §7.5 item 8 (a held glossy toy in the browser with bloom
   on its glint, the vignette, the border and the peel shadow) is still to be looked at -, real keyboard
   and mouse, the browser's pointer lock (including the `stickyCursorLock` line, which only the Web player

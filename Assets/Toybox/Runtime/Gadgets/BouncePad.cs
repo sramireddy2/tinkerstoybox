@@ -44,6 +44,10 @@ namespace Toybox.Gadgets
             cooldownTicks = Ticks(options.Cooldown);
         }
 
+        /// <summary>The toy that is the pad, or null for a pad that is part of the level. (For presentation: what flattens under a landing.)</summary>
+        public Prop Prop => options.Prop;
+        /// <summary>The collider of a pad that is part of the level, or null for a toy.</summary>
+        public Collider Surface => options.Surface;
         public int BounceCount { get; private set; }
         /// <summary>The speed the last bounce launched the player with.</summary>
         public float LastLaunchSpeed { get; private set; }

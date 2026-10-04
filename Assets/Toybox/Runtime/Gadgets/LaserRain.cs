@@ -59,6 +59,7 @@ namespace Toybox.Gadgets
         readonly int zapTicks;
         readonly List<Vector3> beamVertices;
         readonly Mesh beamMesh;
+        Renderer beamRenderer;
         int exposedTicks;
         int covered;
         int refresh;
@@ -95,6 +96,8 @@ namespace Toybox.Gadgets
         }
 
         public int BeamCount => origins.Length;
+        /// <summary>The renderer of the gadget's own plain beams (null without Visual): a presenter that draws the beams itself switches it off.</summary>
+        public Renderer BeamRenderer => beamRenderer;
         public Vector3 Direction => direction;
         public float Range => options.Range;
         /// <summary>True while a beam rests on the player.</summary>
@@ -281,7 +284,8 @@ namespace Toybox.Gadgets
             mesh.RecalculateBounds();
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             // ART_BIBLE 4.4: additive, Hazard x 3, soft across the beam.
-            go.AddComponent<MeshRenderer>().sharedMaterial = Materials.Flat(new FlatRecipe
+            beamRenderer = go.AddComponent<MeshRenderer>();
+            beamRenderer.sharedMaterial = Materials.Flat(new FlatRecipe
             {
                 Name = "Laser Beam", Color = Palette.Hazard.Emission, Blend = FlatBlend.Additive, Soft = 0.5f,
             });

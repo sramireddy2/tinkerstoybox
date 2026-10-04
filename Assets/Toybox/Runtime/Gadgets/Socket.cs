@@ -111,6 +111,9 @@ namespace Toybox.Gadgets
             }
         }
 
+        /// <summary>The socket's lamp (for presentation), or null without one.</summary>
+        public SignalLamp Lamp => lamp;
+
         public Zone Capture => options.Capture;
         public float MinScale => options.MinScale;
         public float MaxScale => options.MaxScale;

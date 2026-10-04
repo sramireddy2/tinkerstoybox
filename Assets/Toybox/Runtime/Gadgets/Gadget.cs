@@ -24,6 +24,7 @@ namespace Toybox.Gadgets
             Ctx = ctx ?? throw new ArgumentNullException(nameof(ctx));
             Game = ctx.Game;
             Name = string.IsNullOrEmpty(name) ? GetType().Name : name;
+            GadgetList.Add(ctx, this);
             ctx.OnUpdate(Step);
             ctx.OnDispose(DisposeOnce);
         }
@@ -73,6 +74,36 @@ namespace Toybox.Gadgets
         protected static int Ticks(float seconds, int least = 0) => Mathf.Max(least, Mathf.RoundToInt(seconds / Sim.Dt));
 
         public override string ToString() => GetType().Name + " '" + Name + "'";
+    }
+
+    /// <summary>
+    /// The gadgets of a level, in the order they were constructed: how presentation finds what there is
+    /// to draw (a gadget is a plain object nobody else keeps hold of). A read-only view for presenters;
+    /// the simulation never looks in here. The list of a level goes when the level is unloaded.
+    /// </summary>
+    public static class GadgetList
+    {
+        static readonly System.Collections.Generic.Dictionary<LevelContext, System.Collections.Generic.List<Gadget>> Lists =
+            new System.Collections.Generic.Dictionary<LevelContext, System.Collections.Generic.List<Gadget>>();
+        static readonly System.Collections.Generic.List<Gadget> None = new System.Collections.Generic.List<Gadget>();
+
+        /// <summary>The gadgets built into this level so far (empty for null or an unloaded level).</summary>
+        public static System.Collections.Generic.IReadOnlyList<Gadget> Of(LevelContext ctx) =>
+            ctx != null && Lists.TryGetValue(ctx, out System.Collections.Generic.List<Gadget> list) ? list : None;
+
+        /// <summary>The gadgets of the level the game has loaded.</summary>
+        public static System.Collections.Generic.IReadOnlyList<Gadget> Of(Game game) => Of(game != null && !game.IsDisposed ? game.Context : null);
+
+        internal static void Add(LevelContext ctx, Gadget gadget)
+        {
+            if (!Lists.TryGetValue(ctx, out System.Collections.Generic.List<Gadget> list))
+            {
+                Lists[ctx] = list = new System.Collections.Generic.List<Gadget>();
+                // Registered before the first gadget's own disposer, so it runs after every gadget's.
+                ctx.OnDispose(() => Lists.Remove(ctx));
+            }
+            list.Add(gadget);
+        }
     }
 
     /// <summary>

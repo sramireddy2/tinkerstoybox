@@ -18,6 +18,11 @@ namespace Toybox.Render
     /// over 120 ms, out over 300 ms.
     ///
     /// It shows true size, which is its job: the toy is no longer held when it appears.
+    ///
+    /// A toy made small is let go close to the eye (Level 3: a marble, a step and a half away). A figure of
+    /// the player's own height standing there fills half the picture and hides what the release sets off,
+    /// so nearer than <see cref="FigureNear"/> figure heights the drawing does without it, and the factor
+    /// is written no bigger than it can be read at that range.
     /// </summary>
     [Presenter(215)]
     public sealed class DimensionCallout : IPresenter
@@ -26,6 +31,15 @@ namespace Toybox.Render
         public const float Threshold = 0.15f;
         public const float Seconds = 1.5f, InSeconds = 0.12f, OutSeconds = 0.3f;
         public const float FigureHeight = 1.7f;
+        /// <summary>
+        /// The figure is drawn in full from this many figure heights away from the camera (there it is a good
+        /// quarter of the picture's height at the default 70 degree lens) and not at all <see cref="FigureGone"/>
+        /// or nearer (a third of the picture and more).
+        /// </summary>
+        public const float FigureNear = 2.6f, FigureGone = 2.1f;
+        /// <summary>The factor's letters are at most this fraction of their distance from the camera tall (font units).</summary>
+        public const float LabelPerDistance = 0.6f;
+        public const float LabelMin = 0.6f, LabelMax = 24f, LabelRest = 3f;
 
         static readonly int ColorId = Shader.PropertyToID("_Color");
         static readonly Vector3[] LineVertices = new Vector3[12];
@@ -43,7 +57,7 @@ namespace Toybox.Render
         MaterialPropertyBlock block;
 
         Prop prop;
-        float age = float.MaxValue, height, reach, thickness;
+        float age = float.MaxValue, height, reach, thickness, figureShown;
 
         /// <summary>The toy the drawing stands beside, or null while none is shown.</summary>
         public Prop Shown => age < Seconds ? prop : null;
@@ -53,6 +67,10 @@ namespace Toybox.Render
         public string Text => label != null ? label.text : null;
         /// <summary>0..1: how opaque the drawing is right now.</summary>
         public float Opacity { get; private set; }
+        /// <summary>0..1: how much of that the figure has (0 when the drawing stands too near the camera for it).</summary>
+        public float FigureShown => age < Seconds ? figureShown : 0f;
+        /// <summary>The size the factor is written in (TextMeshPro font units), or 0 without a label.</summary>
+        public float LabelSize => label != null ? label.fontSize : 0f;
         /// <summary>The drawing's root (inactive while nothing is shown).</summary>
         public Transform Root => root != null ? root.transform : null;
 
@@ -85,6 +103,8 @@ namespace Toybox.Render
             inkColor.a = Opacity;
             block.SetVector(ColorId, inkColor);
             lineRenderer.SetPropertyBlock(block);
+            inkColor.a = Opacity * figureShown;
+            block.SetVector(ColorId, inkColor);
             figureRenderer.SetPropertyBlock(block);
             if (label != null) label.alpha = Opacity;
         }
@@ -103,6 +123,16 @@ namespace Toybox.Render
             line = null;
             figure = null;
             prop = null;
+        }
+
+        /// <summary>
+        /// The factor as the label writes it: "×12", "×3.2", "×0.5" - and with as many decimals as it takes
+        /// to show a digit when a toy was made very small ("×0.04", not "×0.0").
+        /// </summary>
+        public static string FactorText(float factor)
+        {
+            string format = factor >= 10f ? "0" : factor >= 0.095f ? "0.0" : factor >= 0.0095f ? "0.00" : "0.000";
+            return "×" + factor.ToString(format, CultureInfo.InvariantCulture);
         }
 
         void OnDropped(PropHoldEvent e)
@@ -142,11 +172,32 @@ namespace Toybox.Render
 
             if (label != null)
             {
-                label.text = "×" + factor.ToString(factor >= 10f ? "0" : "0.0", CultureInfo.InvariantCulture);
-                label.fontSize = Mathf.Clamp(height * 1.4f, 3f, 24f);
+                label.text = FactorText(factor);
+                label.fontSize = LabelSizeFor(height, CameraDistance(bounds));
             }
             root.SetActive(true);
             Place();
+        }
+
+        /// <summary>
+        /// The size the factor is written in beside a toy of this height, seen from this far away: 1.4 times
+        /// the toy's height, between <see cref="LabelRest"/> and <see cref="LabelMax"/> - but close to the
+        /// camera no bigger than <see cref="LabelPerDistance"/> of the distance (letters that read at 20
+        /// units cover the picture at one and a half).
+        /// </summary>
+        public static float LabelSizeFor(float height, float distance)
+        {
+            float least = Mathf.Clamp(distance * LabelPerDistance, LabelMin, LabelRest);
+            return Mathf.Clamp(height * 1.4f, least, LabelMax);
+        }
+
+        /// <summary>How much of the figure is drawn when the drawing stands this far from the camera (in units of the figure's height).</summary>
+        public static float FigureAt(float distanceInFigures) => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(FigureGone, FigureNear, distanceInFigures));
+
+        float CameraDistance(Bounds bounds)
+        {
+            Camera camera = context.Camera;
+            return camera != null ? Vector3.Distance(camera.transform.position, bounds.center) : float.MaxValue;
         }
 
         // Beside the toy on the camera's right, standing on the level of the toy's base, facing the camera.
@@ -169,9 +220,17 @@ namespace Toybox.Render
             float tick = thickness * 8f;
             figureObject.transform.localPosition = new Vector3(tick + 0.45f * figureScale, 0f, 0f);
             figureObject.transform.localScale = new Vector3(figureScale, figureScale, 0.03f * figureScale);
+            // The figure is the player's own size: standing closer than a couple of its heights it would be
+            // most of the picture. There the line and the factor say it alone.
+            float away = camera != null ? Vector3.Distance(camera.transform.position, foot) : float.MaxValue;
+            figureShown = FigureAt(away / Mathf.Max(FigureHeight * figureScale, 1e-3f));
+            if (figureObject.activeSelf != figureShown > 0f) figureObject.SetActive(figureShown > 0f);
             // At half height - or over the figure's head, where half height would put it across the figure.
             if (labelObject != null)
-                labelObject.transform.localPosition = new Vector3(tick, Mathf.Max(height * 0.5f, FigureHeight * figureScale + 0.12f * label.fontSize), 0f);
+            {
+                float over = figureShown > 0f ? FigureHeight * figureScale + 0.12f * label.fontSize : 0.06f * label.fontSize;
+                labelObject.transform.localPosition = new Vector3(tick, Mathf.Max(height * 0.5f, over), 0f);
+            }
         }
 
         // A vertical bar from the base to the true height, with a tick at either end.

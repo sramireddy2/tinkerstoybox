@@ -14,17 +14,20 @@ near geometry; nothing crushes the player; a rider stays on a `Mover` through sp
 Pitch bands quoted below are the conservative ones (a grazing pass that only the coarse march would
 have allowed is not counted).
 
-**Status.** Geometry and arithmetic are checked by script. Nothing has been run in Unity: the numbers
-are what the level classes should be built from, and the scale windows in Appendix B are what the bot
-tests should assert. Physics behaviour that only PhysX can confirm is listed in Appendix C with a
-fallback per level.
+**Status.** Geometry and arithmetic are checked by script. The numbers are what the level classes
+should be built from, and the scale windows in Appendix B are what the bot tests should assert. Physics
+behaviour that only PhysX can confirm is listed in Appendix C with a fallback per level.
+**Levels 1 to 4 are built** (2026-10-04) and solved by their bots in the simulation: each of their
+sections ends with an "As built" note saying where the level departs from the text above and what was
+measured, and Appendix D puts the four side by side. Where a note and the text above it disagree, the
+note is what the game does. Levels 5 to 15 have not been run in Unity.
 
 **Restart marker.** Sections are appended in order. The file is complete only when its last line is
 `END OF LEVELS.md`.
 
 **Contents.** 0 Conventions and rules · 1 Campaign overview · 2 Gadget catalog · 3 Toy catalog ·
 4 Settings and environment presets · 5 Levels 1–15 · Appendix A Design corrections · Appendix B Scale
-windows for the bot tests · Appendix C Risks and fallbacks
+windows for the bot tests · Appendix C Risks and fallbacks · Appendix D As built: phase 1
 
 ---
 
@@ -143,6 +146,10 @@ ignores `MoveTo` while held); what is missing is switching a `Dynamic` prop to d
   reverse (3), consequence (4). Level 2 no longer depends on how far away the thimble was picked up
   (the default grab is close and the clamp makes "too far back" harmless), so the only new thing in it
   is fitting.
+  *As built:* that did not hold in the simulation. In Levels 1, 2 and 4 a pick-up from too far away
+  cannot be made to work, so all three put the toy a step from where the player stands, say the same
+  sentence on a far grab ("It only ever gets as big as it looks. Pick it up from closer.") and return
+  a toy that is too small to use to its pedestal. See Appendix D.
 - Phase 2 turns scale into one physical quantity per level: area (5), bounce height (6), mass on a
   lever (7), exact radius and mass (8), then adds timing (9). Level 7's drafted dependence on a
   close pickup was removed (the pebble now sits beside the seat), so its single idea is the lever.
@@ -630,6 +637,33 @@ yield return bot.WalkTo(new Vector3(0, 4, 42));
 
 **Confidence.** High. One heavy convex wedge settling on a flat floor against a wall.
 
+**As built (2026-10-04; `Level01CheeseWedge.cs`, `Level01Set.cs`, 64 tests).**
+- **Spawn (0, 4, −4), pitch −20°**, one step from the spool (the pedestal rule of 0.3), not (0, 4, −9).
+  From six units away the first click takes the cheese looking a sixth as big (`k` = 0.066) and the
+  hillside comes out 2 long. The crosshair starts on the cheese, with the far stack, its outline and
+  the exit mark above it in the same picture.
+- **The solve.** Grab `g` = 1.097, `k` = 0.365; let go from (1.96, 4, −0.73) at pitch −6.9°, `d` = 25.92:
+  **s = 9.46** (text: 9.4), centre (0.03, 2.36, 24.93), mass 50.7. Level complete after **12.63 s**.
+- **Window.** 5.5 works by a hair (the hop clears the stack by 0.01), 5.4 fails; the clamp is 14. The
+  level treats a hold below `k` = 0.23 (a hillside under 6.3) as too small.
+- **Aim from the edge.** The crosshair anywhere from y = 1.5 on the far stack's face up to y = 6.5 on
+  the wall behind it (pitch −7.5° to +1.8°), and ±3 sideways. Lower, the base meets the rug first: 1.5
+  short is hopped, 3.5 short needs a sprint jump, more fails. From 6.75 up the wedge lands on top of
+  the far stack (10.8–14) and is picked up again from the start stack.
+- **Pick-up distance matters here too** (the text does not consider it): from the edge `s` needs
+  `k` ≥ 0.197, a pick-up from 2 or nearer.
+- **Added.** A dashed outline of the wedge's tall end at 9.4 on the far stack's face (the size
+  language); a `PropLeash` that puts a cheese smaller than 0.45 back on its spool wherever else it
+  lies (on a floor it cannot be picked up from close enough to matter); six lines, each said when it
+  happens: what a hold does (first good grab), "It only ever gets as big as it looks. Pick it up from
+  closer." (`k` < 0.23), the crumb went back, the cheese went back, tall end the wrong way round, and
+  "It fell short of the far books…" when a hillside rests more than 2 short of the stack.
+- **Hint 3** names the dashed outline, not "the bottom of the far book stack" (the lowest third of
+  that face is the one place on it that leaves the wedge short), and the leaning book.
+- The rug floor is the room's own rug over an invisible collider; the two chest walls on the sun's side
+  cast no shadow (they shaded three quarters of the rug and hid the hillside's own shadow); the sun disc
+  behind the exit is no taller than what can be aimed at.
+
 ---
 
 ### Level 2 — The Thimble Chasm
@@ -734,6 +768,37 @@ yield return bot.WalkTo(new Vector3(0, 0, 34f));
 **Confidence.** High: the seat is a scripted ease, and the only free physics is a too-small thimble
 falling onto a flat pad. If the capture feels too magnetic, shrink its radius to 4 and keep the leash.
 
+**As built (2026-10-04; `Level02ThimbleChasm.cs`, `Level02Shapes.cs`, 43 test cases).**
+- **Spool at (0.9, 0, −4.8), spawn yaw 12°** (text: (0, 0, −4.5), yaw 0): the thimble dead ahead hid
+  the hole, the door and half the outline. The thimble is **anodised Tangerine** (`ART_BIBLE.md` §2.5
+  rule 3), not chrome, and `AllowPitch` is off: it always lands on its rim.
+- **The solve.** Grab from the spawn (`k` = 0.53), let go from (0, 0, 3) at the outline's centre:
+  **s = 11.62** (text: 11.5). Seated and level complete after **9.28 s**.
+- **Where it works.** Picked up from the spawn and aimed at the outline's centre it seats from every
+  standing Z between −8 and 9 (13.0 at the clamp down to 9.13). Eleven stand-and-aim variations round
+  the solver's spot: 10.2–13.0.
+- **Yaw is tighter than the script said.** From the spawn itself ±2.9° (the thimble meets the corridor
+  wall before its middle is over the hole), from Z = −2 ±7°, from Z = 0 ±9.6°. A miss stands on the
+  walkway at the hole's edge and gets "Big enough, but it is not over the hole…".
+- **Pick-up distance is a second variable** (section 1 says it is not): from touching distance
+  (`k` ≈ 1.0) the thimble reaches its clamp short of the hole and only plugs from Z ≥ 8; below
+  `k` = 0.26 it never fits, from 0.26 to 0.3 only from the back wall. A grab below 0.3 gets Level 1's
+  sentence at once.
+- **Gadget numbers.** Capture radius 6.85 (text: 6; a clamp-size thimble hung 6.1–6.8 from the axis and
+  was left on the edge), ease 0.45 s, capture from Y −1.5. Hazard top −0.6 (the slab's underside), and
+  it stays armed after the plug. The leash goes by time alone: 1.5 s after the thimble's middle is
+  below −1.5 it is back on the spool (2.0–3.6 s after going in, none stuck in 790 drops); a toppled
+  thimble rolled above `RestSpeed` for 6–10 s. The tunnel and the top of the lamp's bracket are leash
+  zones too.
+- **The paint is the gauge.** The outline's dashes and a band round the hole blink red while the held
+  thimble is too small and turn green when it fits; a dashed line along each corridor wall turns green
+  with them (a thimble held big covers the outline and the lamp). The gauge's lamp sits on a bracket at
+  (0, 15.7, 29).
+- **Lines:** too small (step back), caught on the edge of the floor (hold it higher), picked up from
+  too far off, big enough but not over the hole. **Hint 3** is the procedure the paint supports: green,
+  let go; red, step back; on the floor, walk closer.
+- Not built: the pad's spring (a too-small thimble is put back on the spool with the presenter's ring).
+
 
 ---
 
@@ -828,6 +893,33 @@ yield return bot.WalkTo(new Vector3(6, 0, 0));
   to daylight.
 
 **Confidence.** High. A sphere in a low-friction funnel is the most reliable set-up in the phase.
+
+**As built (2026-10-04; `Level03ShrinkingApple.cs`, 55 tests).**
+- **The cup is a low, wide dish standing free at (1.2, −0.2)** (text: (1.8, −2.2), half a unit from the
+  wall): rim 0.45, mouth 0.7 with no flat lip, throat 0.32 at Y 0.3, button at 0.12. With the text's
+  cup the drop only worked from within 1.25 of the axis; from 1.4 a marble of the right size came to
+  rest on the lip.
+- **The button takes anything that passes the throat** (`MinMass` 0.005): the window is **0.10–0.64**
+  (text: 0.27–0.50) and there is no "too light". A marble lying on the button without pressing it failed
+  for a reason nobody could see. Apple clamps 0.1–12 (text: 0.15).
+- **Spawn (0, 0, −3.6), pitch +8.5°** (text: (0, 0, −2.5), +25°): the apple, the cup with its lit
+  button, its lead and the flap's amber bar are all in the first picture.
+- **The solve.** Stand at (0.82, 0, −1.28), grab from 38.4 away (`k` = 0.297), look into the throat:
+  the hold ends 1.52 from the eye, **s = 0.451**. Button pressed at 1.82 s, flap open at 2.60 s, level
+  complete after **3.77 s**.
+- **Where it works.** Aimed at the button or the throat from 1.05–1.8 away it goes in from all eight
+  bearings (0.39–0.50); aimed at the middle of the cup, up to 1.6 away. Two steps: the marble made at
+  the feet is 0.39 (0.33–0.47) and goes in picked up from as far as 4.2 away.
+- **Leash:** the inside of the box (to Y 6.5) and the flap's recess, 2 s; no sphere round the shelf (a
+  small apple let go at the wall above the shelf lay on it for good). **The exit is locked** until the
+  button is pressed and `HazardZone`s round the box put back whoever rode a growing apple over a wall.
+- **Lines:** too big for the cup; "The flap is the only way out of the box."; and, for a pea let go
+  where the view could not put it (a toy cannot be put down nearer than where it would be at its
+  smallest size, so the click leaves it where it could last lie), "It cannot get small enough to come
+  that close. Walk up to it and pick it up from there." The hints say "pick up", as the other levels do.
+- `GroundY` −0.1: the box stands on the den floor on its own cardboard bottom.
+- The grab's wow beat (the shadow leaving the wall behind the shelf) does not happen: the preset's sun
+  comes from +X.
 
 ---
 
@@ -951,6 +1043,34 @@ its first rock, or the velocity sample missing the impact tick (hence `History` 
 there, it is taken kinematic and rotated about its downhill base edge by the same law
 `θ'' = (3g / 2h)·sin θ`; on reaching the barricade plane the same mass and speed test applies, then
 physics takes it back. The puzzle (size, and room to fall) is unchanged.
+
+**As built (2026-10-04; `Level04DominoEffect.cs`, `Level04Barricade.cs`, 44 test cases).** The fallback
+was not needed: the domino pivots on the board and the impact is sampled.
+- **The solve.** Pick up from (−3, 3, 6.94): `g` = 1.10, `k` = 0.455. Let go from the balcony edge at
+  pitch −7.2°: **s = 4.105**, mass 33.2, standing at Z 18.4. The barricade breaks 1.37 s later at a
+  speed of 8.1 into the face (Appendix B asks for at least 5). Level complete after **14.18 s**.
+- **Window from the edge.** Mass floor between 3.0 and 3.2. Pitch **−12° to −3°** breaks (3.2–5.3;
+  text: −10°), lower is too light or falls short, higher only leans. A domino turned sideways on the
+  board does not stand: it topples and breaks through at any yaw.
+- **Pick-up distance decides everything** (the campaign teaches it in Level 8): taken from 1.3 or
+  nearer (`k` ≥ 0.39) the whole painted footprint works; from 1.45 only its far end; from 2.0 a 2° band;
+  from 2.5 on and from the spawn (`k` = 0.044, at most 0.73) nothing. So: Level 1's sentence on a grab
+  below `k` = 0.38, a domino let go smaller than 0.6 goes back to its pedestal (`PropLeash`), stand
+  marks (a pad with shoe prints) in front of the pedestal and at the balcony edge, and hint 3 begins
+  "Pick the domino up from right beside it."
+- **Every try that fails gets a word** once the domino has come to rest: too light, heavy enough but no
+  room to fall, fell short of the wall, stands firm on the flat floor, lying flat.
+- **The footprint** is painted in the toy's colour, 4.1 × 1.25 with the least size (3.1) dashed inside;
+  nothing else in the level is that colour.
+- **Walls.** The colliders reach the sky cap at 14 as specified; what is drawn are rows of blocks 3.4
+  to 7 high, so the sun reaches the footprint. A held toy aimed over them stops at the unseen wall.
+  (Lower colliders would let a sprint jump from the balcony reach the row beside the board.)
+- **Nothing crushes the player:** while the domino outweighs the player and its fastest point moves
+  faster than 1.5 it passes through them (a domino toppling onto somebody on the board threw them at
+  35–50 units a second).
+- The barricade's body is the level's own (eight courses, a block missing as a peephole to the exit
+  mark, a shudder on a bonk); the `Breakable` options are the text's. After every break at least 1.2 is
+  free beside the fallen domino. A `PropLeash` covers the whole hall.
 
 
 ---
@@ -2702,5 +2822,45 @@ scripted seat.
 - Costs to watch on WebGL: Level 11 draws about 550 instanced beams (refresh a third per frame on the
   low tier); Level 14's second camera is high-tier only; Level 13's water is two flat meshes.
 - Level 15 runs over the 1–4 minute target by design; most of the extra is walking between stations.
+
+---
+
+## Appendix D — As built: phase 1 (Levels 1–4)
+
+Measured in the Unity simulation on 2026-10-04 with each level's own bot solver. Times are game
+seconds from the load to `LevelCompleted`; `Phase1CampaignTests` plays the four in one `Game`, forwards
+and backwards, and gets the same times to the tick. The details are in each level's "As built" note
+and in `tools/out/notes/level0N-build.md`, `level0N-review.md` and `phase-1-campaign.md`.
+
+| Level | Toy: start → solver's drop (text) | Works from → to | Solve | Pick-up `k` (solver; too small below) | Tests |
+|---|---|---|---|---|---|
+| 1 The Cheese Wedge | Wedge 0.4 → **9.46** (9.4) | 5.5 → 14 (clamp) | **12.63 s** | 0.365; 0.23 | 64 |
+| 2 The Thimble Chasm | Thimble 0.8 → **11.62** (11.5) | 9 → 13 (clamp) | **9.28 s** | 0.53; 0.30 | 43 |
+| 3 Shrinking the Apple | Apple 11.4 → **0.451** (0.40) | 0.10 (clamp) → 0.64 | **3.77 s** | 0.297; — | 55 |
+| 4 Domino Effect | Domino 0.5 → **4.105** (4.1) | 3.2 → 5.3 (mass floor 3.0–3.2; placement decides the rest) | **14.18 s** | 0.455; 0.38 | 44 |
+
+What the four agree on (and `Phase1CampaignTests` asserts):
+
+- **One toy to pick up, in view at the start**, in the catalog's colour for that room; three hints, the
+  last ending with when to let go; plain text only (the UI font has no dash but the hyphen).
+- **One verb for one act:** toys are *picked up* and *let go*.
+- **The sentence for a pick-up from too far away** is the same in Levels 1, 2 and 4; Level 3 says its
+  mirror image ("Pick it up from farther off and let go up close.").
+- **Dashed paint is the size language:** the wedge's tall end on the far stack (1), the thimble on the
+  silo wall (2, where it is also the gauge), the domino's footprint on the board (4).
+- **A toy that is too small to use comes back by itself** (1, 2, 4), and nothing is ever out of sight
+  for good (3: the leash; 1: the chest is closed).
+
+Still open after phase 1 (none of it stops a level from being solved):
+
+- A pick-up from too far away remains a second, unstated variable in Levels 1, 2 and 4; it is said out
+  loud and undone for free, not designed out.
+- Level 2: from the spawn itself the throw tolerates only ±2.9° of yaw.
+- Level 4: the scale pill (72% of the screen's height, `ART_BIBLE.md` §9.6) lies over the held
+  domino's foot when it is swung onto the footprint.
+- Engine: a heavy prop that hits the player from the side at speed throws them (the grabber only lets
+  a prop pass once it is 0.15 deep). Level 4 guards its own domino; Levels 5 to 15 with heavy dynamic
+  toys need the same guard or an engine fix.
+- Not checked: a WebGL build of these levels.
 
 END OF LEVELS.md

@@ -328,6 +328,69 @@ namespace Toybox.Tests
             Assert.AreEqual(0f, callout.Opacity);
         }
 
+        // Level 3 makes an 11.4 apple a 0.45 marble: a factor of 0.04, which one decimal wrote as "×0.0".
+        [Test]
+        public void TheDimensionCallout_WritesAVerySmallFactor_WithADigitInIt()
+        {
+            Assert.AreEqual("×12", DimensionCallout.FactorText(12.3f));
+            Assert.AreEqual("×3.2", DimensionCallout.FactorText(3.21f));
+            Assert.AreEqual("×0.5", DimensionCallout.FactorText(0.52f));
+            Assert.AreEqual("×0.1", DimensionCallout.FactorText(0.097f));
+            Assert.AreEqual("×0.04", DimensionCallout.FactorText(0.0395f));
+            Assert.AreEqual("×0.004", DimensionCallout.FactorText(0.0041f));
+        }
+
+        // Level 3 lets the marble go a step and a half from the eye. The 1.7 figure stood there too, half the
+        // picture tall, between the player and the flap that falls open; the factor's letters were as tall.
+        [Test]
+        public void TheDimensionCallout_CloseToTheCamera_DoesWithoutItsFigure_AndWritesSmall()
+        {
+            Assert.AreEqual(0f, DimensionCallout.FigureAt(1.5f / DimensionCallout.FigureHeight), "a step and a half away: no figure");
+            Assert.AreEqual(0f, DimensionCallout.FigureAt(DimensionCallout.FigureGone));
+            Assert.AreEqual(1f, DimensionCallout.FigureAt(DimensionCallout.FigureNear), "in full from here on");
+            Assert.AreEqual(1f, DimensionCallout.FigureAt(9f / DimensionCallout.FigureHeight), "Level 4's domino, nine away");
+            Assert.That(DimensionCallout.FigureAt((DimensionCallout.FigureGone + DimensionCallout.FigureNear) * 0.5f), Is.InRange(0.4f, 0.6f), "it fades in between");
+
+            Assert.AreEqual(DimensionCallout.LabelRest, DimensionCallout.LabelSizeFor(0.45f, 20f), 1e-4f, "far away the letters keep their least size");
+            Assert.AreEqual(8f * 1.4f, DimensionCallout.LabelSizeFor(8f, 20f), 1e-4f, "and grow with the toy");
+            Assert.AreEqual(DimensionCallout.LabelMax, DimensionCallout.LabelSizeFor(40f, 60f), 1e-4f);
+            Assert.AreEqual(1.5f * DimensionCallout.LabelPerDistance, DimensionCallout.LabelSizeFor(0.45f, 1.5f), 1e-4f, "close by they are sized for the distance");
+            Assert.AreEqual(DimensionCallout.LabelMin, DimensionCallout.LabelSizeFor(0.1f, 0.3f), 1e-4f);
+            Assert.AreEqual(2f * 1.4f, DimensionCallout.LabelSizeFor(2f, 1.5f), 1e-4f, "a big toy close by keeps the size its height asks for");
+
+            // The same in a level: a block taken from far off and let go at the feet.
+            Prop block = null;
+            Load("sunny-rug", ctx =>
+            {
+                Ground(ctx);
+                block = ctx.AddProp(BasicToys.Block(4f, Palette.Cherry), new Vector3(0f, 2f, 24f));
+            });
+            Present(QualityTier.Medium, typeof(DimensionCallout));
+            DimensionCallout callout = Presentation.Get<DimensionCallout>();
+            if (!Presentation.Context.HasGraphics) Assert.Ignore("no graphics device: nothing is drawn");
+
+            TestHelpers.LookAt(Game.Player, block.Center);
+            Input.Once.GrabPressed = true;
+            Frames(5);
+            Assert.IsTrue(block.Held);
+            TestHelpers.LookAt(Game.Player, new Vector3(0f, 0f, 1.2f));
+            Frames(5);
+            Input.Once.GrabPressed = true;
+            Frames(3);
+            Assert.Less(block.Scale, 1f, "a small block at the feet");
+            Assert.AreSame(block, callout.Shown);
+            Frames(TestHelpers.Ticks(0.2f));
+            Assert.AreEqual(1f, callout.Opacity, 1e-3f, "the line and the factor are there");
+            Assert.AreEqual(0f, callout.FigureShown, "the figure is not: it would stand " +
+                            Vector3.Distance(Presentation.Context.Camera.transform.position, callout.Root.position).ToString("0.0") + " from the eye");
+            if (callout.Text != null)
+            {
+                float away = Vector3.Distance(Presentation.Context.Camera.transform.position, block.Center);
+                Assert.LessOrEqual(callout.LabelSize, Mathf.Max(DimensionCallout.LabelMin, away * DimensionCallout.LabelPerDistance) + 1e-3f,
+                    "the factor is written for a reader " + away.ToString("0.0") + " away");
+            }
+        }
+
         [Test]
         public void AHeavyToyComingDown_ShakesThePicture_ALightOneDoesNot()
         {

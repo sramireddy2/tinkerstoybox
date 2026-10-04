@@ -41,7 +41,7 @@ namespace Toybox.EditorTools
         static GameRunner runner;
         static Game game;
         static double startedAt;
-        static int frames, startTicks, loads, completions, shotsTaken;
+        static int frames, startTicks, loads, completions, shotsTaken, loadsToSee;
         static float longestFrame;
         static bool wrapped;
         static RenderTexture target;
@@ -175,6 +175,11 @@ namespace Toybox.EditorTools
             shotsTaken = 0;
             longestFrame = 0f;
             wrapped = false;
+            // Turning autoplay on reloads the level, and the runner loads the next one after the completion:
+            // two loads. With "autoplay=1" in the address the bot has been playing since the start and
+            // SetAutoplay changes nothing, so the only load to come is the next level's. (Waiting for two
+            // then made the check play the level after as well and report the one after that.)
+            loadsToSee = runner.Autoplay ? 1 : 2;
             runner.SetAutoplay(true);
             startedAt = EditorApplication.timeSinceStartup;
             startTicks = game.TickCount;
@@ -203,8 +208,8 @@ namespace Toybox.EditorTools
                 shotsTaken++;
             }
 
-            // SetAutoplay reloaded the level once; the second load after a completion is the runner moving on.
-            if (!wrapped && completions >= 1 && loads >= 2)
+            // The load after a completion is the runner moving on (see Attach for how many loads that makes).
+            if (!wrapped && completions >= 1 && loads >= loadsToSee)
             {
                 wrapped = true;
                 Report.Add("autoplay completed the level after " + elapsed.ToString("0.0", CultureInfo.InvariantCulture) +

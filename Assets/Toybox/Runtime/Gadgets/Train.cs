@@ -84,6 +84,8 @@ namespace Toybox.Gadgets
         public float Radius => options.Radius;
         public Vector2 Center => options.Center;
         public float DeckY => options.DeckY;
+        /// <summary>The bearing at which TrainAtStation is raised: where the station is on the track.</summary>
+        public float StationBearing => options.StationBearing;
         /// <summary>Seconds a lap takes.</summary>
         public float LapSeconds => 360f / Mathf.Abs(options.AngularSpeed);
         /// <summary>Speed of the decks along the track.</summary>

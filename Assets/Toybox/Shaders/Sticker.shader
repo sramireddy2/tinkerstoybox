@@ -98,7 +98,9 @@ Shader "Toybox/Sticker"
             ZTest Always
             ZWrite Off
             Cull Off
-            Blend DstColor Zero
+            // Multiply what is there by _PeelColor. Written as Zero SrcColor on purpose: the equivalent
+            // DstColor Zero came out brighter instead of darker on Direct3D 12 with MSAA (Intel Arc).
+            Blend Zero SrcColor
             Stencil
             {
                 Ref 0

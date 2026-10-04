@@ -44,6 +44,9 @@ namespace Toybox.Gadgets
             }
         }
 
+        /// <summary>The gauge's lamp (for presentation: tints and read-outs hang on it), or null without one.</summary>
+        public SignalLamp Lamp => lamp;
+
         public FitState State { get; private set; } = FitState.Idle;
         /// <summary>The scale of the toy being judged (0 while idle).</summary>
         public float Scale { get; private set; }

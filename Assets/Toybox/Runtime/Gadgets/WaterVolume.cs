@@ -59,6 +59,8 @@ namespace Toybox.Gadgets
         }
 
         public Zone Footprint => options.Footprint;
+        /// <summary>The surface this volume draws (for presentation), or null when it draws none (Visual off).</summary>
+        public Transform Surface => surface;
         public float FloorY => options.FloorY;
         public float Area => options.Area;
         public float Volume => (float)volume;
