@@ -541,6 +541,65 @@ namespace Toybox.Tests
         }
 
         // ==========================================================================================
+        // A step that rides the same platform as the player (a plank on the next wagon of a train)
+        // travels along with them. The speed into its edge is what the two have relative to each other,
+        // not the platform's speed through the world. (Found in Level 9: with the edge judged in the
+        // world, a hop at a plank on the wagon ahead cost the player the train's whole 6 u/s; they
+        // came down three units back, or off the end of the train.)
+        // ==========================================================================================
+
+        // Up against a half-unit step on a platform that moves at `platformSpeed` along +X, the player jumps
+        // with the forward key down. Returns how far along the platform they are when they have landed, and
+        // whether that is on the step (it reaches from 1.5 to 4.5, its top at 10.5).
+        float HopAtARidingStep(float platformSpeed, out bool onTheStep)
+        {
+            Mover platform = null, step = null;
+            float x = 0f;
+            Rebuild(ctx =>
+            {
+                platform = ctx.AddKinematic(BasicToys.Slab(new Vector3(14f, 0.5f, 6f)), new Vector3(0f, 9.75f, 0f));
+                step = ctx.AddKinematic(BasicToys.Slab(new Vector3(3f, 0.5f, 6f)), new Vector3(3f, 10.25f, 0f));
+                ctx.OnUpdate(dt =>
+                {
+                    x += platformSpeed * dt;
+                    platform.MoveTo(new Vector3(x, 9.75f, 0f));
+                    step.MoveTo(new Vector3(x + 3f, 10.25f, 0f));
+                });
+                ctx.SetSpawn(new Vector3(-1f, 10.02f, 0f), 90f);
+            });
+            Run(30);
+            Assert.IsTrue(Game.Player.Grounded, "test setup: the player should be standing on the platform");
+            Input.Hold.MoveZ = 1f;
+            Run(40);
+            float blockedAt = Game.Player.Position.x - x;
+            Assert.IsTrue(blockedAt > 1f && blockedAt < 1.3f, "test setup: the player should be up against the step, 1.2 along the platform (is at " + F(blockedAt) + ")");
+            Input.Once.Jump = true;
+            Run(3);
+            // Until they are down again; on the step the key is let go.
+            for (int i = 0; i < TestHelpers.Ticks(1.5f) && !Game.Player.Grounded; i++) Game.Tick();
+            Input.Hold.MoveZ = 0f;
+            Run(10);
+            onTheStep = Game.Player.Grounded && Game.Player.GroundCollider != null && Game.Player.GroundCollider.attachedRigidbody == step.Body;
+            return Game.Player.Position.x - x;
+        }
+
+        [Test]
+        public void HoppingAtAStepThatRidesTheSamePlatformDoesNotCostThePlatformsSpeed()
+        {
+            float still = HopAtARidingStep(0f, out bool stillOn);
+            float toward = HopAtARidingStep(-6f, out bool towardOn);
+            float away = HopAtARidingStep(6f, out bool awayOn);
+            string measured = "\n  platform at rest:        ends " + F(still) + " along it, on the step: " + stillOn
+                              + "\n  platform at -6 (step behind in the direction of travel): " + F(toward) + ", on the step: " + towardOn
+                              + "\n  platform at +6 (step ahead in the direction of travel):  " + F(away) + ", on the step: " + awayOn;
+            Assert.IsTrue(stillOn && towardOn, "A standing hop onto a half-unit step failed:" + measured);
+            // With the step ahead the player already travels faster than they walk, and air steering adds
+            // nothing to that: they come down where they took off (a running jump is what gets them up).
+            // What must not happen is that the step's edge takes the platform's speed away from them.
+            Assert.IsTrue(away > 0.9f, "A hop at a step that rides ahead on the same platform left the player behind:" + measured);
+        }
+
+        // ==========================================================================================
         // Vertical Movers: an elevator that starts, stops or reverses keeps its rider (up to
         // Player.MoverGripSpeed of sudden change); a piston that stops after rising fast throws them.
         // ==========================================================================================

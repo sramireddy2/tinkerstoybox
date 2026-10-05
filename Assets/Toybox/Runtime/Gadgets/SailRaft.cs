@@ -48,6 +48,17 @@ namespace Toybox.Gadgets
         public float RiseSeconds = 1f, DescendSeconds = 0.8f;
         /// <summary>Seconds without a rider before a gliding sail is let go (it falls and is respawned by the kill plane).</summary>
         public float AbandonSeconds = 1f;
+        /// <summary>
+        /// How far a moored sail is pressed into the deck it lies on, per unit of its scale; it is levelled
+        /// while that happens. 0 (the default) pins it exactly as it came to rest. A feather comes to rest
+        /// balanced on its quill with its outline 0.013 s up in the air - at the sizes that fly, a lip no
+        /// player walks over (0.16 high at scale 9.2, and pinned it cannot tip under a foot as a loose one
+        /// does). Pressed down by that much its outline lies on the deck and it is walked onto from any side.
+        /// When it lands at the end of a glide it stands on its underside again.
+        /// </summary>
+        public float Settle;
+        /// <summary>Seconds the pressing down takes.</summary>
+        public float SettleSeconds = 0.2f;
     }
 
     /// <summary>
@@ -74,6 +85,11 @@ namespace Toybox.Gadgets
         int still, aboard, riderless, tick;
         bool stalled;
 
+        // Pressing a sail flat when it is moored (Settle).
+        int settleTick, settleTicks;
+        Vector3 settleFromPosition, settleToPosition;
+        Quaternion settleFromRotation, settleToRotation;
+
         // The pose it was moored at, and the glide computed from it.
         Vector3 startPosition;
         Quaternion startRotation, endRotation;
@@ -98,6 +114,26 @@ namespace Toybox.Gadgets
         public Prop Prop => prop;
         /// <summary>True while the player stands on the sail.</summary>
         public bool RiderAboard => !prop.Removed && Game.Player.Grounded && Game.Player.GroundProp == prop;
+
+        /// <summary>
+        /// True while the player is in the air over the sail: a hop does not leave it. (A jump pressed just
+        /// before landing goes off on the tick the feet touch down, so a rider who hops twice in a row is not
+        /// seen standing for longer than the sail waits for a rider - and it was let go under them.)
+        /// </summary>
+        public bool RiderOverhead
+        {
+            get
+            {
+                Player player = Game.Player;
+                if (prop.Removed || player.Grounded) return false;
+                // The feet in the sail's own frame (its transform carries its scale): over its outline's box,
+                // give or take the foot's radius, and not under it.
+                Vector3 local = prop.Transform.InverseTransformPoint(player.Position) - prop.LocalCenter;
+                Vector3 half = prop.LocalHalfExtents;
+                float margin = player.Radius / Mathf.Max(prop.Scale, 1e-3f);
+                return Mathf.Abs(local.x) <= half.x + margin && Mathf.Abs(local.z) <= half.z + margin && local.y >= -half.y;
+            }
+        }
 
         /// <summary>Inside the tick.</summary>
         public event Action SailMoored;
@@ -158,8 +194,35 @@ namespace Toybox.Gadgets
             State = SailState.Moored;
             aboard = 0;
             stalled = false;
+            BeginSettle();
             SailMoored?.Invoke();
             Game.Events.RaiseSailMoored(Event(prop.Center, prop, prop.Scale));
+        }
+
+        // Where the gale presses the moored sail: level (its heading kept), and Settle x scale deeper than
+        // its underside lay. It is kinematic now, so it simply goes there; what it lies on is not asked.
+        void BeginSettle()
+        {
+            settleTick = 0;
+            settleTicks = options.Settle > 0f ? Ticks(options.SettleSeconds, 1) : 0;
+            if (settleTicks == 0) return;
+            settleFromPosition = prop.Position;
+            settleFromRotation = prop.Rotation;
+            Vector3 up = settleFromRotation * Vector3.up;
+            settleToRotation = Quaternion.FromToRotation(up, up.y >= 0f ? Vector3.up : Vector3.down) * settleFromRotation;
+            GadgetKit.VerticalExtent(prop, out float underside, out _);
+            // Level, its underside is its own half thickness under its middle.
+            Vector3 centre = prop.Center;
+            centre.y = underside - options.Settle * prop.Scale + prop.LocalHalfExtents.y * prop.Scale;
+            settleToPosition = centre - settleToRotation * (prop.LocalCenter * prop.Scale);
+        }
+
+        void TickSettle()
+        {
+            if (settleTick >= settleTicks) return;
+            settleTick++;
+            float t = GadgetKit.Smooth((float)settleTick / settleTicks);
+            mover.MoveTo(Vector3.Lerp(settleFromPosition, settleToPosition, t), Quaternion.Slerp(settleFromRotation, settleToRotation, t));
         }
 
         bool StillOurs()
@@ -175,6 +238,7 @@ namespace Toybox.Gadgets
         void TickMoored()
         {
             if (!StillOurs()) return;
+            TickSettle();
             bool rider = RiderAboard;
             if (!rider)
             {
@@ -277,10 +341,11 @@ namespace Toybox.Gadgets
                 return;
             }
 
-            riderless = RiderAboard ? 0 : riderless + 1;
+            riderless = RiderAboard || RiderOverhead ? 0 : riderless + 1;
             if (riderless >= abandonTicks)
             {
-                // Nobody aboard: it is let go and sinks. Over the canyon the kill plane brings it back.
+                // Nobody aboard, nobody in the air over it: it is let go and sinks. Over the canyon the kill
+                // plane brings it back.
                 prop.Grabbable = wasGrabbable;
                 prop.EndDrive(mover.Velocity);
                 State = SailState.Loose;
@@ -316,6 +381,7 @@ namespace Toybox.Gadgets
             }
             State = SailState.Loose;
             still = aboard = riderless = tick = 0;
+            settleTick = settleTicks = 0;
             stalled = false;
         }
     }

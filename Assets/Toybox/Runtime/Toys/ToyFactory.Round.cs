@@ -18,38 +18,93 @@ namespace Toybox.Toys
         public const float ThimbleRimRadius = 0.5f, ThimbleTopRadius = 0.49f, ThimbleHeight = 0.8f;
 
         /// <summary>
-        /// A thimble standing on its rim, closed flat top up: rim radius 0.5, top radius 0.49, height 0.8.
-        /// One convex collider (a 16-sided frustum) - it is a plug and a platform, so it is solid; the
+        /// Where the thimble's candy band ends, measured from its rim: the rolled rim and a collar above it.
+        /// A fifth of the height - the toy is silver first, and the band is what says "yours to lift".
+        /// </summary>
+        public const float ThimbleBandHeight = 0.16f;
+
+        /// <summary>
+        /// Bare silver (the owner's brief for Level 2: "a tiny silver thimble"): the one metal among the
+        /// toys that is not anodised candy. Brushed metal's numbers, changed where the pictures of Level 2
+        /// asked for it. A quarter of it is plain grey: a mirror takes all its colour from the room, and in
+        /// the Pool room that is baby blue. No lacquer, less of the room in it and a faint rim: all three
+        /// whiten the silhouette, and a white silhouette melts into the die-cut border of a held toy. The
+        /// window's glint is narrower - a streak down the wall, not a patch across it - and the brushing is
+        /// turned up until it shows. Use with <see cref="Palette.Silver"/>.
+        /// </summary>
+        public static readonly ToyRecipe Silver = ToyRecipe.BrushedMetal.With(r =>
+        {
+            r.Name = "Silver";
+            r.Metallic = 0.75f;
+            r.Smoothness = 0.72f;
+            r.Env = 0.85f;
+            r.Coat = 0f;
+            r.Glint = 0.45f;
+            r.GlintStretch = 1.5f;
+            r.Rim = 0.1f;
+            r.Streak = 0.3f;
+            r.DetailAlbedo = 1f;
+            r.DetailSmooth = 1f;
+        });
+
+        /// <summary>
+        /// A silver thimble standing on its rim, closed flat top up: rim radius 0.5, top radius 0.49, height
+        /// 0.8. One convex collider (a 16-sided frustum) - it is a plug and a platform, so it is solid; the
         /// hollow underneath is a look.
+        ///
+        /// The body is <see cref="Silver"/> whatever the colour asked for; the colour (Tangerine unless the
+        /// room bans it) is the anodised band round the rim, the toy's pool and its tag. Seated in the well
+        /// of Level 2 the band is below the floor, and what is walked on is plain metal.
         /// </summary>
         public static GameObject Thimble(Color? color = null)
         {
             ToyLook look = ToyLook.Of(ToyRecipe.BrushedMetal, Palette.Tangerine, color);
+            ToyLook metal = ToyLook.Of(Silver, Palette.Silver);
             var kit = new ToyKit("Thimble", "Thimble");
-            float half = ThimbleHeight * 0.5f;
+            float half = ThimbleHeight * 0.5f, band = -half + ThimbleBandHeight;
             kit.Hull("Hull", () => ToyHull.Frustum(ThimbleRimRadius, ThimbleTopRadius, -half, half, 16));
-            kit.Visual("Visual", look.Main, () =>
+            kit.Visual("Visual", metal.Main, () =>
             {
-                // From the middle of the cavity's ceiling, down the inside, round the rolled rim, up the
-                // knurled wall and across the top.
-                var inside = new List<Vector2>
+                // From the middle of the cavity's ceiling, down the inside, out under the band (which hides
+                // that lip), up the knurled wall and round the shoulder to the edge of the top.
+                var profile = new List<Vector2>
                 {
-                    new Vector2(0f, 0.32f), new Vector2(0.41f, 0.32f), new Vector2(0.445f, 0.285f), new Vector2(0.458f, -0.34f),
-                    new Vector2(0.47f, -0.4f), new Vector2(0.492f, -0.4f), new Vector2(0.5f, -0.385f), new Vector2(0.5f, -0.33f),
-                    new Vector2(0.484f, -0.3f),
+                    new Vector2(0f, 0.32f), new Vector2(0.445f, 0.32f), new Vector2(0.458f, -0.34f), new Vector2(0.462f, -0.39f),
+                    new Vector2(ThimbleWall(-0.39f), -0.39f),
                 };
-                var profile = new List<Vector2>(ToyGeo.Fillet(inside, 0.012f, 2));
-                profile.Add(new Vector2(ThimbleWall(-0.25f), -0.25f));
-                var top = new List<Vector2> { new Vector2(ThimbleWall(0.33f), 0.33f), new Vector2(0.458f, 0.384f), new Vector2(0.425f, 0.4f), new Vector2(0f, 0.4f) };
-                profile.AddRange(ToyGeo.Fillet(top, 0.012f, 2));
-                return new[] { ToyKit.At(MeshKit.Lathe(profile, 24), Vector3.zero) };
+                for (int i = 0; i < ThimbleWallRows; i++)
+                {
+                    float y = Mathf.Lerp(band, ThimbleShoulder, (float)i / ThimbleWallRows);
+                    profile.Add(new Vector2(ThimbleWall(y), y));
+                }
+                var shoulder = new List<Vector2>
+                {
+                    new Vector2(ThimbleWall(ThimbleShoulder), ThimbleShoulder), new Vector2(0.458f, 0.384f), new Vector2(0.425f, half), new Vector2(ThimbleTurned, half),
+                };
+                profile.AddRange(ToyGeo.Fillet(shoulder, 0.012f, 2));
+                Mesh shell = MeshKit.Lathe(profile, ThimbleSides);
+                LeanThimbleWall(shell, band);
+                return new[] { ToyKit.At(shell, Vector3.zero), ToyKit.At(ThimbleTop(), Vector3.zero) };
             });
-            // The dimples that hold the needle: rows round the upper wall and rings on the top.
-            kit.Visual("Detail", look.Shade(0.5f), () =>
+            // The candy: the rolled rim and a collar above it, a sleeve over the foot of the wall.
+            kit.Visual("Band", look.Main, () =>
+            {
+                // From inside the mouth, under the rim, up the outside and in again through the wall, where
+                // it ends out of sight.
+                var sleeve = new List<Vector2>
+                {
+                    new Vector2(0.455f, -0.35f), new Vector2(0.466f, -half), new Vector2(0.488f, -half), new Vector2(0.497f, -0.393f),
+                    new Vector2(0.5f, -0.38f), new Vector2(0.5f, -0.34f), new Vector2(0.497f, -0.325f), new Vector2(0.4895f, -0.312f),
+                    new Vector2(0.4895f, band - 0.014f), new Vector2(ThimbleWall(band) - 0.004f, band),
+                };
+                return new[] { ToyKit.At(MeshKit.Lathe(sleeve, ThimbleSides), Vector3.zero) };
+            });
+            // The dimples that hold the needle: rows round the wall above the band and rings on the top.
+            kit.Visual("Detail", metal.Shade(0.35f), () =>
             {
                 var parts = new List<MeshPart>();
                 const int perRow = 14;
-                for (int row = 0; row < 3; row++)
+                for (int row = 0; row < 4; row++)
                 {
                     float y = 0.25f - row * 0.115f;
                     for (int i = 0; i < perRow; i++)
@@ -71,8 +126,75 @@ namespace Toybox.Toys
             return kit.Finish(look);
         }
 
+        const int ThimbleSides = 24, ThimbleWallRows = 4, ThimbleRings = 8;
+        // Where the wall ends and the shoulder begins, and the radius the turned top starts at.
+        const float ThimbleShoulder = 0.33f, ThimbleTurned = 0.4f;
+        // How far the normals lean off the faces they stand on, in degrees: the wall's at the band and at
+        // the shoulder, and those of the rings of the top (toward the axis and away from it by turns).
+        const float ThimbleLeanFoot = 6f, ThimbleLeanShoulder = 12f, ThimbleLeanRing = 9f;
+
         // Radius of the thimble's wall at a height: just inside the collider.
         static float ThimbleWall(float y) => Mathf.Lerp(0.483f, 0.477f, (y + ThimbleHeight * 0.5f) / ThimbleHeight);
+
+        // The collider is all but a cylinder with a flat lid (it is a plug and a floor: 0.5 at the rim, 0.49
+        // at the top), and a mirror of that shape shows one band of the room from top to bottom and another
+        // all over its lid - flat, whatever it is made of. A thimble is domed and its top is turned on a
+        // lathe. The shape has to stay the collider's, so both are in the normals alone.
+        //
+        // The wall leans in toward the top, as the dome would: it catches the ceiling at the shoulder and
+        // the floor at its foot.
+        static void LeanThimbleWall(Mesh shell, float band)
+        {
+            var positions = new List<Vector3>();
+            var normals = new List<Vector3>();
+            shell.GetVertices(positions);
+            shell.GetNormals(normals);
+            for (int i = 0; i < positions.Count; i++)
+            {
+                Vector3 p = positions[i];
+                var radial = new Vector3(p.x, 0f, p.z);
+                float radius = radial.magnitude;
+                if (radius < 0.47f || p.y > ThimbleShoulder + 1e-4f) continue;
+                radial /= radius;
+                // The wall's own vertices: not the lip under the band, not the shoulder.
+                if (Vector3.Dot(normals[i], radial) < 0.9f) continue;
+                float t = Mathf.InverseLerp(band, ThimbleShoulder, p.y);
+                float lean = Mathf.Lerp(ThimbleLeanFoot, ThimbleLeanShoulder, t * Mathf.Sqrt(t)) * Mathf.Deg2Rad;
+                normals[i] = radial * Mathf.Cos(lean) + Vector3.up * Mathf.Sin(lean);
+            }
+            shell.SetNormals(normals);
+        }
+
+        // The top is ring after ring, each with a normal of its own: toward the axis, away from it, toward
+        // it again - the cut of a lathe's tool. Seen along the floor one ring mirrors the ceiling and its
+        // neighbour the floor, and they trade places as the player walks, which is what says "metal" on a
+        // disc eleven units wide. It is flat all the same: the dimples stand on it as they do on the wall.
+        static Mesh ThimbleTop()
+        {
+            var b = new GeoBuilder();
+            float top = ThimbleHeight * 0.5f, lean = ThimbleLeanRing * Mathf.Deg2Rad;
+            for (int ring = 0; ring < ThimbleRings; ring++)
+            {
+                float outer = ThimbleTurned * (ThimbleRings - ring) / ThimbleRings, inner = ThimbleTurned * (ThimbleRings - ring - 1) / ThimbleRings;
+                float toward = ring % 2 == 0 ? -1f : 1f;
+                int first = b.Count;
+                for (int s = 0; s <= ThimbleSides; s++)
+                {
+                    float angle = Mathf.PI * 2f * s / ThimbleSides;
+                    var radial = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+                    Vector3 normal = radial * (toward * Mathf.Sin(lean)) + Vector3.up * Mathf.Cos(lean);
+                    // U round the axis and V along the radius, as the lathe has them: the brushing runs in rings.
+                    b.Add(radial * outer + Vector3.up * top, normal, new Vector2(angle * ThimbleRimRadius, ThimbleTurned - outer));
+                    b.Add(radial * inner + Vector3.up * top, normal, new Vector2(angle * ThimbleRimRadius, ThimbleTurned - inner));
+                }
+                for (int s = 0; s < ThimbleSides; s++)
+                {
+                    int a = first + s * 2;
+                    b.Quad(a, a + 1, a + 3, a + 2);
+                }
+            }
+            return b.Build("Thimble Top");
+        }
 
         // ---------------------------------------------------------------------------------------------------
         // The spheres

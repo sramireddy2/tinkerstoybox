@@ -35,12 +35,55 @@ namespace Toybox.Engine
         // A prop heavier than the player that has sunk this far into the capsule (per unit of player scale)
         // is squeezing them against something. It passes through instead (see LetHeavyPropsPass).
         const float CrushDepth = 0.15f;
+        /// <summary>
+        /// A prop heavier than the player whose surface comes at them faster than this (units per second, per
+        /// unit of player scale) passes through them instead of hitting them (see LetComingPropsPass).
+        /// Measured (tools/out/notes/prelude-engine-fling.md): a hit from the side hands the player the
+        /// prop's speed, and an edge that comes down on the capsule's round top squirts them out at up to
+        /// four times it (1.0 gives 3.8, 1.7 gives 7.0, 5.5 gives 20), so this has to stay well below 2.
+        /// </summary>
+        public const float PassSpeed = 1f;
+        /// <summary>
+        /// Slower than <see cref="PassSpeed"/> a heavy prop is solid and shoves the player along. One that
+        /// goes on shoving faster than this for <see cref="PushSeconds"/> passes through as well: a boulder
+        /// rolling at walking pace would otherwise bulldoze them for as long as it rolls.
+        /// </summary>
+        public const float PushSpeed = 0.3f;
+        public const float PushSeconds = 0.25f;
+        /// <summary>
+        /// What a heavy prop under the player's feet may hand them (units per second, per unit of player
+        /// scale): it carries them, lifts them or launches them at up to this speed - less than their own
+        /// jump (7.6). Faster than this it is no ground: it passes through them like any other prop, so
+        /// nothing a prop does ever moves the player at 9 or more. Measured before this limit
+        /// (tools/out/notes/prelude-verify.md): standing on a block that another one slides into, the
+        /// player was carried off at up to 25 (21 units away); on the low end of a plank whose high end a
+        /// block came down on, they were flung upward at up to 37.
+        /// </summary>
+        public const float CarrySpeed = 6f;
+        // How far ahead a hit is seen coming, and the slack on top of it (per unit of player scale). Early
+        // costs nothing - a prop that passes and never arrives has done nothing - and late is a hit.
+        const float LookAhead = 0.05f;
+        const float ReachMargin = 0.1f;
+        // Closer than this (per unit of player scale) a prop is touching the capsule.
+        const float TouchGap = 0.03f;
         /// <summary>Ticks a GrabPose takes to stand a tumbled prop up: 0.15 s.</summary>
         public const int PoseTicks = 9;
+
+        static readonly float WalkableNormalY = Mathf.Cos(Player.MaxSlopeDegrees * Mathf.Deg2Rad);
+        static readonly int PushTicks = Mathf.CeilToInt(PushSeconds / Sim.Dt - 1e-3f);
+
+        struct Pusher
+        {
+            public Prop Prop;
+            public int Ticks;
+            public bool Seen;
+        }
 
         readonly Game game;
         readonly Collider[] candidates = new Collider[256];
         readonly List<Prop> passingThroughPlayer = new List<Prop>();
+        // Heavy props that are shoving the player right now, and for how many ticks they have been.
+        readonly List<Pusher> pushers = new List<Pusher>();
 
         float ratio;
         float grabScale, grabDistance;
@@ -281,6 +324,18 @@ namespace Toybox.Engine
             }
         }
 
+        /// <summary>
+        /// Right before the physics step, when the player, the level and the gadgets have all had their say
+        /// about this tick's velocities: the props that would hit the player in it pass through instead.
+        /// </summary>
+        internal void BeforePhysics() => LetComingPropsPass();
+
+        /// <summary>
+        /// Right after the physics step, before the player's controller reads what it did: a throw that could
+        /// not be seen coming is taken back (see <see cref="TakeBackThrows"/>).
+        /// </summary>
+        internal void AfterPhysics() => TakeBackThrows();
+
         /// <summary>After the physics step: the player has moved, so this is where the held prop is placed.</summary>
         internal void PostPhysics()
         {
@@ -294,6 +349,8 @@ namespace Toybox.Engine
                     continue;
                 }
                 if (prop.Held || OverlapsPlayer(prop)) continue;
+                // Out of the player, but still on its way at them: not yet.
+                if (CanThrow(prop) && ComesAtPlayer(prop, out _)) continue;
                 SetPlayerCollision(prop, true);
                 passingThroughPlayer.RemoveAt(i);
             }
@@ -331,6 +388,7 @@ namespace Toybox.Engine
             Held = null;
             presented = false;
             passingThroughPlayer.Clear();
+            pushers.Clear();
             focus = null;
             focusStamp = -1;
             poseTick = PoseTicks;
@@ -503,10 +561,297 @@ namespace Toybox.Engine
         }
 
         /// <summary>
-        /// A prop much heavier than the player that comes down on them (let go overhead, it grows and falls)
-        /// squeezes the capsule against the floor; the solver then squirts the player out sideways at many
-        /// times their running speed. Nothing can crush the player in this game, so such a prop passes
-        /// through them instead, exactly like one that is released around them, until they have separated.
+        /// Nothing throws the player. A dynamic prop that outweighs them hands them its own speed when it
+        /// hits them, and squirts them out at several times that when it catches them against the floor (a
+        /// domino the size of a house toppling onto them: 35 to 75 units a second). So a heavy prop whose
+        /// surface comes at the player faster than <see cref="PassSpeed"/> stops colliding with them before
+        /// it arrives, exactly like a prop that is let go around them: it passes through, and is solid for
+        /// them again when it is no longer coming at them and they are out of it. A slower one is solid and
+        /// shoves them, for <see cref="PushSeconds"/> at most; then it passes too.
+        ///
+        /// What counts is the prop's own movement, so walking into a heavy prop, or being carried into one,
+        /// never makes it give way; nor does what the player stands on, whatever it does (it carries them,
+        /// and a prop that comes up from below lifts or launches them, as a seesaw does). Kinematic props -
+        /// held, fixed, frozen, driven by a gadget - are not this rule's business.
+        /// </summary>
+        void LetComingPropsPass()
+        {
+            for (int i = 0; i < pushers.Count; i++)
+            {
+                Pusher pusher = pushers[i];
+                pusher.Seen = false;
+                pushers[i] = pusher;
+            }
+
+            IReadOnlyList<Prop> props = game.Props;
+            for (int i = 0; i < props.Count; i++)
+            {
+                Prop prop = props[i];
+                if (!CanThrow(prop)) continue;
+                if (!ComesAtPlayer(prop, out bool fast)) continue;
+                if (fast || passingThroughPlayer.Contains(prop) || Pushed(prop) >= PushTicks) LetPass(prop);
+            }
+
+            for (int i = pushers.Count - 1; i >= 0; i--)
+                if (!pushers[i].Seen) pushers.RemoveAt(i);
+        }
+
+        // Counts one more tick of this prop shoving the player, and says how many that makes in a row.
+        int Pushed(Prop prop)
+        {
+            for (int i = 0; i < pushers.Count; i++)
+            {
+                Pusher pusher = pushers[i];
+                if (pusher.Prop != prop) continue;
+                pusher.Ticks++;
+                pusher.Seen = true;
+                pushers[i] = pusher;
+                return pusher.Ticks;
+            }
+            pushers.Add(new Pusher { Prop = prop, Ticks = 1, Seen = true });
+            return 1;
+        }
+
+        void LetPass(Prop prop)
+        {
+            for (int i = pushers.Count - 1; i >= 0; i--)
+                if (pushers[i].Prop == prop) pushers.RemoveAt(i);
+            // Said again even if it is on the list: a gadget may have made the prop solid in between.
+            SetPlayerCollision(prop, false);
+            if (!passingThroughPlayer.Contains(prop)) passingThroughPlayer.Add(prop);
+        }
+
+        // Is this a prop that could throw the player: simulated, and heavier than they are?
+        bool CanThrow(Prop prop) =>
+            !prop.Removed && !prop.Held && !prop.Body.isKinematic && prop.Mass > Player.Mass;
+
+        /// <summary>
+        /// Is a heavy prop about to hit the player (`fast`), or shoving them? Judged where the prop is
+        /// nearest to the capsule, and where it is nearest to the capsule's foot and to its head - the part
+        /// of a toppling slab that is nearest now is not always the part that arrives first.
+        /// </summary>
+        bool ComesAtPlayer(Prop prop, out bool fast)
+        {
+            fast = false;
+            Player player = game.Player;
+            float scale = player.Scale;
+            Rigidbody body = prop.Body;
+            // No point of the prop moves faster than this. (Nearly every prop is at rest and ends here.)
+            float fastest = body.linearVelocity.magnitude + body.angularVelocity.magnitude * prop.Radius * 2f;
+            if (fastest <= PushSpeed * scale) return false;
+            // What the player stands on carries them; it is never in their way - unless it goes faster than
+            // anything may carry them. Then it is no ground: it goes on without them.
+            if (player.GroundProp == prop)
+            {
+                fast = body.GetPointVelocity(player.Position).magnitude > CarrySpeed * scale;
+                return fast;
+            }
+
+            float radius = player.Radius;
+            Vector3 low = player.Position + Vector3.up * radius;
+            Vector3 high = player.Position + Vector3.up * (player.Height - radius);
+            Vector3 middle = (low + high) * 0.5f;
+            Vector3 playerVelocity = player.Velocity;
+            float margin = ReachMargin * scale;
+            // Too far away to get here in time, however it moves.
+            float apart = Vector3.Distance(prop.Center, middle) - prop.Radius - player.Height * 0.5f;
+            if (apart > (fastest + playerVelocity.magnitude) * LookAhead + margin) return false;
+
+            bool pushing = false;
+            Collider[] colliders = prop.Colliders;
+            for (int c = 0; c < colliders.Length; c++)
+            {
+                Collider collider = colliders[c];
+                if (collider == null || !collider.enabled || collider.isTrigger) continue;
+
+                // The nearest pair of points of the collider and the capsule's axis, by going back and forth
+                // between the two (both are convex, so this arrives at the nearest pair).
+                Vector3 onAxis = middle;
+                Vector3 onProp = collider.ClosestPoint(onAxis);
+                Vector3 axis = high - low;
+                for (int i = 0; i < 3; i++)
+                {
+                    onAxis = low + axis * Mathf.Clamp01(Vector3.Dot(onProp - low, axis) / axis.sqrMagnitude);
+                    onProp = collider.ClosestPoint(onAxis);
+                }
+                Weigh(body, onAxis, onProp, playerVelocity, ref fast, ref pushing);
+                Weigh(body, low, collider.ClosestPoint(low), playerVelocity, ref fast, ref pushing);
+                Weigh(body, high, collider.ClosestPoint(high), playerVelocity, ref fast, ref pushing);
+                if (fast) return true;
+            }
+            return pushing;
+        }
+
+        // One point of a heavy prop against one point of the capsule's axis: is it coming, and how soon?
+        void Weigh(Rigidbody body, Vector3 onAxis, Vector3 onProp, Vector3 playerVelocity, ref bool fast, ref bool pushing)
+        {
+            Player player = game.Player;
+            Vector3 to = onAxis - onProp;
+            float distance = to.magnitude;
+            // The axis itself is inside the prop: no telling which way is out. That is a squeeze (below).
+            if (distance < 1e-5f) return;
+            Vector3 normal = to / distance;
+            float scale = player.Scale;
+            float gap = distance - player.Radius;
+
+            Vector3 velocity = body.GetPointVelocity(onProp);
+            float closing = Mathf.Max(0f, Vector3.Dot(velocity - playerVelocity, normal));
+            bool near = gap <= closing * LookAhead + ReachMargin * scale;
+            // Under the foot, where the player would come to stand on it: faster than anything may carry
+            // them (sliding, rolling or rising) it would whisk them off or launch them. It is no ground.
+            if (near && normal.y >= WalkableNormalY)
+            {
+                float speed = velocity.magnitude;
+                if (player.Grounded) speed = Mathf.Min(speed, (velocity - player.GroundVelocity).magnitude);
+                if (speed > CarrySpeed * scale)
+                {
+                    fast = true;
+                    return;
+                }
+            }
+
+            float approach = Toward(velocity, normal);
+            // A prop that rides along on what the player rides on is not coming at them either.
+            if (player.Grounded) approach = Mathf.Min(approach, Toward(velocity - player.GroundVelocity, normal));
+            if (approach <= PushSpeed * scale) return;
+
+            if (approach > PassSpeed * scale && near) fast = true;
+            else if (gap <= TouchGap * scale) pushing = true;
+        }
+
+        // How fast a point of a prop moves toward the player along the line between them. Under the foot -
+        // where the player could stand on it - coming up does not count: that lifts them, or launches them,
+        // and both are meant (up to CarrySpeed: see Weigh). Sliding into the foot from the side does.
+        static float Toward(Vector3 velocity, Vector3 normal) =>
+            normal.y >= WalkableNormalY ? velocity.x * normal.x + velocity.z * normal.z : Vector3.Dot(velocity, normal);
+
+        /// <summary>
+        /// Nothing throws the player, the part that cannot be seen coming. Before the step only a prop that
+        /// is already moving can be told to pass. But a step can set a heavy prop going and have it hit the
+        /// player all at once: a block that rests against them is struck by another; the block they stand on
+        /// is knocked away, or tipped up under their feet by something that lands on its other end. So after
+        /// every step: if it left the player more than <see cref="PassSpeed"/> faster than they were going by
+        /// themselves, moving at more than <see cref="CarrySpeed"/> the way they were pushed, and a heavy
+        /// prop that is moving is at the capsule, that was a throw. It is taken back - the player is where,
+        /// and as fast as, they would be had the prop not been there - and the prop passes through them from
+        /// now on, like one that was seen coming.
+        ///
+        /// The prop at the capsule may itself be a light one that a heavy one drove into the player (a crate
+        /// between them and a sliding block): it is told by having sent the player off faster than its own
+        /// momentum could (<see cref="DrivenIntoThePlayer"/>), and passes while it is being pushed through
+        /// them. A light prop that flies at the player by itself pushes them as it always did.
+        ///
+        /// And what the player stood on during the step and has been set going faster than it may carry
+        /// them passes too, before the controller takes its speed for the ground's.
+        ///
+        /// A kinematic platform that launches its rider is a gadget's business and is left alone.
+        /// </summary>
+        void TakeBackThrows()
+        {
+            Player player = game.Player;
+            float scale = player.Scale;
+            Vector3 actual = player.Velocity;
+            Vector3 gained = actual - player.ExpectedVelocity;
+            float gain = gained.magnitude;
+            if (gain > PassSpeed * scale)
+            {
+                Vector3 way = gained / gain;
+                float sent = Vector3.Dot(actual, way);
+                if (sent > CarrySpeed * scale && !LaunchedByAMover(player, way, scale))
+                {
+                    bool thrown = false;
+                    // They may have parted again by now, by as much as the throw covers in a step.
+                    float reach = (TouchGap + ReachMargin) * scale + gain * Sim.Dt;
+                    IReadOnlyList<Prop> props = game.Props;
+                    for (int i = 0; i < props.Count; i++)
+                    {
+                        Prop prop = props[i];
+                        if (prop.Removed || prop.Held || prop.Body.isKinematic) continue;
+                        // A prop the player outweighs pushes them by its own momentum, as it always did. Only
+                        // when it sent them off faster than that had something heavier driven it into them.
+                        if (prop.Mass <= Player.Mass && !DrivenIntoThePlayer(prop, sent, scale)) continue;
+                        if (!Threw(prop, way, reach, scale)) continue;
+                        LetPass(prop);
+                        thrown = true;
+                    }
+                    if (thrown) player.TakeBack();
+                }
+            }
+
+            Prop ground = player.GroundProp;
+            if (ground != null && CanThrow(ground) && ground.Body.GetPointVelocity(player.Position).magnitude > CarrySpeed * scale)
+                LetPass(ground);
+        }
+
+        // A light prop that flies into the player hands them its momentum: at most m / (m + M) of the speed
+        // it went into the step with (twice that if it is perfectly bouncy). If the player came out of the
+        // step faster than that - with room for the solver's roughness - the prop did not have it to give:
+        // a heavy one behind it (a crate between the player and a sliding block) pushed through it.
+        static bool DrivenIntoThePlayer(Prop prop, float sent, float scale)
+        {
+            float mass = prop.Mass;
+            float own = prop.StepVelocity.magnitude * mass / (mass + Player.Mass) * (1f + prop.Material.bounciness);
+            return sent > own * 1.25f + 0.5f * scale;
+        }
+
+        // The platform under the player moves that way itself: the launch is its doing, not a prop's.
+        static bool LaunchedByAMover(Player player, Vector3 way, float scale)
+        {
+            if (!player.Grounded || player.GroundCollider == null) return false;
+            Rigidbody body = player.GroundCollider.attachedRigidbody;
+            if (body == null || !body.isKinematic) return false;
+            MoverRef reference = body.GetComponent<MoverRef>();
+            if (reference == null || reference.Mover == null) return false;
+            return Vector3.Dot(reference.Mover.PointVelocity(player.Position), way) > PassSpeed * scale;
+        }
+
+        // Could this prop have thrown the player that way in the step that just ended: is it at the capsule,
+        // solid for it, and moving - on the side the push came from, or into them (a squeeze sends the
+        // player out sideways, not the way the prop goes)? One that merely passes by while something else
+        // sends the player off (a trampoline) is not it.
+        bool Threw(Prop prop, Vector3 way, float reach, float scale)
+        {
+            Player player = game.Player;
+            float radius = player.Radius;
+            Vector3 low = player.Position + Vector3.up * radius;
+            Vector3 high = player.Position + Vector3.up * (player.Height - radius);
+            Vector3 middle = (low + high) * 0.5f;
+            if (Vector3.Distance(prop.Center, middle) - prop.Radius - player.Height * 0.5f > reach) return false;
+
+            Rigidbody body = prop.Body;
+            CapsuleCollider capsule = player.Collider;
+            Collider[] colliders = prop.Colliders;
+            for (int c = 0; c < colliders.Length; c++)
+            {
+                Collider collider = colliders[c];
+                if (collider == null || !collider.enabled || collider.isTrigger) continue;
+                if (Physics.GetIgnoreCollision(collider, capsule)) continue;
+                Vector3 onAxis = middle;
+                Vector3 onProp = collider.ClosestPoint(onAxis);
+                Vector3 axis = high - low;
+                for (int i = 0; i < 3; i++)
+                {
+                    onAxis = low + axis * Mathf.Clamp01(Vector3.Dot(onProp - low, axis) / axis.sqrMagnitude);
+                    onProp = collider.ClosestPoint(onAxis);
+                }
+                Vector3 to = onAxis - onProp;
+                float distance = to.magnitude;
+                if (distance - radius > reach) continue;
+                Vector3 velocity = body.GetPointVelocity(onProp);
+                if (velocity.magnitude <= PassSpeed * scale) continue;
+                // The axis itself is inside it: no telling the side, and no doubt that it is at them.
+                if (distance < 1e-5f) return true;
+                Vector3 normal = to / distance;
+                if (Vector3.Dot(normal, way) > 0.2f || Vector3.Dot(velocity, normal) > PassSpeed * scale) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// The squeeze, which has nothing to do with speed: a prop much heavier than the player that has come
+        /// to lie on them (let go just overhead, or put there by a respawn) presses the capsule against the
+        /// floor; the solver then squirts the player out sideways. Nothing can crush the player in this game,
+        /// so such a prop passes through them as well, until they have separated.
         /// </summary>
         void LetHeavyPropsPass()
         {

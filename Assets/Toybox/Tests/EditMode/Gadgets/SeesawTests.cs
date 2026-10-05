@@ -124,6 +124,152 @@ namespace Toybox.Tests.Gadgets
             Assert.Less(Mathf.Abs(Game.Player.Position.x), 0.3f);
         }
 
+        // The player on the bullseye and a boulder of this size let go 1.7 above the short arm (a fixture's let-go).
+        void RiderAndBoulder(float scale)
+        {
+            Game.Player.Teleport(seesaw.PointAt(9.3f, 0.21f, seesaw.RestAngle), 0f);
+            RunSeconds(0.5f);
+            Assert.IsTrue(Game.Player.Grounded, "standing on the bullseye");
+            pebble.Unfreeze();
+            pebble.SetScale(scale);
+            pebble.SetPose(new Vector3(0f, 2.6f + 0.5f * scale + 1.7f, 15.4f - 0.5f * scale), Quaternion.identity);
+        }
+
+        // Found by the Level 7 review: a jump while the plank swung let it pass through its rider (the crush
+        // guard took them for somebody in the way) and threw nobody. The rider of a swing who is in the air
+        // over their own arm is still its rider: the plank comes up under their feet and takes them along,
+        // and they are thrown with everybody else. (0.33 s is the jump the plank does not catch up with
+        // before it stops; it left them 0.4 above it with too little speed of their own.)
+        [TestCase(0.05f)]
+        [TestCase(0.18f)]
+        [TestCase(0.27f)]
+        [TestCase(0.33f)]
+        public void ARiderWhoJumpsWhileItSwings_IsNotPassedThrough_AndIsThrownAllTheSame(float jumpAt)
+        {
+            Build(ctx => BuildCubby(ctx));
+            int struck = -1, strikes = 0, launches = 0;
+            float f = 0f, launchSpeed = 0f, apex = 0f;
+            bool ghosted = false;
+            Collider plank = seesaw.Mover.Body.GetComponentInChildren<Collider>();
+            seesaw.SeesawStruck += (m, value) =>
+            {
+                if (struck < 0) struck = Game.TickCount;
+                f = value;
+                strikes++;
+            };
+            seesaw.SeesawLaunched += (rider, speed) =>
+            {
+                launches++;
+                launchSpeed = speed;
+            };
+            Game.Context.OnUpdate(dt =>
+            {
+                apex = Mathf.Max(apex, Game.Player.Position.y);
+                ghosted |= Physics.GetIgnoreCollision(plank, Game.Player.Collider);
+            });
+            RiderAndBoulder(4.6f);
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => struck >= 0, 3f), "the boulder lands on the short arm");
+            Run(TestHelpers.Ticks(jumpAt));
+            Assert.AreEqual(SeesawState.Swing, seesaw.State, "the plank is swinging");
+            Input.Once.Jump = true;
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => seesaw.State == SeesawState.Tipped, 2f));
+            Assert.AreEqual(1, launches, "the swing threw its rider");
+            Assert.IsFalse(ghosted, "and the plank did not pass through them");
+            Assert.GreaterOrEqual(launchSpeed, seesaw.LaunchSpeed(f, 9.3f) - 1.5f, "with the speed of the rule (f " + f + ")");
+            RunSeconds(1.5f);
+            Assert.Greater(apex, 12.5f, "a jump " + jumpAt + " s into the swing still goes as high as the rule promises (13.7)");
+            Assert.Less(apex, 15.5f, "and gains nothing by it");
+            Assert.AreEqual(1, strikes, "one strike");
+        }
+
+        // A jump in the last tenth of a second takes the plank's speed along and adds the jump: higher than the
+        // throw. That is the player's own doing and is left to them.
+        [Test]
+        public void AJumpAtTheVeryEndOfTheSwing_KeepsItsOwnSpeed()
+        {
+            Build(ctx => BuildCubby(ctx));
+            int struck = -1;
+            float apex = 0f;
+            seesaw.SeesawStruck += (m, value) =>
+            {
+                if (struck < 0) struck = Game.TickCount;
+            };
+            Game.Context.OnUpdate(dt => apex = Mathf.Max(apex, Game.Player.Position.y));
+            RiderAndBoulder(4.6f);
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => struck >= 0, 3f));
+            Run(TestHelpers.Ticks(0.48f));
+            Input.Once.Jump = true;
+            RunSeconds(2f);
+            Assert.Greater(apex, 15.5f, "higher than the plank alone throws (13.7)");
+        }
+
+        // Found by the Level 7 review: when the boulder came to rest on the tipped plank the seesaw counted a
+        // second strike (the boulder hops as the tip meets the floor, the plank starts back, and is struck
+        // again), so whatever listens - the level, the sound, the camera shake - heard it twice.
+        [TestCase(3.2f)]
+        [TestCase(4.6f)]
+        [TestCase(7f)]
+        public void ABoulderThatComesToRestOnTheTippedPlank_StrikesOnce(float scale)
+        {
+            Build(ctx => BuildCubby(ctx));
+            int strikes = 0, launches = 0, returns = 0;
+            var log = new System.Text.StringBuilder();
+            seesaw.SeesawStruck += (m, f) =>
+            {
+                strikes++;
+                log.Append(" [tick ").Append(Game.TickCount).Append(": load ").Append(m.ToString("0.0")).Append(", f ").Append(f.ToString("0.00")).Append(", plank at ")
+                    .Append(seesaw.Angle.ToString("0.0")).Append(", boulder at ").Append(pebble.Center.ToString("0.00")).Append(']');
+            };
+            seesaw.SeesawLaunched += (rider, speed) => launches++;
+            seesaw.SeesawReturned += () => returns++;
+            int channel = 0;
+            Game.Events.SeesawStruck += e => channel++;
+            RiderAndBoulder(scale);
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => seesaw.State == SeesawState.Tipped, 4f));
+            RunSeconds(5f);
+            Assert.AreEqual(1, strikes, "one strike for one boulder of " + scale + ":" + log);
+            Assert.AreEqual(1, channel, "and one on the game's channel");
+            Assert.AreEqual(1, launches);
+            Assert.AreEqual(0, returns);
+            // (The biggest boulder rests between the marker and the wall a hair above the tipped plank; the
+            // plank may be settling under it at any given moment, which nobody is told about.)
+            Assert.AreNotEqual(SeesawState.Rest, seesaw.State, "the boulder keeps the short arm down");
+            Assert.AreEqual(seesaw.TippedAngle, seesaw.Angle, 1.5f);
+            Assert.IsTrue(seesaw.Launched, "and the throw is not forgotten");
+        }
+
+        // Found by the Level 7 review: the boulder picked up again in mid-swing still threw the player as if it
+        // had stayed (the swing never looked at its load again). With what drives it gone the plank stops
+        // being driven: its rider keeps the speed it had given them so far, and it swings back.
+        [Test]
+        public void TheBoulderPickedUpAgainInMidSwing_ThrowsOnlyAsFarAsItHadGot_AndThePlankSwingsBack()
+        {
+            Build(ctx => BuildCubby(ctx));
+            int struck = -1;
+            float f = 0f, launchSpeed = -1f, apex = 0f;
+            seesaw.SeesawStruck += (m, value) =>
+            {
+                if (struck < 0) struck = Game.TickCount;
+                f = value;
+            };
+            seesaw.SeesawLaunched += (rider, speed) => launchSpeed = speed;
+            Game.Context.OnUpdate(dt => apex = Mathf.Max(apex, Game.Player.Position.y));
+            RiderAndBoulder(4.6f);
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => struck >= 0, 3f));
+            Run(TestHelpers.Ticks(0.2f));
+            LookAt(pebble.Center);
+            Click();
+            Assert.IsTrue(pebble.Held, "the boulder is in the hand again, 0.2 s into the swing");
+            float full = seesaw.LaunchSpeed(f, 9.3f);
+            RunSeconds(0.1f);
+            Assert.AreNotEqual(SeesawState.Swing, seesaw.State, "nothing drives the plank any more");
+            Assert.Greater(launchSpeed, 1.5f, "the rider leaves with what the plank had given them");
+            Assert.Less(launchSpeed, full * 0.6f, "which is far less than a full swing's " + full);
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => seesaw.State == SeesawState.Rest, 5f), "the plank swings back");
+            Assert.Less(apex, 6f, "thrown to " + apex + ": nowhere near the bookend (11)");
+            Assert.IsTrue(pebble.Held);
+        }
+
         [Test]
         public void TooLightAWeight_DoesNothing_AndThePlayerTipsItGently()
         {

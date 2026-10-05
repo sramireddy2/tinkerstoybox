@@ -15,7 +15,7 @@ namespace Toybox.Tests.Gadgets
         Prop feather;
         readonly List<string> log = new List<string>();
 
-        void BuildCanyon(LevelContext ctx, float scale)
+        void BuildCanyon(LevelContext ctx, float scale, float settle = 0f)
         {
             log.Clear();
             TestHelpers.Box(ctx, new Vector3(-1f, -1f, 6f), new Vector3(16f, 2f, 24f));     // deck A: x -9..7, z -6..18
@@ -26,6 +26,7 @@ namespace Toybox.Tests.Gadgets
             raft = new SailRaft(ctx, new SailRaftOptions
             {
                 Prop = feather, Stream = wind, Launch = Zone.MinMax(new Vector3(-6f, 0f, -5f), new Vector3(4f, 1.5f, 17.5f)), Landing = new Vector3(-1f, 0f, 49f),
+                Settle = settle,
             });
             raft.SailMoored += () => log.Add("moored");
             raft.SailStalled += share => log.Add("stalled " + share.ToString("0.00"));
@@ -126,6 +127,131 @@ namespace Toybox.Tests.Gadgets
             Assert.AreEqual(SailState.Loose, raft.State, "below MoorAbove it is never pinned");
             Assert.AreEqual(0, log.Count);
             Assert.Greater(farthest, 18f, "the wind slid it across the deck and over the edge (it is at " + feather.Center + ", mass " + feather.Mass + ", in the stream " + wind.Contains(feather.Center) + ")");
+        }
+
+        // Found building Level 5: a feather comes to rest balanced on its quill, its outline 0.013 s up in the
+        // air. Loose, it tips under a foot and is walked onto (ToyCatalogTests); moored it is pinned, and at
+        // the sizes that fly its outline is a lip of 0.11 to 0.2 that stops a player who walks at it.
+        // Settle presses the moored sail down until its outline lies on the deck.
+        [TestCase(6.6f, 0f, false, TestName = "AMooredFeather_PinnedAsItLies_StopsAPlayerWhoWalksAtIt(6.6)")]
+        [TestCase(9.2f, 0f, false, TestName = "AMooredFeather_PinnedAsItLies_StopsAPlayerWhoWalksAtIt(9.2)")]
+        [TestCase(6.6f, 0.013f, true, TestName = "AMooredFeather_PressedFlat_IsWalkedOnto_AndCarriesItsRider(6.6)")]
+        [TestCase(9.2f, 0.013f, true, TestName = "AMooredFeather_PressedFlat_IsWalkedOnto_AndCarriesItsRider(9.2)")]
+        [TestCase(12f, 0.013f, true, TestName = "AMooredFeather_PressedFlat_IsWalkedOnto_AndCarriesItsRider(12)")]
+        public void AMooredFeather_AndAPlayerWhoWalksAtIt(float scale, float settle, bool boards)
+        {
+            Build(ctx => BuildCanyon(ctx, scale, settle), -13f);
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => raft.State == SailState.Moored, 4f));
+            RunSeconds(0.5f);
+            GadgetKit.VerticalExtent(feather, out float underside, out float top);
+            // The outline is 0.002 s above and below the feather's middle, the quill 0.015 s.
+            float lip = feather.Center.y + 0.002f * scale;
+            if (settle > 0f)
+            {
+                Assert.AreEqual(-0.013f * scale, underside, 0.01f, "its quill is pressed into the deck");
+                Assert.AreEqual(0.004f * scale, lip, 0.01f, "and its outline lies on it");
+                Assert.Less(Vector3.Angle(feather.Rotation * Vector3.up, Vector3.up), 0.1f, "level");
+                Assert.IsTrue(feather.Grabbable, "it can still be taken back");
+            }
+            else
+            {
+                Assert.AreEqual(0f, underside, 0.01f, "it stands on its quill");
+                Assert.Greater(lip, 0.1f, "with its outline in the air");
+            }
+
+            // From beside it, level with its middle and looking at -X: straight at its edge and on toward its quill.
+            Game.Player.Teleport(new Vector3(5f, 0f, 12f), -90f);
+            Input.Hold.MoveZ = 1f;
+            bool arrived = TestHelpers.RunUntil(Game, () => Game.Player.Position.x <= -0.9f, 4f);
+            Input.Hold.MoveZ = 0f;
+            Assert.AreEqual(boards, arrived, "the player stopped at " + Game.Player.Position + " (lip " + lip.ToString("0.000") + ", top " + top.ToString("0.000") + ")");
+            if (!boards)
+            {
+                Assert.AreEqual(SailState.Moored, raft.State);
+                Assert.IsFalse(raft.RiderAboard);
+                return;
+            }
+            Assert.IsTrue(raft.RiderAboard, "standing on the feather");
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => raft.State == SailState.Docked, 16f), "it flew: " + string.Join(", ", log));
+            CollectionAssert.AreEqual(new[] { "moored", "launched", "docked" }, log);
+            RunSeconds(0.5f);
+            GadgetKit.VerticalExtent(feather, out underside, out _);
+            Assert.AreEqual(0f, underside, 0.03f, "it came down on the far deck, not into it");
+            Assert.Greater(Game.Player.Position.z, 47f, "the rider is across");
+            Assert.IsTrue(Game.Player.Grounded);
+            Assert.AreSame(feather, Game.Player.GroundProp);
+        }
+
+        // Found reviewing Level 5: a jump pressed just before landing goes off on the tick the feet touch down.
+        // Hop after hop the sail never saw anybody standing on it, counted a second without a rider and let
+        // itself go under them, in the middle of the canyon. A rider in the air over the sail has not left it.
+        [Test]
+        public void ARiderWhoHops_IsNotLetGoOf()
+        {
+            Build(ctx => BuildCanyon(ctx, 9.2f, 0.013f), -13f);
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => raft.State == SailState.Moored, 4f));
+            // Behind its middle: the wind pushes whoever is in the air, and three hops in a row carry the
+            // rider four units forward along the feather (a fourth would carry them off its tip).
+            Game.Player.Teleport(new Vector3(-1f, feather.Center.y + 0.15f, 9.5f), 0f);
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => raft.State == SailState.Glide, 2f));
+            RunSeconds(1.5f);
+            int hops = 0, standing = 0, inTheAir = 0;
+            string elsewhere = null;
+            float ahead = Game.Player.Position.z - feather.Center.z;
+            for (int i = 0; i < 200 && raft.State == SailState.Glide; i++)
+            {
+                if (Game.Player.Grounded && hops < 3)
+                {
+                    // Off again at once, as a jump pressed just before landing is.
+                    Input.Once.Jump = true;
+                    hops++;
+                }
+                else if (Game.Player.Grounded && hops == 3) break;
+                Game.Tick();
+                if (raft.RiderAboard) standing++;
+                else if (raft.RiderOverhead) inTheAir++;
+                else if (elsewhere == null)
+                    elsewhere = "tick " + i + ": player " + Game.Player.Position.ToString("0.000") + (Game.Player.Grounded ? " grounded on " + Game.Player.GroundCollider : " in the air") + ", feather " + feather.Center.ToString("0.000");
+            }
+            Assert.AreEqual(3, hops);
+            Assert.Greater(inTheAir * Sim.Dt, 1.8f, "three hops: twice as long in the air as the sail waits for a rider");
+            Assert.Less(standing, 6, "with hardly a tick of standing between them");
+            Assert.IsNull(elsewhere, "all the while in the air over the sail");
+            Assert.AreEqual(SailState.Glide, raft.State, "it did not let go of a rider who was only hopping");
+            Assert.IsTrue(raft.RiderAboard, "who has come down on it again");
+            Assert.Greater(Game.Player.Position.z - feather.Center.z, ahead + 2f, "farther forward: the wind pushed them while they were in the air");
+            Assert.IsTrue(feather.Driven);
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => raft.State == SailState.Docked, 16f), "it flew on: " + string.Join(", ", log));
+            RunSeconds(0.5f);
+            Assert.Greater(Game.Player.Position.z, 44f, "the rider is across");
+            Assert.IsTrue(Game.Player.Grounded);
+            Assert.AreSame(feather, Game.Player.GroundProp);
+        }
+
+        // The other side of that rule: a rider who is beside the sail, or under it, has left it.
+        [Test]
+        public void ARiderWhoGoesOverTheSide_IsLeftBehind_ASecondLater()
+        {
+            Build(ctx => BuildCanyon(ctx, 9.2f, 0.013f), -13f);
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => raft.State == SailState.Moored, 4f));
+            Game.Player.Teleport(new Vector3(-1f, feather.Center.y + 0.15f, 12f), 0f);
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => raft.State == SailState.Glide && feather.Center.z > 24f, 8f));
+            Assert.IsTrue(raft.RiderAboard);
+            Assert.IsFalse(raft.RiderOverhead, "standing is not hopping");
+            // Beside it, in the air: half its width and a foot more.
+            Game.Player.Teleport(feather.Center + new Vector3(0.2f * 9.2f + 0.8f, 0.4f, 0f), 0f);
+            Assert.IsFalse(raft.RiderOverhead);
+            int ticks = 0;
+            while (raft.State == SailState.Glide && ticks < 200)
+            {
+                Game.Tick();
+                ticks++;
+            }
+            Assert.AreEqual(SailState.Loose, raft.State, "nobody aboard, nobody over it: it is let go");
+            Assert.AreEqual(1f, ticks * Sim.Dt, 0.05f, "after the second it waits for a rider");
+            Assert.IsFalse(feather.Driven);
+            Assert.IsTrue(feather.Grabbable);
+            CollectionAssert.AreEqual(new[] { "moored", "launched" }, log);
         }
 
         [Test]

@@ -336,6 +336,57 @@ namespace Toybox.Tests
             Assert.AreEqual(0, RootOf<WindVisuals>().childCount);
         }
 
+        // Found building Level 5: its gale is 50 units long and its streamers 8 to 16, each drawn in five
+        // pieces - and a sway of 1.9 radians per unit put a whole wave into every piece: zigzags like
+        // lightning across the picture. The sway is stretched with the stream, so a long streamer bends as a
+        // short one does.
+        [Test]
+        public void Wind_InALongStream_HasStreamersThatBend_NotZigzag()
+        {
+            const float length = 50f;
+            Build(ctx =>
+            {
+                TestHelpers.Floor(ctx, 140f);
+                new WindStream(ctx, new WindStreamOptions { Center = new Vector3(0f, 4.6f, length * 0.5f), Size = new Vector3(10f, 9f, length), Direction = Vector3.forward });
+                ctx.SetSpawn(new Vector3(14f, 0f, 0f), 0f);
+            });
+            WindVisuals visuals = Present<WindVisuals>();
+            float sharpest = 0f;
+            int measured = 0;
+            for (int look = 0; look < 30; look++)
+            {
+                Frames(4);
+                Vector3[] v = MeshOf(visuals.RibbonRendererOf(0)).vertices;
+                Assert.AreEqual(visuals.StreamerCount(0) * 2 * 5 * 4, v.Length);
+                for (int streamer = 0; streamer < v.Length / 20; streamer++)
+                {
+                    Vector3 previous = Vector3.zero;
+                    for (int piece = 0; piece < 5; piece++)
+                    {
+                        int q = streamer * 20 + piece * 4;
+                        Vector3 from = (v[q] + v[q + 1]) * 0.5f, to = (v[q + 2] + v[q + 3]) * 0.5f;
+                        // Pieces that reach past an end of the stream are folded onto it (and drawn clear).
+                        bool inside = Mathf.Min(from.z, to.z) > 0.01f && Mathf.Max(from.z, to.z) < length - 0.01f;
+                        if (!inside)
+                        {
+                            previous = Vector3.zero;
+                            continue;
+                        }
+                        Vector3 direction = to - from;
+                        if (previous != Vector3.zero)
+                        {
+                            sharpest = Mathf.Max(sharpest, Vector3.Angle(previous, direction));
+                            measured++;
+                        }
+                        previous = direction;
+                    }
+                }
+            }
+            Debug.Log("[GadgetVisuals] long stream: the sharpest bend between two pieces of a streamer is " + sharpest.ToString("0.0") + " degrees (" + measured + " measured)");
+            Assert.Greater(measured, 1000);
+            Assert.Less(sharpest, 15f, "a streamer bends; it does not zigzag");
+        }
+
         // ------------------------------------------------------------------------------------------
         // Fit lamps
         // ------------------------------------------------------------------------------------------

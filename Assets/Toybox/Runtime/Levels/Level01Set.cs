@@ -11,6 +11,12 @@ namespace Toybox.Levels
     /// collider - whatever must stop the player or a held toy is a collider the level adds itself, and the
     /// looks stay inside it. Parts are collected per material and merged into one mesh each when the set is
     /// finished (level statics are a draw per material, ART_BIBLE 12.1).
+    ///
+    /// Shared: it was written for Level 1 and keeps that name (a class and its file are renamed together,
+    /// in the editor), but Levels 5 and 6 build their sets with it too. Add to it; do not change what an
+    /// existing call draws for one level's sake, and run Level01Tests, Level05Tests and Level06Tests after
+    /// a change (each checks what its level draws: no colliders, the draw budget). Level 7 has its own,
+    /// Level07Set.
     /// </summary>
     sealed class Level01Set
     {

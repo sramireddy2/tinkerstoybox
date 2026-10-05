@@ -50,6 +50,40 @@ namespace Toybox.Tests
             float z = rect.localEulerAngles.z;
             return z > 180f ? z - 360f : z;
         }
+
+        /// <summary>
+        /// What some rects take up of their canvas, measured on the rects themselves: in canvas pixels from
+        /// the canvas's middle, x to the right and y up (the coordinates of <see cref="HudFrame"/>).
+        /// </summary>
+        public static Rect OnCanvas(UiRoot root, params RectTransform[] rects)
+        {
+            var corners = new Vector3[4];
+            var min = new Vector2(float.MaxValue, float.MaxValue);
+            var max = new Vector2(float.MinValue, float.MinValue);
+            foreach (RectTransform rect in rects)
+            {
+                rect.GetWorldCorners(corners);
+                foreach (Vector3 corner in corners)
+                {
+                    Vector2 point = root.Rect.InverseTransformPoint(corner);
+                    min = Vector2.Min(min, point);
+                    max = Vector2.Max(max, point);
+                }
+            }
+            return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+        }
+
+        /// <summary>What a sticker takes up of its canvas as it is drawn: its face, its border and its peel shadow.</summary>
+        public static Rect Footprint(UiRoot root, Sticker sticker) =>
+            OnCanvas(root, sticker.Face.rectTransform, sticker.Border.rectTransform, sticker.Shadow.rectTransform);
+
+        public static void AreEqual(Rect expected, Rect actual, float tolerance, string message)
+        {
+            Assert.AreEqual(expected.xMin, actual.xMin, tolerance, message + " (left)");
+            Assert.AreEqual(expected.xMax, actual.xMax, tolerance, message + " (right)");
+            Assert.AreEqual(expected.yMin, actual.yMin, tolerance, message + " (bottom)");
+            Assert.AreEqual(expected.yMax, actual.yMax, tolerance, message + " (top)");
+        }
     }
 
     /// <summary>A walled room, a block to grab four units ahead and an exit off to the side. Its number tells the levels apart.</summary>
@@ -736,10 +770,13 @@ namespace Toybox.Tests
             ScaleReadout readout = hud.Readout;
             Assert.IsFalse(readout.Shown);
             Assert.IsFalse(readout.Pill.gameObject.activeSelf);
-            // A pill centred at 72% of the screen's height (from the top).
-            Assert.AreEqual(0.28f, readout.Pill.Rect.anchorMin.y, 1e-4f);
-            Assert.AreEqual(0.5f, readout.Pill.Rect.anchorMin.x, 1e-4f);
+            // A Paper pill on the bottom edge of the frame, in the middle (HudLayoutTests hold it to its place).
+            Assert.AreEqual(ReadoutDock.Low, readout.Dock);
+            Assert.AreEqual(UiKit.Bottom, readout.Pill.Rect.anchorMin, "it hangs on the frame's edge, whatever the shape of the screen");
+            Assert.AreEqual(UiKit.Bottom, readout.Pill.Rect.anchorMax);
+            Assert.AreEqual(ScaleReadout.Size, readout.Pill.Size);
             Assert.AreEqual(StickerShape.Pill, readout.Pill.Shape);
+            Assert.IsTrue(Palette.Same(Palette.Paper, readout.Pill.FaceColor));
 
             Grab(level.Block);
             Assert.IsTrue(readout.Shown, "it sticks on with the grab");
@@ -968,6 +1005,11 @@ namespace Toybox.Tests
             Assert.IsTrue(pills.Shown(ControlPills.Control.Turn));
             Assert.IsTrue(pills.Shown(ControlPills.Control.Flip));
             Assert.IsTrue(pills.Shown(ControlPills.Control.Drop));
+            // The words are the levels' words: toys are let go, not dropped (Phase1CampaignTests, Phase2CampaignTests).
+            var words = new List<string>();
+            foreach (TMPro.TextMeshProUGUI label in pills.Pill(ControlPills.Control.Drop).Rect.GetComponentsInChildren<TMPro.TextMeshProUGUI>(true)) words.Add(label.text);
+            CollectionAssert.Contains(words, "let go");
+            CollectionAssert.DoesNotContain(words, "drop");
             // Bottom right, stacked.
             Assert.AreEqual(new Vector2(1f, 0f), pills.Pill(ControlPills.Control.Drop).Rect.anchorMin);
             Assert.Less(pills.Pill(ControlPills.Control.Drop).Rect.anchoredPosition.y, pills.Pill(ControlPills.Control.Turn).Rect.anchoredPosition.y);
@@ -1027,6 +1069,441 @@ namespace Toybox.Tests
     }
 
     // ----------------------------------------------------------------------------------------------
+    // Where the HUD puts the scale readout (ART_BIBLE 9.6): never on what the player aims with or at
+    // ----------------------------------------------------------------------------------------------
+
+    /// <summary>A walled room with one block to pick up, standing on the floor straight ahead of the spawn.</summary>
+    sealed class HudStage : LevelDefinition
+    {
+        public readonly Vector3 Size;
+        public readonly float Distance;
+        public Prop Toy;
+
+        public HudStage(Vector3 size, float distance)
+        {
+            Size = size;
+            Distance = distance;
+        }
+
+        public override string Title => "The Stage";
+        public override string Blurb => "Pick the block up.";
+
+        public override void Build(LevelContext ctx)
+        {
+            TestHelpers.Room(ctx, 20f, 12f);
+            Toy = ctx.AddProp(BasicToys.Block(Size), new Vector3(0f, Size.y * 0.5f, Distance), new PropOptions { Name = "Toy" });
+            ctx.SetSpawn(Vector3.zero, 0f);
+        }
+    }
+
+    public class HudLayoutTests
+    {
+        /// <summary>Screens by width over height: ultra-wide, 16:9, 16:10, 4:3, square, portrait.</summary>
+        static readonly float[] Shapes = { 21f / 9f, 16f / 9f, 16f / 10f, 4f / 3f, 1f, 9f / 16f };
+        /// <summary>A domino, as Level 4 has one: twice as tall as it is wide.</summary>
+        static readonly Vector3 Domino = new Vector3(1f, 2f, 0.3f);
+
+        Game game;
+        ScriptedInput input;
+        Presentation presentation;
+        HudPresenter hud;
+        Vector2 canvas;
+
+        [SetUp]
+        public void Begin()
+        {
+            Settings.Use(new MemoryStore());
+        }
+
+        [TearDown]
+        public void End()
+        {
+            Close();
+            UiCapture.Reset();
+            Settings.Use(null);
+        }
+
+        void Close()
+        {
+            presentation?.Dispose();
+            presentation = null;
+            game?.Dispose();
+            game = null;
+            Game.Current?.Dispose();
+        }
+
+        // The HUD on a screen of this shape. A capture's canvas is the one the game's scaler would make
+        // (UiCaptureTests), and unlike the overlay's it does not need a screen to get its size from.
+        void Open(float shape, LevelDefinition level, bool scripted = true)
+        {
+            Close();
+            UiCapture.Request = "hud";
+            UiCapture.Aspect = shape;
+            input = scripted ? new ScriptedInput() : null;
+            game = Game.Create(scripted ? new GameOptions { Input = input } : new GameOptions());
+            game.LoadLevel(level);
+            presentation = Presentation.Create(game, new PresentationOptions { Presenters = new List<PresenterRegistry.Entry> { UiTestKit.Entry<HudPresenter>() } });
+            hud = presentation.Get<HudPresenter>();
+            presentation.Frame(0f, 1f);
+            canvas = HudFrame.Size(hud.Root.Rect);
+        }
+
+        void Step(int ticks = 1)
+        {
+            for (int i = 0; i < ticks; i++)
+            {
+                game.Tick();
+                presentation.Frame(Sim.Dt, 1f);
+            }
+        }
+
+        // Lets the stickers finish sticking on, so that they can be measured where they lie.
+        void Settle()
+        {
+            for (int i = TestHelpers.Ticks(0.3f); i > 0; i--) presentation.Frame(Sim.Dt, 1f);
+        }
+
+        void Grab(Prop prop)
+        {
+            TestHelpers.LookAt(game.Player, prop.Center);
+            input.Once.GrabPressed = true;
+            Step();
+            Assert.AreSame(prop, game.Grabber.Held);
+        }
+
+        Rect Dock(ReadoutDock dock) => HudFrame.Footprint(ScaleReadout.FaceIn(dock, canvas));
+
+        // The part of a held toy the player aims with: its foot.
+        static Rect LowerThird(Rect toy) => Rect.MinMaxRect(toy.xMin, toy.yMin, toy.xMax, toy.yMin + toy.height / 3f);
+
+        // Everything else the HUD can have up, each with what it takes of the canvas.
+        IEnumerable<KeyValuePair<string, Rect>> Furniture(bool onlyWhatIsUp)
+        {
+            if (!onlyWhatIsUp || hud.Reticle.Visible) yield return new KeyValuePair<string, Rect>("the reticle", UiTestKit.OnCanvas(hud.Root, hud.Reticle.Rect));
+            if (!onlyWhatIsUp || hud.LevelCard.Shown) yield return new KeyValuePair<string, Rect>("the level card", UiTestKit.Footprint(hud.Root, hud.LevelCard.Card));
+            for (int i = 0; i < HintToasts.Capacity; i++)
+                if (hud.Hints.StickerAt(i).Tween.IsShown) yield return new KeyValuePair<string, Rect>("a toast", UiTestKit.Footprint(hud.Root, hud.Hints.StickerAt(i)));
+            foreach (ControlPills.Control control in Enum.GetValues(typeof(ControlPills.Control)))
+                if (hud.Controls.Shown(control)) yield return new KeyValuePair<string, Rect>("the " + control + " pill", UiTestKit.Footprint(hud.Root, hud.Controls.Pill(control)));
+            if (!onlyWhatIsUp || hud.LookPrompt.Tween.IsShown) yield return new KeyValuePair<string, Rect>("the look prompt", UiTestKit.Footprint(hud.Root, hud.LookPrompt));
+            if (!onlyWhatIsUp || hud.AutoplayPill.Tween.IsShown) yield return new KeyValuePair<string, Rect>("the autoplay pill", UiTestKit.Footprint(hud.Root, hud.AutoplayPill));
+        }
+
+        [Test]
+        public void TheScaleReadout_IsDockedOutsideTheAimingArea_AtEveryShapeOfScreen()
+        {
+            // The middle of the frame is for aiming: two thirds of it at the least, each way.
+            Assert.GreaterOrEqual(HudFrame.AimShare, 2f / 3f);
+
+            foreach (float shape in Shapes)
+            {
+                string at = " on a " + shape.ToString("0.00") + " screen";
+                var stage = new HudStage(Vector3.one, 6f);
+                Open(shape, stage);
+                Vector2 expected = UiRoot.CanvasSize(shape);
+                Assert.AreEqual(expected.x, canvas.x, 0.01f, at);
+                Assert.AreEqual(expected.y, canvas.y, 0.01f, at);
+                var frame = new Rect(-canvas * 0.5f, canvas);
+
+                Rect aim = HudFrame.AimArea(canvas);
+                Assert.AreEqual(0f, aim.center.magnitude, 1e-3f, "the aiming area is around the crosshair" + at);
+                Assert.AreEqual(canvas.x * HudFrame.AimShare, aim.width, 0.01f);
+                Assert.AreEqual(canvas.y * HudFrame.AimShare, aim.height, 0.01f);
+                Rect reticle = UiTestKit.OnCanvas(hud.Root, hud.Reticle.Rect);
+                Assert.IsTrue(aim.Contains(reticle.min) && aim.Contains(reticle.max), "the reticle is in it" + at);
+
+                // Everything the HUD has: the level card of a level just begun, three long hints, the
+                // control pills of a hold; the prompt and the autoplay pill are measured where they would be.
+                game.Events.RaiseMessage(new MessageEvent { Text = "Step back while you hold a toy: it lands farther away, and bigger than it was.", Seconds = 20f });
+                game.Events.RaiseMessage(new MessageEvent { Text = "It lands on whatever is behind it. Look around.", Seconds = 20f });
+                game.Events.RaiseMessage(new MessageEvent { Text = "Press R to start the level over.", Seconds = 20f });
+                Grab(stage.Toy);
+                Settle();
+                Assert.IsTrue(hud.LevelCard.Shown);
+                Assert.AreEqual(3, hud.Hints.Count);
+                Assert.IsTrue(hud.Controls.Shown(ControlPills.Control.Turn) && hud.Controls.Shown(ControlPills.Control.Flip) && hud.Controls.Shown(ControlPills.Control.Drop));
+
+                // A toy that fits the aiming area, sticker and all, leaves the readout where it is.
+                Assert.AreEqual(ReadoutDock.Low, ScaleReadout.DockFor(HudFrame.StickerOf(aim, canvas.y), canvas), "a toy as large as the aiming area" + at);
+
+                // What the HUD says about the game itself hangs at the top, out of the aiming area as well.
+                foreach (Sticker note in new[] { hud.LookPrompt, hud.AutoplayPill })
+                {
+                    Rect taken = UiTestKit.Footprint(hud.Root, note);
+                    Assert.IsFalse(HudFrame.Meet(taken, aim), note.name + " reaches into the aiming area" + at);
+                    Assert.IsTrue(frame.Contains(taken.min) && frame.Contains(taken.max), note.name + " is wholly in the frame" + at);
+                    Assert.Greater(taken.yMin, aim.yMax, note.name + " is above it" + at);
+                    Assert.IsFalse(HudFrame.Meet(taken, UiTestKit.Footprint(hud.Root, hud.LevelCard.Card)), note.name + " lies on the level card" + at);
+                }
+
+                foreach (ReadoutDock dock in Enum.GetValues(typeof(ReadoutDock)))
+                {
+                    Rect taken = Dock(dock);
+                    Assert.IsFalse(HudFrame.Meet(taken, aim), "the " + dock + " dock reaches into the aiming area" + at);
+                    Assert.IsTrue(frame.Contains(taken.min) && frame.Contains(taken.max), "the " + dock + " dock is wholly in the frame" + at);
+                    foreach (KeyValuePair<string, Rect> other in Furniture(false))
+                        Assert.IsFalse(HudFrame.Meet(taken, other.Value), "the " + dock + " dock lies on " + other.Key + at);
+                }
+
+                // The pill is where its dock says, drawn: the block is small and far, so that is the low dock.
+                ScaleReadout readout = hud.Readout;
+                Assert.IsTrue(readout.Shown);
+                Assert.AreEqual(ReadoutDock.Low, readout.Dock, at);
+                UiTestKit.AreEqual(Dock(ReadoutDock.Low), UiTestKit.Footprint(hud.Root, readout.Pill), 0.5f, "the pill in the low dock" + at);
+                Rect low = Dock(ReadoutDock.Low);
+                Assert.AreEqual(0f, low.center.x, UiTheme.ShadowOffset.x, "under the crosshair" + at);
+                Assert.Less(low.yMax, aim.yMin, "below the aiming area" + at);
+
+                // In the corner it is drawn where that dock says, too: top right. (Let go first: while a toy
+                // is held the HUD tells the readout every frame where that toy is.)
+                input.Once.GrabPressed = true;
+                Step();
+                Assert.IsNull(game.Grabber.Held);
+                readout.Avoid(Rect.MinMaxRect(-300f, -canvas.y, 300f, canvas.y * 0.4f), canvas);
+                Settle();
+                Assert.IsTrue(readout.Shown, "it lingers");
+                Assert.AreEqual(ReadoutDock.Corner, readout.Dock, at);
+                Rect corner = Dock(ReadoutDock.Corner);
+                UiTestKit.AreEqual(corner, UiTestKit.Footprint(hud.Root, readout.Pill), 0.5f, "the pill in the corner dock" + at);
+                Assert.Greater(corner.xMin, 0f, "right of the crosshair" + at);
+                Assert.Greater(corner.yMin, 0f, "above it" + at);
+            }
+        }
+
+        [Test]
+        public void TheScaleReadout_NeverLiesOnTheHeldToy_HoweverNearItWasPickedUp()
+        {
+            var used = new HashSet<ReadoutDock>();
+            foreach (float shape in new[] { 21f / 9f, 16f / 9f, 4f / 3f, 9f / 16f })
+                foreach (float distance in new[] { 8f, 4f, 3f, 2.5f, 2.2f, 2f, 1.8f, 1.5f, 1.2f })
+                {
+                    string at = " (a domino picked up from " + distance + " away, on a " + shape.ToString("0.00") + " screen)";
+                    var stage = new HudStage(Domino, distance);
+                    Open(shape, stage);
+                    Grab(stage.Toy);
+                    // Carried about and looked up with, the toy stays what it was on the screen.
+                    TestHelpers.LookAt(game.Player, new Vector3(3f, 5f, 20f));
+                    Step(20);
+                    Settle();
+
+                    Assert.IsTrue(hud.HeldSticker(canvas, out Rect toy), at);
+                    Camera camera = presentation.Camera;
+                    Assert.IsTrue(HudFrame.BoxOf(stage.Toy, camera.transform.position, camera.transform.rotation, camera.fieldOfView, canvas.y, out Rect box));
+                    UiTestKit.AreEqual(Seen(camera, stage.Toy, canvas.y), box, 0.5f, "the toy's box is what the camera shows of it" + at);
+                    UiTestKit.AreEqual(HudFrame.StickerOf(box, canvas.y), toy, 1e-3f, "with its border and its peel shadow" + at);
+                    Assert.IsTrue(toy.Contains(Vector2.zero), "a held toy is on the crosshair" + at);
+
+                    ScaleReadout readout = hud.Readout;
+                    Rect pill = UiTestKit.Footprint(hud.Root, readout.Pill);
+                    UiTestKit.AreEqual(Dock(readout.Dock), pill, 0.5f, "the pill is in its dock" + at);
+                    Assert.IsFalse(HudFrame.Meet(pill, HudFrame.AimArea(canvas)), "the readout is in the aiming area" + at);
+                    Assert.IsFalse(HudFrame.Meet(pill, LowerThird(toy)), "the readout lies on the toy's foot" + at);
+
+                    // Low unless the toy comes down that far; then the corner, which a toy this narrow does
+                    // not reach on a 16:9 screen or a wider one, however near it was picked up.
+                    bool lowIsFree = !HudFrame.Meet(toy, Dock(ReadoutDock.Low), ScaleReadout.Clearance);
+                    bool cornerIsFree = !HudFrame.Meet(toy, Dock(ReadoutDock.Corner), ScaleReadout.Clearance);
+                    Assert.AreEqual(lowIsFree ? ReadoutDock.Low : ReadoutDock.Corner, readout.Dock, at);
+                    if (shape > 1.7f) Assert.IsTrue(cornerIsFree, "a domino does not reach the corner" + at);
+                    if (lowIsFree || cornerIsFree) Assert.IsFalse(HudFrame.Meet(pill, toy, ScaleReadout.Clearance - 0.5f), "the readout touches the toy" + at);
+                    foreach (KeyValuePair<string, Rect> other in Furniture(true))
+                        Assert.IsFalse(HudFrame.Meet(pill, other.Value), "the readout lies on " + other.Key + at);
+                    used.Add(readout.Dock);
+                }
+            Assert.AreEqual(2, used.Count, "dominoes that leave the low dock alone and dominoes that come down into it");
+        }
+
+        // The box of a prop's bounds on a canvas this tall, by the camera's own projection.
+        static Rect Seen(Camera camera, Prop prop, float canvasHeight)
+        {
+            var min = new Vector2(float.MaxValue, float.MaxValue);
+            var max = new Vector2(float.MinValue, float.MinValue);
+            Vector3 half = prop.LocalHalfExtents;
+            for (int i = 0; i < 8; i++)
+            {
+                var corner = new Vector3((i & 1) == 0 ? -half.x : half.x, (i & 2) == 0 ? -half.y : half.y, (i & 4) == 0 ? -half.z : half.z);
+                Vector3 view = camera.WorldToViewportPoint(prop.Transform.TransformPoint(prop.LocalCenter + corner));
+                Assert.Greater(view.z, 0f, "the whole toy is in front of the eye");
+                // The field of view is the frame's height, at any shape.
+                var point = new Vector2((view.x - 0.5f) * camera.aspect, view.y - 0.5f) * canvasHeight;
+                min = Vector2.Min(min, point);
+                max = Vector2.Max(max, point);
+            }
+            return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+        }
+
+        [Test]
+        public void TheScaleReadout_KeepsOffTheFootOfAToyThatFillsTheFrame()
+        {
+            foreach (float shape in new[] { 16f / 9f, 4f / 3f })
+            {
+                // A crate three across from two and a half away: wider and taller than the frame's aiming area.
+                var stage = new HudStage(new Vector3(3f, 3f, 1f), 2.5f);
+                Open(shape, stage);
+                Grab(stage.Toy);
+                Settle();
+                Assert.IsTrue(hud.HeldSticker(canvas, out Rect toy));
+                Assert.IsTrue(HudFrame.Meet(toy, Dock(ReadoutDock.Low)), "it comes down into the low dock");
+                Assert.AreEqual(ReadoutDock.Corner, hud.Readout.Dock);
+                Assert.IsFalse(HudFrame.Meet(UiTestKit.Footprint(hud.Root, hud.Readout.Pill), LowerThird(toy)), "the foot stays in view");
+            }
+        }
+
+        [Test]
+        public void TheScaleReadout_ComesBackDown_OnlyOnceTheToyHasLeftTheLowDockWellAlone()
+        {
+            canvas = new Vector2(1920f, 1080f);
+            Rect low = Dock(ReadoutDock.Low);
+            // A toy on the crosshair whose foot ends this far above the low dock.
+            Rect Toy(float above) => Rect.MinMaxRect(-200f, low.yMax + above, 200f, 300f);
+
+            Assert.AreEqual(ReadoutDock.Low, ScaleReadout.DockFor(Toy(ScaleReadout.Clearance + 1f), canvas));
+            Assert.AreEqual(ReadoutDock.Corner, ScaleReadout.DockFor(Toy(ScaleReadout.Clearance - 1f), canvas), "nearer than the clearance: out of its way");
+            Assert.AreEqual(ReadoutDock.Corner, ScaleReadout.DockFor(Toy(-40f), canvas));
+
+            // At the limit it stays where it is.
+            Assert.AreEqual(ReadoutDock.Low, ScaleReadout.DockFor(Toy(ScaleReadout.Clearance + 1f), canvas, ReadoutDock.Low));
+            Assert.AreEqual(ReadoutDock.Corner, ScaleReadout.DockFor(Toy(ScaleReadout.Clearance + 1f), canvas, ReadoutDock.Corner));
+            Assert.AreEqual(ReadoutDock.Corner, ScaleReadout.DockFor(Toy(ScaleReadout.Clearance + ScaleReadout.ComeBack - 1f), canvas, ReadoutDock.Corner));
+            Assert.AreEqual(ReadoutDock.Low, ScaleReadout.DockFor(Toy(ScaleReadout.Clearance + ScaleReadout.ComeBack + 1f), canvas, ReadoutDock.Corner));
+            Assert.Greater(ScaleReadout.ComeBack, 0f);
+
+            // Something that comes down beside the dock, not into it, does not move the readout.
+            Assert.AreEqual(ReadoutDock.Low, ScaleReadout.DockFor(Rect.MinMaxRect(low.xMax + ScaleReadout.Clearance + 1f, -540f, 900f, 300f), canvas));
+        }
+
+        [Test]
+        public void TheScaleReadout_SticksOnAgainWhereItMovesTo_AndStaysThereOnceTheToyIsLetGo()
+        {
+            var stage = new HudStage(Domino, 1.6f);
+            Open(16f / 9f, stage);
+            ScaleReadout readout = hud.Readout;
+            Assert.AreEqual(ReadoutDock.Low, readout.Dock, "nothing is held: where it is by default");
+
+            // Picked up from this near the domino is taller than the aiming area: the readout sticks on in the corner.
+            Grab(stage.Toy);
+            Assert.AreEqual(ReadoutDock.Corner, readout.Dock, "placed before it is first drawn");
+            Assert.AreEqual(TweenPhase.Entering, readout.Pill.Tween.Phase);
+            Settle();
+            Assert.AreEqual(TweenPhase.Shown, readout.Pill.Tween.Phase);
+            // Looking about with it changes nothing: it is as tall on the screen as it was.
+            TestHelpers.LookAt(game.Player, new Vector3(0f, game.Player.Eye.y, 20f));
+            Step(5);
+            Assert.AreEqual(ReadoutDock.Corner, readout.Dock);
+            Assert.AreEqual(TweenPhase.Shown, readout.Pill.Tween.Phase);
+
+            // Flipped, it points away from the player and is a low thing on the screen: the low dock is free again.
+            input.Once.RotatePitch = true;
+            Step();
+            Assert.AreEqual(ReadoutDock.Low, readout.Dock);
+            Assert.AreEqual(TweenPhase.Entering, readout.Pill.Tween.Phase, "it sticks on again in its new place");
+            Assert.IsTrue(readout.Shown);
+            Settle();
+            UiTestKit.AreEqual(Dock(ReadoutDock.Low), UiTestKit.Footprint(hud.Root, readout.Pill), 0.5f, "in the low dock");
+
+            // And upright once more.
+            input.Once.RotatePitch = true;
+            Step();
+            Assert.AreEqual(ReadoutDock.Corner, readout.Dock);
+            Settle();
+            Assert.AreEqual(TweenPhase.Shown, readout.Pill.Tween.Phase, "it does not keep sticking on while nothing changes");
+            Step(10);
+            Assert.AreEqual(TweenPhase.Shown, readout.Pill.Tween.Phase);
+
+            // Let go, it stays where it is for as long as it lingers.
+            input.Once.GrabPressed = true;
+            Step();
+            Assert.IsNull(game.Grabber.Held);
+            for (int i = 0; i < 30; i++)
+            {
+                Step();
+                Assert.IsTrue(readout.Shown);
+                Assert.AreEqual(ReadoutDock.Corner, readout.Dock, "nothing is held: nothing moves it");
+            }
+            Assert.IsTrue(hud.Reticle.Visible, "the reticle is back");
+            Assert.IsFalse(HudFrame.Meet(UiTestKit.Footprint(hud.Root, readout.Pill), UiTestKit.OnCanvas(hud.Root, hud.Reticle.Rect)));
+
+            // The next toy starts afresh, and so does the next level.
+            game.LoadLevel(new HudStage(Vector3.one, 6f));
+            presentation.Frame(Sim.Dt, 1f);
+            Assert.IsFalse(readout.Shown);
+            Assert.AreEqual(ReadoutDock.Low, readout.Dock);
+        }
+
+        [Test]
+        public void TheBoxOfAToy_IsCutOffAtTheEye()
+        {
+            var stage = new HudStage(Vector3.one, 6f);
+            Open(16f / 9f, stage);
+            Prop toy = stage.Toy;
+            Vector3 eye = new Vector3(0f, 0.5f, 0f);
+            float half = 540f / Mathf.Tan(35f * Mathf.Deg2Rad);
+
+            // Straight ahead: its near face, 5.5 away, is the widest thing of it.
+            Assert.IsTrue(HudFrame.BoxOf(toy, eye, Quaternion.identity, 70f, 1080f, out Rect box));
+            UiTestKit.AreEqual(Rect.MinMaxRect(-0.5f / 5.5f * half, -0.5f / 5.5f * half, 0.5f / 5.5f * half, 0.5f / 5.5f * half), box, 0.01f, "a unit block six away");
+            // Twice the canvas, twice the pixels; off to the right when the view turns left.
+            Assert.IsTrue(HudFrame.BoxOf(toy, eye, Quaternion.identity, 70f, 2160f, out Rect twice));
+            Assert.AreEqual(box.width * 2f, twice.width, 0.01f);
+            Assert.IsTrue(HudFrame.BoxOf(toy, eye, Quaternion.Euler(0f, -20f, 0f), 70f, 1080f, out Rect right));
+            Assert.Greater(right.xMin, box.xMax);
+
+            // From inside it, part of it is behind the eye: what is in front runs out of any frame.
+            Assert.IsTrue(HudFrame.BoxOf(toy, toy.Center, Quaternion.identity, 70f, 1080f, out Rect around));
+            Assert.IsTrue(around.xMin < -5000f && around.xMax > 5000f && around.yMin < -5000f && around.yMax > 5000f, around.ToString());
+            Assert.IsFalse(float.IsInfinity(around.width) || float.IsNaN(around.width));
+
+            // Behind the player there is nothing of it to see.
+            Assert.IsFalse(HudFrame.BoxOf(toy, eye, Quaternion.Euler(0f, 180f, 0f), 70f, 1080f, out _));
+            Assert.IsFalse(HudFrame.BoxOf(null, eye, Quaternion.identity, 70f, 1080f, out _));
+
+            // The held toy's sticker: 4.5 px of border all round, the peel shadow 10 to the right and 12 down,
+            // at 1080; a frame half as tall again has them half as large again.
+            UiTestKit.AreEqual(Rect.MinMaxRect(-104.5f, -216.5f, 114.5f, 204.5f), HudFrame.StickerOf(Rect.MinMaxRect(-100f, -200f, 100f, 200f), 1080f), 1e-3f, "at 1080");
+            UiTestKit.AreEqual(Rect.MinMaxRect(-106.75f, -224.75f, 121.75f, 206.75f), HudFrame.StickerOf(Rect.MinMaxRect(-100f, -200f, 100f, 200f), 1620f), 1e-3f, "at 1620");
+            Assert.IsFalse(hud.HeldSticker(canvas, out _), "nothing is held");
+        }
+
+        // The acceptance of the readout's place, on the levels it was found on: while the bot holds the
+        // toy over its target the readout lies on nothing the player needs to see.
+        [TestCase(1)]
+        [TestCase(2)]
+        [TestCase(4)]
+        public void InTheCampaign_TheReadoutLiesOnNothingWhileTheBotAims(int id)
+        {
+            if (!LevelRegistry.Has(id)) Assert.Ignore("There is no level " + id + ".");
+            foreach (float shape in new[] { 16f / 9f, 4f / 3f, 9f / 16f })
+            {
+                string at = " (level " + id + " on a " + shape.ToString("0.00") + " screen";
+                Open(shape, LevelRegistry.Get(id), false);
+                var bot = new Bot(game);
+                var script = new BotRunner(game.Level.Solve(bot));
+                int held = 0;
+                bool letGo = false;
+                game.Events.PropDropped += e => letGo = true;
+                for (int tick = 0; tick < TestHelpers.Ticks(30f) && !letGo; tick++)
+                {
+                    if (script != null && !script.Advance()) script = null;
+                    game.Tick();
+                    presentation.Frame(Sim.Dt, 1f);
+                    if (!game.Grabber.IsHolding) continue;
+                    held++;
+                    string when = at + ", tick " + tick + ")";
+                    Assert.IsTrue(hud.Readout.Shown, when);
+                    Assert.IsTrue(hud.HeldSticker(canvas, out Rect toy), when);
+                    Rect pill = Dock(hud.Readout.Dock);
+                    Assert.IsFalse(HudFrame.Meet(pill, HudFrame.AimArea(canvas)), "the readout is in the aiming area" + when);
+                    Assert.IsFalse(HudFrame.Meet(pill, toy), "the readout lies on the held toy" + when);
+                    foreach (KeyValuePair<string, Rect> other in Furniture(true))
+                        Assert.IsFalse(HudFrame.Meet(pill, other.Value), "the readout lies on " + other.Key + when);
+                }
+                Assert.IsTrue(letGo, "the bot picked a toy up and let it go" + at + ")");
+                Assert.Greater(held, 30, "and held it for a while" + at + ")");
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------------
     // The menus (ART_BIBLE 10.5, 9.7), driven by the real GameRunner with fake devices
     // ----------------------------------------------------------------------------------------------
 
@@ -1059,11 +1536,11 @@ namespace Toybox.Tests
             Settings.Use(null);
         }
 
-        void Begin(string url, int levels = 3)
+        void Begin(string url, int levels = 3, bool refuseLock = false)
         {
             host = new GameObject("UI Test Runner") { hideFlags = HideFlags.DontSave };
             runner = host.AddComponent<GameRunner>();
-            devices = new FakeDevices();
+            devices = new FakeDevices { RefuseLock = refuseLock };
             runner.Begin(LaunchOptions.FromUrl(url), new RunnerOptions
             {
                 Devices = devices,
@@ -1619,8 +2096,9 @@ namespace Toybox.Tests
             Assert.IsTrue(complete.Info.Tween.IsShown, "600 ms: title, time, grab count and Next");
             Assert.AreEqual("TEST LEVEL 1", complete.Title);
             StringAssert.Contains(UiKit.Time(played), complete.Stats);
-            StringAssert.Contains("1 grab", complete.Stats);
-            Assert.IsFalse(complete.Stats.Contains("grabs"));
+            StringAssert.Contains("1 pick-up", complete.Stats);
+            Assert.IsFalse(complete.Stats.Contains("pick-ups"));
+            Assert.IsFalse(complete.Stats.Contains("grab"), "the card uses the levels' word");
             Assert.AreEqual("Next", complete.Next.Label.text);
             Assert.IsTrue(Palette.Same(Palette.Cherry, complete.Next.Sticker.FaceColor), "a Cherry Next pill");
             Assert.AreSame(complete.Next, menu.Active.Focused);
@@ -1726,6 +2204,50 @@ namespace Toybox.Tests
             Assert.AreEqual(0, store.Count, "and the bot leaves nothing in the player's store - no progress, no pill counts");
         }
 
+        // The middle of the bottom edge is the scale readout's and nothing goes over the toy (HudLayoutTests):
+        // what the HUD says about the game itself - the mouse is not captured, a bot is playing - hangs from
+        // the middle of the top edge. One place for the two, because they are never up together.
+        [Test]
+        public void TheLookPromptAndTheAutoplayPill_ShareTheTopOfTheFrame_AndAreNeverUpTogether()
+        {
+            Begin("?level=1", refuseLock: true);
+            Frames();
+            Assert.AreEqual(FlowState.Playing, State);
+            Assert.IsFalse(devices.PointerLocked, "the browser did not hand the mouse over");
+            Assert.IsFalse(hud.LookPrompt.Tween.IsShown, "not at once");
+            Seconds(HudPresenter.LookPromptDelay + 0.1f);
+            Assert.IsTrue(hud.LookPrompt.Tween.IsShown, "click to look around");
+            Assert.IsFalse(hud.AutoplayPill.Tween.IsShown);
+            foreach (Sticker note in new[] { hud.LookPrompt, hud.AutoplayPill })
+            {
+                Assert.AreEqual(UiKit.Top, note.Rect.anchorMin, note.name);
+                Assert.AreEqual(UiKit.Top, note.Rect.anchorMax, note.name);
+                Assert.AreEqual(new Vector2(0f, -HudPresenter.NoteMargin), note.Rect.anchoredPosition, note.name);
+                Assert.IsTrue(Palette.Same(Palette.Ink, note.FaceColor), "HUD pills are Ink");
+            }
+
+            // P: the bot takes over. Its pill comes, the prompt goes - the bot does not need the mouse.
+            devices.State.AutoplayPressed = true;
+            Frames();
+            Assert.IsTrue(runner.Autoplay);
+            Assert.IsTrue(hud.AutoplayPill.Tween.IsShown);
+            Assert.IsFalse(hud.LookPrompt.Tween.IsShown);
+            Seconds(1f);
+            Assert.IsTrue(hud.AutoplayPill.Tween.IsShown);
+            Assert.IsFalse(hud.LookPrompt.Tween.IsShown, "never while the bot plays");
+            Assert.IsFalse(hud.LookPrompt.gameObject.activeSelf);
+
+            // P again: the player is back, still without the mouse.
+            devices.State.AutoplayPressed = true;
+            Frames();
+            Assert.IsFalse(runner.Autoplay);
+            Assert.IsFalse(hud.AutoplayPill.Tween.IsShown);
+            Assert.IsFalse(hud.LookPrompt.Tween.IsShown, "the prompt waits its 0.6 s: the pill has peeled off by then");
+            Seconds(HudPresenter.LookPromptDelay + 0.1f);
+            Assert.IsTrue(hud.LookPrompt.Tween.IsShown);
+            Assert.IsFalse(hud.AutoplayPill.gameObject.activeSelf);
+        }
+
         [Test]
         public void Shutdown_GivesTheCameraAndTheFlowBack()
         {
@@ -1828,6 +2350,99 @@ namespace Toybox.Tests
             Assert.AreEqual(0f, Quaternion.Angle(camera.transform.rotation, rect.rotation), 1e-3f);
         }
 
+        // A picture that is not 16:9 has to show the UI the size the game shows it on such a screen: the
+        // scaler's Expand mode makes the canvas taller there, not narrower (the capture's canvas used to be
+        // 1080 tall at any shape, and a 4:3 or portrait picture showed a HUD the game never has).
+        [Test]
+        public void ACapturedCanvas_IsTheOneTheGamesScalerMakesOfThatScreen()
+        {
+            foreach (Vector2 screen in new[]
+                     {
+                         new Vector2(1920f, 1080f), new Vector2(1280f, 720f), new Vector2(2560f, 1080f), new Vector2(1024f, 768f), new Vector2(800f, 800f), new Vector2(540f, 960f),
+                     })
+            {
+                // CanvasScaler, Scale With Screen Size, Expand: the smaller of the two scale factors.
+                float factor = Mathf.Min(screen.x / 1920f, screen.y / 1080f);
+                Vector2 canvas = UiRoot.CanvasSize(screen.x / screen.y);
+                Assert.AreEqual(screen.x / factor, canvas.x, 0.01f, screen.ToString());
+                Assert.AreEqual(screen.y / factor, canvas.y, 0.01f, screen.ToString());
+                Assert.IsTrue(canvas.x >= 1919.99f && canvas.y >= 1079.99f, "the reference frame is wholly on it: " + screen);
+            }
+            Assert.AreEqual(1920f, UiRoot.CanvasSize(0f).x, 0.01f, "no shape: the reference frame");
+            Assert.AreEqual(1080f, UiRoot.CanvasSize(0f).y, 0.01f);
+
+            Present("hud", 3f / 4f);
+            Camera camera = presentation.Camera;
+            RectTransform rect = presentation.Get<HudPresenter>().Root.Rect;
+            Assert.AreEqual(1920f, rect.sizeDelta.x, 0.01f);
+            Assert.AreEqual(2560f, rect.sizeDelta.y, 0.01f);
+            // It still fills the picture exactly: all of its height is the view's height, its width three quarters of that.
+            float distance = Vector3.Dot(rect.position - camera.transform.position, camera.transform.forward);
+            float viewHeight = 2f * distance * Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            Assert.AreEqual(viewHeight, 2560f * rect.lossyScale.y, viewHeight * 1e-3f);
+            Assert.AreEqual(viewHeight * 0.75f, 1920f * rect.lossyScale.x, viewHeight * 1e-3f);
+        }
+
+        // A picture below 16:9 has a taller canvas, and a canvas put right behind the near plane is the smaller
+        // the taller it is. Below a scale of about 7e-5 TextMeshPro draws nothing on a world-space canvas:
+        // every picture narrower than 6:5 showed the level card, the toasts and the pills without a word on
+        // them (measured: drawn at 7.2e-5, gone at 6.7e-5). The canvas now keeps the scale it has at 16:9 and
+        // stands farther off instead.
+        [Test]
+        public void ACapturedPicture_HasItsWords_AtEveryShape()
+        {
+            float reference = 0f;
+            foreach (float aspect in new[] { 16f / 9f, 4f / 3f, 6f / 5f, 1f, 9f / 16f })
+            {
+                Present("hud", aspect);
+                for (int i = 0; i < 30; i++) presentation.Frame(1f / 60f, 1f);
+                HudPresenter hud = presentation.Get<HudPresenter>();
+                Assert.IsTrue(hud.LevelCard.Shown, "test setup: the level card is up");
+                Camera camera = presentation.Camera;
+                RectTransform rect = hud.Root.Rect;
+                string shape = "a picture " + aspect.ToString("0.###") + " wide for 1 high";
+
+                // The same scale at every shape, the canvas filling the picture, the UI on top of the world.
+                if (reference == 0f) reference = rect.lossyScale.y;
+                Assert.AreEqual(reference, rect.lossyScale.y, reference * 1e-3f, shape + ": the canvas is scaled as it is at 16:9");
+                float distance = Vector3.Dot(rect.position - camera.transform.position, camera.transform.forward);
+                float viewHeight = 2f * distance * Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+                Assert.AreEqual(viewHeight, rect.sizeDelta.y * rect.lossyScale.y, viewHeight * 1e-3f, shape + ": the canvas fills the picture's height");
+                Assert.Greater(distance, camera.nearClipPlane, shape);
+                Assert.IsTrue(UnityEngine.Rendering.Universal.CameraExtensions.GetUniversalAdditionalCameraData(UiCapture.Overlay).clearDepth,
+                    "the UI's camera clears the depth: nothing of the world gets in front of a canvas that stands farther off");
+
+                // The words of the level card are in the picture: dark pixels that are gone when its labels are.
+                const int height = 960;
+                int width = Mathf.RoundToInt(height * aspect);
+                int with = InkInTheLevelCard(hud, width, height);
+                TMPro.TextMeshProUGUI[] labels = hud.LevelCard.Card.GetComponentsInChildren<TMPro.TextMeshProUGUI>(true);
+                Assert.AreEqual(3, labels.Length, "test setup: number, title and blurb");
+                foreach (TMPro.TextMeshProUGUI label in labels) label.enabled = false;
+                int without = InkInTheLevelCard(hud, width, height);
+                Assert.Greater(with - without, 100, shape + ": the level card has no words on it (" + with + " dark pixels with its labels, " + without + " without)");
+                End();
+            }
+        }
+
+        // Dark pixels where the level card is: the top left of the canvas, 48 to 740 by 48 to 260 reference pixels.
+        int InkInTheLevelCard(HudPresenter hud, int width, int height)
+        {
+            // The first picture after a change is of the canvas as it was.
+            Object.DestroyImmediate(Toybox.EditorTools.Shots.Photograph(presentation.Camera, width, height));
+            Texture2D image = Toybox.EditorTools.Shots.Photograph(presentation.Camera, width, height);
+            float perUnit = width / hud.Root.Rect.sizeDelta.x;
+            int ink = 0;
+            for (int y = height - 1 - Mathf.RoundToInt(260f * perUnit); y < height - Mathf.RoundToInt(48f * perUnit); y++)
+                for (int x = Mathf.RoundToInt(48f * perUnit); x < Mathf.RoundToInt(740f * perUnit); x++)
+                {
+                    Color c = image.GetPixel(x, y);
+                    if (c.r + c.g + c.b < 1f) ink++;
+                }
+            Object.DestroyImmediate(image);
+            return ink;
+        }
+
         [Test]
         public void ACapture_CanAskForAnyMenu()
         {
@@ -1906,6 +2521,150 @@ namespace Toybox.Tests
             {
                 Object.DestroyImmediate(image);
                 File.Delete(files[0]);
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------------
+    // Pictures of the scale readout's corner dock, for looking at (not a test)
+    // ----------------------------------------------------------------------------------------------
+
+    /// <summary>A level played another way: its own Build, somebody else's script.</summary>
+    sealed class Replayed : LevelDefinition
+    {
+        readonly LevelDefinition level;
+        readonly Func<Bot, IEnumerator> script;
+
+        public Replayed(LevelDefinition level, Func<Bot, IEnumerator> script)
+        {
+            this.level = level;
+            this.script = script;
+        }
+
+        public override string Slug => level.Slug;
+        public override string Title => level.Title;
+        public override string Blurb => level.Blurb;
+        public override string[] Hints => level.Hints;
+        public override string Environment => level.Environment;
+        public override int EnvironmentVisit => level.EnvironmentVisit;
+        public override float GroundY => level.GroundY;
+        public override float KillY => level.KillY;
+
+        public override void Build(LevelContext ctx) => level.Build(ctx);
+
+        public override IEnumerator Solve(Bot bot) => script(bot);
+    }
+
+    public static class HudStills
+    {
+        /// <summary>
+        /// Level 4 with the domino picked up from nearer than its stand mark, so that it is taller on the
+        /// screen than the frame's aiming area and the scale readout has to leave its low dock
+        /// (ART_BIBLE 9.6); held over the painted footprint as the level's own solution holds it:
+        ///
+        ///   tools/unity.ps1 exec -Method Toybox.Tests.HudStills.Capture
+        ///       -UnityArgs '-toyboxUi','hud','-toyboxSize','1280x720','-toyboxOut','tools/out/shots/prelude-hud/near'
+        ///
+        /// -toyboxNear how far in front of the domino the bot stands to pick it up (0.75; the stand mark is
+        /// 1.06 away), -toyboxTimes (4.5), -toyboxSize and -toyboxOut as for Shots.Capture. Without
+        /// -toyboxUi there is no HUD in the picture.
+        /// </summary>
+        public static void Capture()
+        {
+            float near = Toybox.EditorTools.ToyboxArgs.GetFloat("-toyboxNear", 0.75f);
+            int width = 1280, height = 720;
+            Shots.ParseSize(Toybox.EditorTools.ToyboxArgs.Get("-toyboxSize", "1280x720"), ref width, ref height);
+            var level = new Toybox.Levels.Level04DominoEffect();
+            IEnumerator Script(Bot bot)
+            {
+                Vector3 stand = Toybox.Levels.Level04DominoEffect.PickupSpot;
+                stand.z = level.Domino.Center.z - near;
+                yield return bot.WalkTo(stand, 0.03f);
+                yield return bot.LookAt(level.Domino);
+                yield return bot.Grab(level.Domino);
+                yield return bot.WalkTo(Toybox.Levels.Level04DominoEffect.EdgeSpot, 0.1f);
+                yield return bot.LookAt(Toybox.Levels.Level04DominoEffect.AimPoint);
+                yield return bot.Wait(30f);
+            }
+            Shots.Run(new ShotRequest
+            {
+                Level = 4,
+                Definition = new Replayed(level, Script),
+                Times = Shots.ParseTimes(Toybox.EditorTools.ToyboxArgs.Get("-toyboxTimes", "4.5")),
+                Width = width,
+                Height = height,
+                OutputDirectory = Toybox.EditorTools.ToyboxArgs.Get("-toyboxOut", "tools/out/shots/prelude-hud/near"),
+            });
+        }
+
+        /// <summary>
+        /// A level at a moment of its solution with everything the HUD has up at once - the level card,
+        /// three hints, the control pills, the scale readout, the autoplay pill and the look prompt (which
+        /// a tool never shows by itself: they belong to the game's flow) - for seeing that nothing lies on
+        /// anything:
+        ///
+        ///   tools/unity.ps1 exec -Method Toybox.Tests.HudStills.Everything
+        ///       -UnityArgs '-toyboxUi','hud','-toyboxLevel','1','-toyboxTimes','1.3','-toyboxSize','1024x768'
+        ///
+        /// Written to -toyboxOut (tools/out/shots/prelude-hud/all) as levelNN-all.png.
+        /// </summary>
+        public static void Everything()
+        {
+            int id = Toybox.EditorTools.ToyboxArgs.GetInt("-toyboxLevel", 1);
+            float time = Shots.ParseTimes(Toybox.EditorTools.ToyboxArgs.Get("-toyboxTimes", "1.3"))[0];
+            int width = 1280, height = 720;
+            Shots.ParseSize(Toybox.EditorTools.ToyboxArgs.Get("-toyboxSize", "1280x720"), ref width, ref height);
+            string directory = Toybox.EditorTools.ToyboxArgs.Get("-toyboxOut", "tools/out/shots/prelude-hud/all");
+            if (!Path.IsPathRooted(directory)) directory = Path.Combine(Path.GetDirectoryName(Application.dataPath), directory);
+            Directory.CreateDirectory(directory);
+
+            Game.Current?.Dispose();
+            UnityEditor.SceneManagement.EditorSceneManager.NewScene(UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Single);
+            bool previousAsync = ShaderUtil.allowAsyncCompilation;
+            ShaderUtil.allowAsyncCompilation = false;
+            Game game = null;
+            Presentation presentation = null;
+            try
+            {
+                game = Game.Create(new GameOptions());
+                game.LoadLevel(LevelRegistry.Get(id));
+                presentation = Presentation.Create(game, new PresentationOptions());
+                presentation.Context.Autoplay = true;
+                presentation.Frame(0f, 1f);
+                int msaa = Toybox.Render.TierSpec.Of(presentation.Context.Quality).Msaa;
+                // The first render after a script reload is not to be trusted (see Shots.Warm).
+                Object.DestroyImmediate(Shots.Photograph(presentation.Camera, width, height, msaa));
+
+                var bot = new Bot(game);
+                var script = new BotRunner(game.Level.Solve(bot));
+                for (int tick = Mathf.RoundToInt(time / Sim.Dt); tick > 0; tick--)
+                {
+                    if (script != null && !script.Advance()) script = null;
+                    game.Tick();
+                    presentation.Frame(Sim.Dt, 1f);
+                }
+                game.Events.RaiseMessage(new MessageEvent { Text = "Step back while you hold a toy: it lands farther away, and bigger than it was.", Seconds = 20f });
+                game.Events.RaiseMessage(new MessageEvent { Text = "Press R to start the level over.", Seconds = 20f });
+                presentation.Frame(0.5f, 1f);
+                HudPresenter hud = presentation.Get<HudPresenter>();
+                if (hud != null && hud.Root != null)
+                {
+                    hud.LevelCard.Card.Tween.Show(true);
+                    hud.LookPrompt.Tween.Show(true);
+                }
+
+                Texture2D image = Shots.Photograph(presentation.Camera, width, height, msaa);
+                string path = Path.Combine(directory, "level" + id.ToString("00") + "-all.png");
+                File.WriteAllBytes(path, image.EncodeToPNG());
+                Object.DestroyImmediate(image);
+                Debug.Log("[Toybox] shot: " + path);
+            }
+            finally
+            {
+                presentation?.Dispose();
+                game?.Dispose();
+                ShaderUtil.allowAsyncCompilation = previousAsync;
+                UnityEditor.SceneManagement.EditorSceneManager.NewScene(UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Single);
             }
         }
     }

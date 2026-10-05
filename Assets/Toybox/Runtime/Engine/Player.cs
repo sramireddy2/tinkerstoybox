@@ -57,6 +57,7 @@ namespace Toybox.Engine
         readonly Game game;
         readonly PhysicsMaterial material;
         readonly Collider[] nearby = new Collider[32];
+        readonly RaycastHit[] probeHits = new RaycastHit[16];
         readonly Vector3[] steepNormals = new Vector3[MaxSteepContacts];
         readonly Collider[] steepColliders = new Collider[MaxSteepContacts];
         int steepCount;
@@ -137,6 +138,12 @@ namespace Toybox.Engine
         public Vector3 GroundPoint { get; private set; }
         /// <summary>The prop under the feet, or null when airborne or on world geometry.</summary>
         public Prop GroundProp => Grounded ? PropRef.Of(GroundCollider) : null;
+        /// <summary>Velocity of the ground at the feet (a mover, a prop that carries the player); zero on the world and in the air.</summary>
+        internal Vector3 GroundVelocity => groundVelocity;
+        /// <summary>The simulation this body is part of (for the contact handling, which is handed the player only).</summary>
+        internal Game Game => game;
+        /// <summary>The velocity the player has after the running step if nothing touches them: what the controller set, and gravity.</summary>
+        internal Vector3 ExpectedVelocity => expectedVelocity;
         public Vector3 CheckpointPosition => checkpointPosition;
 
         internal Player(Game game, Transform parent)
@@ -242,6 +249,7 @@ namespace Toybox.Engine
                 for (int c = 0; c < count; c++)
                 {
                     Collider other = nearby[c];
+                    if (PassesThrough(other)) continue;
                     Transform otherTransform = other.transform;
                     if (!Physics.ComputePenetration(Collider, position, Quaternion.identity, other, otherTransform.position, otherTransform.rotation,
                             out Vector3 direction, out float depth))
@@ -258,6 +266,28 @@ namespace Toybox.Engine
                 if (position.y < start.y - skin || (position - start).magnitude > 2f * Radius) return false;
             }
             return false;
+        }
+
+        /// <summary>
+        /// The step that just ended threw the player (a heavy prop: PerspectiveGrabber.TakeBackThrows) and
+        /// that is undone: they are where, and as fast as, they would be had nothing touched them in it.
+        /// Called before <see cref="PostPhysics"/>, with whatever threw them already passing through them.
+        /// </summary>
+        internal void TakeBack()
+        {
+            Vector3 velocity = expectedVelocity;
+            // What they stood on took the fall out of that; it is not put back in.
+            if (Grounded)
+            {
+                float into = Vector3.Dot(velocity, GroundNormal);
+                if (into < 0f) velocity -= GroundNormal * into;
+            }
+            Vector3 solved = Body.position;
+            Body.linearVelocity = velocity;
+            MoveBody(previousPosition + velocity * Sim.Dt);
+            // Anything else in the way there (a wall they were walking into): out of it, or left where the
+            // solver put them.
+            if (!MakeRoom()) MoveBody(solved);
         }
 
         /// <summary>Moves the feet to a point and stops. Look direction is unchanged.</summary>
@@ -536,6 +566,7 @@ namespace Toybox.Engine
                 if (!(other is BoxCollider || other is SphereCollider || other is CapsuleCollider || other is MeshCollider)) continue;
                 // The foot shoves light props aside (PlayerContactScaler); they neither block nor lift.
                 if (IsLightProp(other)) continue;
+                if (PassesThrough(other)) continue;
 
                 Vector3 point = other.ClosestPoint(center);
                 Vector3 toCenter = center - point;
@@ -597,7 +628,13 @@ namespace Toybox.Engine
             for (int i = 0; i < steepCount; i++)
             {
                 Vector3 normal = steepNormals[i];
-                float into = Vector3.Dot(velocity, normal);
+                // What counts is the speed into the face, not the speed through the world: the edge of a
+                // step that rides the same platform as the player (a plank on the next wagon of a train)
+                // travels along with them, and hopping at it must not cost them the platform's speed.
+                // (Only what the face does sideways: one that rises under the foot is the solver's.)
+                Vector3 face = steepColliders[i] != null ? GroundPointVelocity(steepColliders[i], Body.position, out _) : Vector3.zero;
+                face.y = 0f;
+                float into = Vector3.Dot(velocity - face, normal);
                 if (into >= 0f) continue;
                 // Sideways out of the face, leaving the vertical speed as it is.
                 var outward = new Vector3(normal.x, 0f, normal.z);
@@ -635,14 +672,13 @@ namespace Toybox.Engine
             Vector3 origin = Body.position + Vector3.up * (radius + lift);
             PhysicsScene physics = game.PhysicsScene;
 
-            bool below = physics.Raycast(origin, Vector3.down, out RaycastHit ray, radius + lift + tolerance, Layers.SolidMask, QueryTriggerInteraction.Ignore)
-                         && ray.normal.y >= WalkableNormalY;
+            bool below = RayDown(physics, origin, radius + lift + tolerance, out RaycastHit ray) && ray.normal.y >= WalkableNormalY;
 
             // On a plane tilted by a, the probe sphere touches after lift + (radius - probeRadius) / cos(a).
             float reach = lift + (radius - probeRadius) / WalkableNormalY + tolerance;
             // A prop too light to carry the player counts only if it is right under the axis (the ray): the
             // side of the capsule does not climb it, it shoves it away (see PlayerContactScaler).
-            if (physics.SphereCast(origin, probeRadius, Vector3.down, out RaycastHit hit, reach, Layers.SolidMask, QueryTriggerInteraction.Ignore)
+            if (SphereDown(physics, origin, probeRadius, reach, out RaycastHit hit)
                 && hit.normal.y >= WalkableNormalY && !IsLightProp(hit.collider))
             {
                 float resting = lift + (radius - probeRadius) / hit.normal.y;
@@ -669,6 +705,49 @@ namespace Toybox.Engine
             ground.Support = ray.normal;
             ground.Gap = Mathf.Max(0f, ray.distance - (radius + lift));
             return true;
+        }
+
+        /// <summary>
+        /// What the capsule does not collide with - a prop let go around the player, a heavy prop on its way
+        /// through them (PerspectiveGrabber), a gadget part that would have crushed them - is no ground to
+        /// stand on and no face in the way either. The queries below see it all the same, because ignoring
+        /// a collision is a matter between two colliders and a query knows only one.
+        /// </summary>
+        bool PassesThrough(Collider other) => Physics.GetIgnoreCollision(other, Collider);
+
+        // The first thing under the probe that the capsule can touch. Nearly always that is simply the
+        // first thing; only when the capsule passes through that one are all of them looked at.
+        bool RayDown(PhysicsScene physics, Vector3 origin, float distance, out RaycastHit hit)
+        {
+            if (!physics.Raycast(origin, Vector3.down, out hit, distance, Layers.SolidMask, QueryTriggerInteraction.Ignore)) return false;
+            if (!PassesThrough(hit.collider)) return true;
+            int count = physics.Raycast(origin, Vector3.down, probeHits, distance, Layers.SolidMask, QueryTriggerInteraction.Ignore);
+            return NearestTouchable(count, out hit);
+        }
+
+        bool SphereDown(PhysicsScene physics, Vector3 origin, float radius, float distance, out RaycastHit hit)
+        {
+            if (!physics.SphereCast(origin, radius, Vector3.down, out hit, distance, Layers.SolidMask, QueryTriggerInteraction.Ignore)) return false;
+            if (!PassesThrough(hit.collider)) return true;
+            int count = physics.SphereCast(origin, radius, Vector3.down, probeHits, distance, Layers.SolidMask, QueryTriggerInteraction.Ignore);
+            return NearestTouchable(count, out hit);
+        }
+
+        bool NearestTouchable(int count, out RaycastHit hit)
+        {
+            hit = default;
+            bool found = false;
+            for (int i = 0; i < count; i++)
+            {
+                RaycastHit candidate = probeHits[i];
+                // A cast for all hits also reports what the probe starts inside of, at distance 0; the cast
+                // for the first hit does not, and neither does this.
+                if (candidate.distance <= 0f || PassesThrough(candidate.collider)) continue;
+                if (found && candidate.distance >= hit.distance) continue;
+                hit = candidate;
+                found = true;
+            }
+            return found;
         }
 
         // A sphere cast reports the direction from the touched point to the sphere's center. On a face that

@@ -68,11 +68,34 @@ namespace Toybox.Gadgets
     /// pivot leaves with the vertical speed r sqrt(2 g f h) x / riderArm. The plank is a kinematic mover
     /// whose pose is a function of the ticks since the strike; the release sets the rider's velocity
     /// explicitly, so the height does not depend on what the solver makes of a fast-rising platform.
+    ///
+    /// Three things a swing does about what happens during it (found by the Level 7 review):
+    /// - Its rider is still its rider while in the air over their own arm (a jump in mid-swing). The plank
+    ///   comes up under their feet and takes them along at its own speed instead of passing through them,
+    ///   and they are thrown with the speed of the rule. A jump so late that it is higher and faster than
+    ///   the throw keeps what it has.
+    /// - What tipped it and is picked up again in mid-swing drives it no longer: the swing ends where it
+    ///   is, its rider keeps the speed it had given them so far, and the plank swings back.
+    /// - A tipped plank whose weight has been picked up (or that the player alone held down) swings back
+    ///   at once. One whose weight is merely not touching it any more - a boulder that hops as the tip
+    ///   meets the floor, or rests a hair above it between the pivot and a wall - waits
+    ///   <see cref="ReleaseTicks"/> ticks first; and a swing with less than <see cref="MinStrikeShare"/> of
+    ///   the full travel left is the plank settling, not a strike: it moves, and nobody is told.
     /// </summary>
     public sealed class Seesaw : Gadget
     {
         /// <summary>Below this much load on the strike side a tipped seesaw swings back.</summary>
         public const float HoldLoad = 0.5f;
+        /// <summary>
+        /// A tipped seesaw whose weight is still about (not picked up, not removed) swings back only when its
+        /// strike side has been empty for this many ticks in a row. (Measured in Level 7's cubby: the biggest
+        /// boulder, 7 across, is off the tipped plank for 0.4 s after the tip has met the floor.)
+        /// </summary>
+        public const int ReleaseTicks = 30;
+        /// <summary>A swing with less than this share of the full travel ahead of it raises no strike events.</summary>
+        public const float MinStrikeShare = 0.1f;
+        /// <summary>The rider of a swing who is in the air no higher than this over their arm (per unit of player scale) is still its rider.</summary>
+        public const float OverheadReach = 1.5f;
         const float TouchSkin = 0.12f;
 
         static readonly Collider[] Hits = new Collider[64];
@@ -97,6 +120,15 @@ namespace Toybox.Gadgets
         bool ghosted;
         int riderTicks;
         float riderDistance;
+        // Somebody stood on the rest side when this swing began, or has since.
+        bool swingRider;
+        // The heaviest loose prop on the strike side, as last measured; the one this swing began with; and
+        // the last one that was seen on the strike side at all (what holds a tipped plank down).
+        Prop strikeProp, swingProp, heldDownBy;
+        int emptyTicks;
+        // The plank has taken its airborne rider along in this swing, and they have not stood on it since:
+        // the upward speed they have is the plank's doing, not their own.
+        bool carried;
 
         public Seesaw(LevelContext ctx, SeesawOptions options) : base(ctx, options?.Name)
         {
@@ -200,10 +232,19 @@ namespace Toybox.Gadgets
                     if (ShouldStrike()) BeginSwing();
                     break;
                 case SeesawState.Tipped:
-                    if (StrikeLoad < HoldLoad)
+                    if (StrikeLoad >= HoldLoad)
+                    {
+                        emptyTicks = 0;
+                        break;
+                    }
+                    // Picked up, taken out of the level, or nothing but the player's own weight: back at once.
+                    // A weight that is still about has only hopped (the tip has just met the floor): wait.
+                    bool gone = heldDownBy == null || heldDownBy.Held || heldDownBy.Removed;
+                    if (gone || ++emptyTicks >= ReleaseTicks)
                     {
                         State = SeesawState.Return;
                         returnSpeed = 0f;
+                        heldDownBy = null;
                     }
                     break;
             }
@@ -235,8 +276,17 @@ namespace Toybox.Gadgets
             swingTravel = Mathf.Max(0f, swingFrom - options.FloorY);
             swingTick = 0;
             swingLanded = false;
-            Launched = false;
+            swingRider = riderTicks > 0 && riderDistance > 0f;
+            swingProp = strikeProp;
+            // (Whatever lay on the strike side before this swing has nothing to do with what holds it down after.)
+            heldDownBy = strikeProp;
+            emptyTicks = 0;
+            carried = false;
             State = SeesawState.Swing;
+            // With next to no way to go (struck again within a hair of lying tipped) the plank only settles:
+            // nobody is told, and a rider it has just thrown is still on their way.
+            if (swingTravel < MinStrikeShare * StrikeTravel) return;
+            Launched = false;
             SeesawStruck?.Invoke(StrikeLoad, swingF);
             Game.Events.RaiseSeesawStruck(Event(PointAt(StrikeSign * strikeArm, 0f, angle), null, StrikeLoad, swingF));
         }
@@ -246,10 +296,22 @@ namespace Toybox.Gadgets
             if (swingLanded)
             {
                 // The tick after the tip met the floor: the plank is at rest, the riders are let go.
-                Launch();
+                Throw(Mathf.Sqrt(2f * Game.Gravity * swingF * swingTravel));
                 State = SeesawState.Tipped;
+                emptyTicks = 0;
                 return;
             }
+            if (swingProp != null && (swingProp.Held || swingProp.Removed))
+            {
+                // What tipped it has been taken off it in mid-swing: nothing drives the plank any more. Its
+                // riders keep the speed it has given them so far, and it swings back from where it is.
+                Throw(Mathf.Min(swingF * Game.Gravity * swingTick * Sim.Dt, Mathf.Sqrt(2f * Game.Gravity * swingF * swingTravel)));
+                swingProp = null;
+                State = SeesawState.Return;
+                returnSpeed = 0f;
+                return;
+            }
+            if (riderDistance > 0f && GadgetKit.PlayerStandsOn(Game, body)) swingRider = true;
             swingTick++;
             float t = swingTick * Sim.Dt;
             float drop = Mathf.Min(swingTravel, 0.5f * swingF * Game.Gravity * t * t);
@@ -258,9 +320,11 @@ namespace Toybox.Gadgets
             if (drop >= swingTravel) swingLanded = true;
         }
 
-        void Launch()
+        // Lets the riders go with what the swing has given them. strikeTipSpeed: how fast the strike tip is
+        // coming down (at the end of a full swing: sqrt(2 g f h)).
+        void Throw(float strikeTipSpeed)
         {
-            float tipSpeed = riderArm / strikeArm * Mathf.Sqrt(2f * Game.Gravity * swingF * swingTravel);
+            float tipSpeed = riderArm / strikeArm * strikeTipSpeed;
             if (riderTicks > 0 && riderDistance > 0f)
             {
                 float speed = tipSpeed * Mathf.Min(riderDistance, riderArm) / riderArm;
@@ -273,6 +337,10 @@ namespace Toybox.Gadgets
                     Vector3 wish = Quaternion.Euler(0f, player.Yaw, 0f) * new Vector3(input.MoveX, 0f, input.MoveZ);
                     if (wish.sqrMagnitude > 1f) wish.Normalize();
                     Vector3 velocity = wish * ((input.Sprint ? Player.SprintSpeed : Player.WalkSpeed) * player.Scale);
+                    // (A rider in the air over the plank who is faster than the throw of their own doing - a
+                    // jump at the very end of the swing - keeps that. One the plank was taking along is not:
+                    // the speed they have is the plank's.)
+                    if (!carried && !GadgetKit.PlayerStandsOn(Game, body)) speed = Mathf.Max(speed, player.Velocity.y);
                     player.SetVelocity(new Vector3(velocity.x, speed, velocity.z));
                     Launched = true;
                     LastLaunchSpeed = speed;
@@ -324,11 +392,61 @@ namespace Toybox.Gadgets
             if (!riding && !ghosted && GadgetKit.WouldCrush(Game, mover.Transform, colliders, position, rotation))
             {
                 if (!force) return false;
-                GadgetKit.IgnorePlayer(Game, colliders, true);
-                ghosted = true;
+                if (!Carry(next))
+                {
+                    GadgetKit.IgnorePlayer(Game, colliders, true);
+                    ghosted = true;
+                }
             }
             angle = next;
             mover.MoveTo(position, rotation);
+            return true;
+        }
+
+        /// <summary>
+        /// True while a swing's rider is in the air over the arm they stood on - they jumped - no higher than
+        /// <see cref="OverheadReach"/> above it and not under it. They are still its rider.
+        /// </summary>
+        public bool RiderOverhead => State == SeesawState.Swing && swingRider && Overhead(out _);
+
+        // The player in the air over the rest side's arm, and how far out along it.
+        bool Overhead(out float along)
+        {
+            Player player = Game.Player;
+            FrameAt(angle, out Vector3 origin, out Quaternion rotation);
+            Vector3 local = Quaternion.Inverse(rotation) * (player.Position - origin);
+            along = -StrikeSign * local.z;
+            if (player.Grounded) return false;
+            if (along <= 0f || along > riderArm + player.Radius) return false;
+            if (Mathf.Abs(local.x) > options.Width * 0.5f + 0.1f * player.Scale) return false;
+            float above = local.y - options.Thickness;
+            return above > -0.1f * player.Scale && above < OverheadReach * player.Scale;
+        }
+
+        // The plank is about to come up into the swing's rider, who is in the air over it: it takes them
+        // along. They get the upward speed that puts their feet on its top where it will be after this step
+        // (never more than the plank's own), so nothing overlaps and the solver has nothing to throw.
+        bool Carry(float next)
+        {
+            if (!swingRider || !Overhead(out float along)) return false;
+            Player player = Game.Player;
+            FrameAt(next, out Vector3 origin, out Quaternion rotation);
+            Vector3 normal = rotation * Vector3.up;
+            if (normal.y < 0.5f) return false;
+            // The height at which the capsule's foot (a sphere) rests on the plank's top, straight under the player.
+            float radius = player.Radius, skin = 0.01f * player.Scale;
+            Vector3 top = origin + rotation * new Vector3(0f, options.Thickness, 0f);
+            Vector3 feet = player.Position;
+            float rest = feet.y + (radius + skin - Vector3.Dot(new Vector3(feet.x, feet.y + radius, feet.z) - top, normal)) / normal.y;
+            float rise = (rest - feet.y) / Sim.Dt + Game.Gravity * Sim.Dt;
+            Vector3 velocity = player.Velocity;
+            if (rise > velocity.y)
+            {
+                player.SetVelocity(new Vector3(velocity.x, rise, velocity.z));
+                carried = true;
+            }
+            riderDistance = Mathf.Min(along, riderArm);
+            riderTicks = 3;
             return true;
         }
 
@@ -344,7 +462,7 @@ namespace Toybox.Gadgets
             int count = Game.PhysicsScene.OverlapBox(centre, half, Hits, rotation, Layers.PropMask, QueryTriggerInteraction.Ignore);
 
             float loadA = 0f, loadB = 0f;
-            Prop previous = null;
+            Prop previous = null, heaviestA = null, heaviestB = null;
             // Colliders of one prop come in a row often enough; a prop with several is still counted once.
             for (int i = 0; i < count; i++)
             {
@@ -357,8 +475,16 @@ namespace Toybox.Gadgets
                 previous = prop;
                 Vector3 local = inverse * (prop.Center - origin);
                 if (Mathf.Abs(local.x) > options.Width * 0.5f + options.TipMargin || local.y < 0f || local.y > options.PadHeight) continue;
-                if (local.z > options.ArmA * 0.1f && local.z <= options.ArmA + options.TipMargin) loadA += prop.Mass;
-                else if (local.z < -options.ArmB * 0.1f && local.z >= -options.ArmB - options.TipMargin) loadB += prop.Mass;
+                if (local.z > options.ArmA * 0.1f && local.z <= options.ArmA + options.TipMargin)
+                {
+                    loadA += prop.Mass;
+                    if (heaviestA == null || prop.Mass > heaviestA.Mass) heaviestA = prop;
+                }
+                else if (local.z < -options.ArmB * 0.1f && local.z >= -options.ArmB - options.TipMargin)
+                {
+                    loadB += prop.Mass;
+                    if (heaviestB == null || prop.Mass > heaviestB.Mass) heaviestB = prop;
+                }
             }
 
             Player player = Game.Player;
@@ -370,6 +496,13 @@ namespace Toybox.Gadgets
                 // How far out on the rest side the rider stands (0 on the strike side).
                 riderDistance = Mathf.Max(0f, -StrikeSign * local.z);
                 riderTicks = 3;
+                carried = false;
+            }
+            else if (State == SeesawState.Swing && swingRider && Overhead(out float along))
+            {
+                // In the air over their own arm while it swings: still the rider.
+                riderDistance = Mathf.Min(along, riderArm);
+                riderTicks = 3;
             }
             else if (riderTicks > 0)
             {
@@ -377,6 +510,8 @@ namespace Toybox.Gadgets
             }
 
             bool restA = options.RestSide == SeesawSide.A;
+            strikeProp = restA ? heaviestB : heaviestA;
+            if (strikeProp != null) heldDownBy = strikeProp;
             StrikeLoad = restA ? loadB : loadA;
             RiderLoad = (restA ? loadA : loadB) + options.RiderBias;
         }
@@ -426,6 +561,12 @@ namespace Toybox.Gadgets
             angle = restAngle;
             returnSpeed = 0f;
             riderTicks = 0;
+            swingRider = false;
+            strikeProp = null;
+            swingProp = null;
+            heldDownBy = null;
+            emptyTicks = 0;
+            carried = false;
             if (ghosted)
             {
                 GadgetKit.IgnorePlayer(Game, colliders, false);

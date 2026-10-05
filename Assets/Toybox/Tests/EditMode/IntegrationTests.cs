@@ -633,6 +633,38 @@ namespace Toybox.Tests
             Assert.AreEqual(2, runner.LevelId);
         }
 
+        /// <summary>
+        /// The menus' focus tick is rate-limited (a dragged slider must purr, not buzz), by the clock. That
+        /// limit is one game's own: the first tick of the next game is heard even when no time has passed
+        /// since the last tick of the game before it - two tests in one editor frame, a game restarted at
+        /// once. (It was a static, and ACompletedLevel_FlashesOnce_AndTheMenusAreHeard lost its tick
+        /// whenever the test that ran before it had moved a focus in the same frame.)
+        /// </summary>
+        [Test]
+        public void TheFirstFocusTickOfAGame_IsHeard_HoweverSoonAfterTheLastGamesTick()
+        {
+            for (int game = 0; game < 2; game++)
+            {
+                Begin("?level=1");
+                Frames(10);
+                MenuPresenter menu = runner.Presentation.Get<MenuPresenter>();
+                AudioPresenter audio = runner.Presentation.Get<AudioPresenter>();
+                runner.Game.CompleteLevel();
+                Frames(TestHelpers.Ticks(0.8f));
+                Assert.AreSame(menu.Complete, menu.Current);
+                int hovers = audio.Output.Count(SoundId.UiHover);
+                Assert.IsTrue(menu.Move(UnityEngine.EventSystems.MoveDirection.Left), "test setup: the focus moved");
+                Frames();
+                Assert.AreEqual(hovers + 1, audio.Output.Count(SoundId.UiHover), "game " + (game + 1) + ": its first focus tick");
+                // Within one game the limit holds: a second move in the same instant is not a second tick.
+                Assert.IsTrue(menu.Move(UnityEngine.EventSystems.MoveDirection.Right));
+                Frames();
+                Assert.AreEqual(hovers + 1, audio.Output.Count(SoundId.UiHover), "game " + (game + 1) + ": two ticks in one instant are one");
+                Shutdown();
+                CleanSlate();
+            }
+        }
+
         [Test]
         public void GadgetEvents_AreHeard()
         {

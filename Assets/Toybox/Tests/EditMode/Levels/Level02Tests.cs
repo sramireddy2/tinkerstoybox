@@ -1,10 +1,16 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using NUnit.Framework;
 using Toybox.Art;
+using Toybox.EditorTools;
 using Toybox.Engine;
 using Toybox.Gadgets;
 using Toybox.Levels;
+using Toybox.Platform;
+using Toybox.Render;
+using Toybox.Toys;
+using UnityEditor;
 using UnityEngine;
 
 namespace Toybox.Tests
@@ -84,6 +90,11 @@ namespace Toybox.Tests
             Assert.IsTrue(thimble.HasTag(Level02ThimbleChasm.PlugTag));
             Assert.AreEqual(GrabPose.Upright, thimble.GrabPose);
             Assert.IsTrue(thimble.Grabbable);
+            // The owner's brief: "a tiny silver thimble". Silver, and the candy that says "yours to lift" is
+            // the band round its rim - the room's hero candy, Tangerine.
+            Assert.AreSame(Materials.Toy(ToyFactory.Silver, Palette.Silver), thimble.GameObject.transform.Find("Visual").GetComponent<MeshRenderer>().sharedMaterial);
+            Assert.AreSame(Materials.Toy(ToyRecipe.BrushedMetal, Palette.Tangerine), thimble.GameObject.transform.Find("Band").GetComponent<MeshRenderer>().sharedMaterial);
+            Assert.IsTrue(Palette.Same(Palette.Pool.Hero, ToyInfo.Of(thimble.GameObject).Candy), "its candy pops against the Pool room");
             // On the spool, at eye height, a step from the spawn: the first pickup is a close one.
             TestHelpers.RunSeconds(Game, 1f);
             Assert.AreEqual(1.42f, thimble.Center.y, 0.02f);
@@ -144,6 +155,8 @@ namespace Toybox.Tests
             Assert.AreEqual(0, level.Leash.Returns);
             GadgetKit.VerticalExtent(level.Thimble, out _, out float top);
             Assert.AreEqual(0f, top, 0.01f, "its top is flush with the walkway");
+            // And what is walked on is plain silver: the candy band is down the well with the rim.
+            Assert.Less(level.Thimble.GameObject.transform.Find("Band").GetComponent<MeshRenderer>().bounds.max.y, -1f);
             Assert.AreEqual(0f, level.Thimble.Position.x, 1e-3f);
             Assert.AreEqual(Level02ThimbleChasm.AxisZ, level.Thimble.Position.z, 1e-3f, "on the axis of the hole");
             Assert.IsEmpty(said, "the intended solution needs no telling off");
@@ -997,6 +1010,252 @@ namespace Toybox.Tests
             Assert.IsTrue(Game.LevelCompleted);
             Assert.GreaterOrEqual(dropped, Level02ThimbleChasm.MinPlug);
             Assert.IsEmpty(said);
+        }
+    }
+
+    /// <summary>
+    /// The owner's brief for Level 2: "Grab a tiny silver thimble". Whether it reads as one is a matter of
+    /// pictures, so these look at pictures - the level as the game shows it, the solver playing, on every
+    /// quality tier: on its spool from the spawn it is grey against the room's blue with its candy band
+    /// under it; in the hand the die-cut border is a line round it and not a white that runs into its
+    /// body; grown to plug the well, its top is turned metal and not one flat grey.
+    /// </summary>
+    public class Level02LookTests : RoomFixture
+    {
+        const int Width = 1280, Height = 720;
+
+        Level02ThimbleChasm level;
+        BotRunner script;
+        bool async;
+
+        [SetUp]
+        public void NoPlaceholders()
+        {
+            // Without this the first render shows cyan placeholders while shader variants compile.
+            async = ShaderUtil.allowAsyncCompilation;
+            ShaderUtil.allowAsyncCompilation = false;
+        }
+
+        [TearDown]
+        public void Restore() => ShaderUtil.allowAsyncCompilation = async;
+
+        void Load(QualityTier tier)
+        {
+            RequireGraphics();
+            Game = Game.Create();
+            Game.LoadLevel(2);
+            level = (Level02ThimbleChasm)Game.Level;
+            Presentation = Presentation.Create(Game, new PresentationOptions { Quality = tier });
+            Presentation.Frame(0f, 1f);
+            // The first picture after a script reload is not to be trusted (Shots.Warm).
+            Object.DestroyImmediate(Photograph());
+            script = new BotRunner(level.Solve(new Bot(Game)));
+        }
+
+        Texture2D Photograph() => Shots.Photograph(Presentation.Camera, Width, Height, TierSpec.Of(Presentation.Context.Quality).Msaa);
+
+        // The picture a failure is about, for looking at: Temp/ToyboxLevel02Look/<tier>-<moment>.png.
+        Texture2D Photograph(string moment)
+        {
+            Texture2D image = Photograph();
+            string directory = Path.Combine(Path.GetDirectoryName(Application.dataPath), "Temp", "ToyboxLevel02Look");
+            Directory.CreateDirectory(directory);
+            File.WriteAllBytes(Path.Combine(directory, Presentation.Context.Quality + "-" + moment + ".png"), image.EncodeToPNG());
+            return image;
+        }
+
+        // The solver plays as it does for Shots.Capture: a tick is a frame.
+        bool PlayUntil(System.Func<bool> done, float seconds)
+        {
+            for (int i = TestHelpers.Ticks(seconds); i > 0 && !done(); i--)
+            {
+                if (script != null && !script.Advance()) script = null;
+                Game.Tick();
+                Presentation.Frame(Sim.Dt, 1f);
+            }
+            Presentation.Frame(0f, 1f);
+            return done();
+        }
+
+        // Where a point of the world is in the picture, in pixels from its bottom left corner. (Not the
+        // camera's own WorldToViewportPoint: outside a render its aspect is the editor window's.)
+        Vector2 Pixel(Vector3 world)
+        {
+            Camera camera = Presentation.Camera;
+            Vector3 view = camera.worldToCameraMatrix.MultiplyPoint3x4(world);
+            Assert.Less(view.z, -camera.nearClipPlane, "behind the camera: " + world);
+            float tan = Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            float x = view.x / (-view.z * tan * Width / Height), y = view.y / (-view.z * tan);
+            return new Vector2((x * 0.5f + 0.5f) * Width, (y * 0.5f + 0.5f) * Height);
+        }
+
+        static bool Inside(Vector2 pixel, float margin) =>
+            pixel.x >= margin && pixel.y >= margin && pixel.x < Width - margin && pixel.y < Height - margin;
+
+        // What the picture shows round a pixel: the mean of a small square.
+        static Color Mean(Texture2D image, Vector2 pixel, int reach)
+        {
+            Assert.IsTrue(Inside(pixel, reach + 1), "not in the picture: " + pixel);
+            int cx = Mathf.RoundToInt(pixel.x), cy = Mathf.RoundToInt(pixel.y);
+            Color sum = Color.clear;
+            for (int y = cy - reach; y <= cy + reach; y++)
+                for (int x = cx - reach; x <= cx + reach; x++) sum += image.GetPixel(x, y);
+            return sum / ((2 * reach + 1) * (2 * reach + 1));
+        }
+
+        static float Value(Color c) => Mathf.Max(c.r, Mathf.Max(c.g, c.b));
+
+        static float Saturation(Color c)
+        {
+            float max = Value(c), min = Mathf.Min(c.r, Mathf.Min(c.g, c.b));
+            return max > 0f ? (max - min) / max : 0f;
+        }
+
+        static bool White(Color c) => Mathf.Min(c.r, Mathf.Min(c.g, c.b)) >= 0.96f;
+
+        static string Hex(Color c) => Palette.ToHex(new Color(c.r, c.g, c.b, 1f));
+
+        // A point on the thimble's wall where it faces the eye, at a height of the toy's own (scale 1):
+        // -0.0375 is between two rows of dimples, -0.32 the middle of the band.
+        Vector3 OnTheWall(float height, float radius)
+        {
+            Prop thimble = level.Thimble;
+            Vector3 toEye = Game.Player.Eye - thimble.Position;
+            toEye.y = 0f;
+            return thimble.Position + (toEye.normalized * radius + Vector3.up * height) * thimble.Scale;
+        }
+
+        static void AssertSilver(Color body, string where)
+        {
+            Assert.Less(Saturation(body), 0.25f, where + ": grey, not a colour (" + Hex(body) + ")");
+            Assert.That(Value(body), Is.InRange(0.45f, 0.88f), where + ": pale, but a good way under the border's white (" + Hex(body) + ")");
+            Assert.GreaterOrEqual(body.b, body.r - 0.01f, where + ": cool (" + Hex(body) + ")");
+        }
+
+        [TestCase(QualityTier.Low)]
+        [TestCase(QualityTier.Medium)]
+        [TestCase(QualityTier.High)]
+        public void TheThimble_ReadsSilver_OnItsSpool_InTheHand_AndPluggingTheWell(QualityTier tier)
+        {
+            Load(tier);
+            Prop thimble = level.Thimble;
+            Camera camera = Presentation.Camera;
+
+            // ---- From the spawn: silver on its spool, its candy band under it, the room's blue behind it.
+            Texture2D image = Photograph("spawn");
+            try
+            {
+                Color body = Mean(image, Pixel(OnTheWall(-0.0375f, 0.48f)), 2);
+                Color band = Mean(image, Pixel(OnTheWall(-0.32f, 0.4895f)), 2);
+                Color room = Mean(image, Pixel(thimble.Position + camera.transform.right * thimble.Scale), 6);
+                Debug.Log("[Level02] " + tier + ", from the spawn: body " + Hex(body) + ", band " + Hex(band) + ", the wall beside it " + Hex(room));
+                AssertSilver(body, "on the spool");
+                Assert.Greater(band.r, 0.8f, "the band is Tangerine (" + Hex(band) + ")");
+                Assert.Greater(band.r - band.b, 0.5f, "the band is Tangerine (" + Hex(band) + ")");
+                Assert.That(band.g, Is.InRange(0.25f, 0.75f), "the band is Tangerine (" + Hex(band) + ")");
+                Assert.Greater(Saturation(room), Saturation(body) + 0.15f, "it stands out: grey metal against the dip (" + Hex(body) + " against " + Hex(room) + ")");
+            }
+            finally
+            {
+                Object.DestroyImmediate(image);
+            }
+
+            // ---- In the hand: the die-cut border is a line round it.
+            Assert.IsTrue(PlayUntil(() => Game.Grabber.Held == thimble, 5f), "the solver picks it up");
+            PlayUntil(() => false, 0.6f);
+            Assert.AreSame(thimble, Game.Grabber.Held);
+            image = Photograph("held");
+            try
+            {
+                AssertSilver(Mean(image, Pixel(OnTheWall(-0.0375f, 0.48f)), 2), "in the hand");
+                Vector2 centre = Pixel(thimble.Position), top = Pixel(thimble.Position + Vector3.up * (0.4f * thimble.Scale));
+                float halfWidth = Mathf.Abs(Pixel(thimble.Position + camera.transform.right * (0.5f * thimble.Scale)).x - centre.x);
+                Assert.Greater(halfWidth, 60f, "big enough in the picture to look at");
+                // Down five columns across its middle, from the wall behind it into its top: the border's
+                // white, then the body. Where the white goes on for more than the border is wide, or the body
+                // five pixels under it is all but white too, the body has melted into it. (The window's
+                // glint may touch the border in one place: one column of the five, two if it falls between.)
+                int melted = 0, columns = 0;
+                var runs = new List<int>();
+                for (int k = -2; k <= 2; k++)
+                {
+                    int x = Mathf.RoundToInt(centre.x + k * 0.3f * halfWidth);
+                    int from = Mathf.Min(Height - 2, Mathf.RoundToInt(top.y) + 40), to = Mathf.RoundToInt(centre.y);
+                    int y = from;
+                    while (y > to && !White(image.GetPixel(x, y))) y--;
+                    if (y <= to) continue;
+                    int run = 0;
+                    while (y > to && White(image.GetPixel(x, y)))
+                    {
+                        run++;
+                        y--;
+                    }
+                    columns++;
+                    runs.Add(run);
+                    if (run > 10 || Value(image.GetPixel(x, y - 5)) >= 0.88f) melted++;
+                }
+                Debug.Log("[Level02] " + tier + ", in the hand: the border's white is " + string.Join(", ", runs) + " px deep over the top");
+                Assert.AreEqual(5, columns, "the border runs over the whole top");
+                Assert.LessOrEqual(melted, 2, "the body melts into the die-cut border");
+            }
+            finally
+            {
+                Object.DestroyImmediate(image);
+            }
+
+            // ---- Plugging the well, the player on it: turned metal, ring after ring - not one flat grey.
+            Assert.IsTrue(PlayUntil(() => level.Well.Seated && Game.Player.Position.z > Level02ThimbleChasm.AxisZ - 5.5f, 20f), "the solver walks onto the plug");
+            Assert.AreEqual(11.5f, thimble.Scale, 11.5f * 0.05f);
+            image = Photograph("plugged");
+            try
+            {
+                // The middle of every ring of the turning along one line through the axis, 15 degrees off
+                // the row of dimples the player walks along (which keeps clear of every dimple but those of
+                // the inner ring: that one is left out).
+                float s = thimble.Scale;
+                var along = new Vector3(Mathf.Cos(105f * Mathf.Deg2Rad), 0f, Mathf.Sin(105f * Mathf.Deg2Rad));
+                var shades = new List<float>();
+                var seen = new List<string>();
+                float jump = 0f, low = 1f, high = 0f, colour = 0f;
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    float previous = -1f;
+                    for (int ring = 1; ring < 8; ring++)
+                    {
+                        if (ring == 2)
+                        {
+                            previous = -1f;
+                            continue;
+                        }
+                        Vector2 pixel = Pixel(thimble.Position + (along * (side * (0.025f + 0.05f * ring)) + Vector3.up * 0.4f) * s);
+                        if (!Inside(pixel, 8f))
+                        {
+                            previous = -1f;
+                            continue;
+                        }
+                        Color c = Mean(image, pixel, 1);
+                        float shade = c.grayscale;
+                        shades.Add(shade);
+                        seen.Add(Hex(c));
+                        colour += Saturation(c);
+                        low = Mathf.Min(low, shade);
+                        high = Mathf.Max(high, shade);
+                        if (previous >= 0f) jump = Mathf.Max(jump, Mathf.Abs(shade - previous));
+                        previous = shade;
+                    }
+                }
+                Debug.Log("[Level02] " + tier + ", on the plug: rings " + string.Join(" ", seen) + "; the biggest step between neighbours " + jump.ToString("0.000"));
+                Assert.GreaterOrEqual(shades.Count, 5, "rings of the top in the picture");
+                // (The rings that mirror the floor take some of its blue; on the whole it is grey.)
+                Assert.Less(colour / shades.Count, 0.22f, "grey metal");
+                Assert.Greater(low, 0.4f, "pale metal");
+                Assert.Greater(jump, 0.03f, "neighbouring rings mirror different parts of the room");
+                Assert.Greater(high - low, 0.06f, "not one flat grey");
+            }
+            finally
+            {
+                Object.DestroyImmediate(image);
+            }
         }
     }
 }

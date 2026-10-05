@@ -272,33 +272,54 @@ namespace Toybox.Tests
             Assert.Less(Game.Player.Velocity.magnitude, 0.1f);
         }
 
-        [Test]
-        public void IsThrownUpwardByAFastRisingDynamicBody()
+        /// <summary>
+        /// A dynamic body under the feet that rises lifts the player, and throws them on when it stops - as
+        /// long as it rises no faster than a prop may carry them (PerspectiveGrabber.CarrySpeed). A heavy
+        /// one that comes up faster passes through them instead: nothing throws the player at 9 or more
+        /// (it used to: 12 here, and 37 off the end of a plank that a block came down on).
+        /// </summary>
+        [TestCase(5f, true)]
+        [TestCase(12f, false)]
+        public void IsThrownUpwardByARisingDynamicBody_UnlessItRisesFasterThanAPropMayCarryThem(float speed, bool thrown)
         {
             Prop launcher = null;
+            // The bars catch the rim of the block after a rise of 0.3 (slow) or 1.25 (fast); the middle, where the player stands, is open.
+            float rise = thrown ? 0.3f : 1.25f;
             Build(ctx =>
             {
                 TestHelpers.Floor(ctx);
                 launcher = ctx.AddProp(BasicToys.Block(new Vector3(3f, 0.5f, 3f)), new Vector3(0f, 0.25f, 0f),
                     new PropOptions { Density = 20f, Grabbable = false });
-                // Two bars catch the rim of the block 1.25 units up; the middle, where the player stands, is open.
-                TestHelpers.Box(ctx, new Vector3(1.75f, 2f, 0f), new Vector3(1f, 0.5f, 3f));
-                TestHelpers.Box(ctx, new Vector3(-1.75f, 2f, 0f), new Vector3(1f, 0.5f, 3f));
+                TestHelpers.Box(ctx, new Vector3(1.75f, 0.5f + rise + 0.25f, 0f), new Vector3(1f, 0.5f, 3f));
+                TestHelpers.Box(ctx, new Vector3(-1.75f, 0.5f + rise + 0.25f, 0f), new Vector3(1f, 0.5f, 3f));
                 ctx.SetSpawn(new Vector3(0f, 0.55f, 0f), 0f);
             });
             Run(30);
             Assert.AreSame(launcher, Game.Player.GroundProp);
+            Assert.Greater(launcher.Mass, Player.Mass * 10f, "test setup: a body that outweighs the player");
             float rest = Game.Player.Position.y;
 
-            launcher.Body.AddForce(Vector3.up * 12f, ForceMode.VelocityChange);
-            float highest = rest;
+            launcher.Body.AddForce(Vector3.up * speed, ForceMode.VelocityChange);
+            float highest = rest, fastest = 0f, top = launcher.Position.y;
             for (int i = 0; i < TestHelpers.Ticks(2f); i++)
             {
                 Game.Tick();
                 highest = Mathf.Max(highest, Game.Player.Position.y);
+                fastest = Mathf.Max(fastest, Game.Player.Velocity.y);
+                top = Mathf.Max(top, launcher.Position.y);
             }
-            Assert.Less(launcher.Position.y, 1.6f, "the bars should have stopped the block");
-            Assert.Greater(highest - rest, 2.5f, "the player should have been flung well above where the block stopped");
+            Assert.AreEqual(0.25f + rise, top, 0.1f, "the bars should have stopped the block");
+            Assert.Less(fastest, PerspectiveGrabber.CarrySpeed + 0.5f, "nothing a prop does moves the player faster than it may carry them");
+            if (thrown)
+            {
+                Assert.Greater(fastest, speed - 1f, "the block took the player up with it");
+                Assert.Greater(highest - rest, rise + 0.15f, "the player should have been flung above where the block stopped");
+            }
+            else
+            {
+                Assert.Less(highest - rest, 0.05f, "the block went up through the player; they were not thrown");
+                Assert.Less(Game.Player.Position.y, 0.05f, "and they are on the floor now");
+            }
         }
 
         [Test]

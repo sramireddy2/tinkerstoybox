@@ -28,7 +28,9 @@ namespace Toybox.Levels
     /// it only ever gets as big as it looks, and taken from two steps away or more it cannot be made heavy
     /// with room to fall. So the level says so on such a grab, sends a domino that is too small to use
     /// back to the pedestal, and has a word for every try that fails (too light, no room, fell short,
-    /// stood on the flat, laid flat). A domino that topples onto the player passes through them.
+    /// stood on the flat, laid flat). A domino that topples onto the player passes through them and comes
+    /// to rest round them; that is the engine's doing (PerspectiveGrabber: a prop that outweighs the
+    /// player and comes at them), the level has no guard of its own.
     /// </summary>
     [Level(4, "domino-effect", "Domino Effect", Phase = 1)]
     public sealed class Level04DominoEffect : LevelDefinition
@@ -89,8 +91,6 @@ namespace Toybox.Levels
         /// it up from closer" would be advice nobody can follow.
         /// </summary>
         public const float CrumbScale = 0.6f;
-        /// <summary>The speed of its fastest point from which a domino heavier than the player passes through them.</summary>
-        public const float FallingSpeed = 1.5f;
 
         /// <summary>Said whenever the domino is taken looking too small (the same words as in Level 1).</summary>
         public const string SmallLine = "It only ever gets as big as it looks. Pick it up from closer.";
@@ -116,7 +116,7 @@ namespace Toybox.Levels
         Level04Barricade wall;
         string lastLine;
         int lastSaid, restTicks;
-        bool judged, laidFlat, passing;
+        bool judged, laidFlat;
 
         public override string Blurb => "That wall won't move for something small.";
 
@@ -149,7 +149,6 @@ namespace Toybox.Levels
             restTicks = 0;
             judged = true;
             laidFlat = false;
-            passing = false;
 
             BuildHall(ctx);
             BuildDressing(ctx);
@@ -478,7 +477,6 @@ namespace Toybox.Levels
         void Watch(LevelContext ctx)
         {
             wall.Tick(ctx);
-            GuardThePlayer(ctx.Game);
             if (judged || Barricade.Broken || Domino == null || Domino.Removed || Domino.Held)
             {
                 restTicks = 0;
@@ -490,27 +488,6 @@ namespace Toybox.Levels
             judged = true;
             string line = Judge();
             if (line != null) Say(ctx, line);
-        }
-
-        // Nothing crushes the player (LEVELS 0.3). A domino the size of a house that topples onto somebody
-        // standing on the board squeezes them against the floor, and the solver squirts them out at five
-        // times their running speed (measured: 35 to 50). So while it outweighs the player and is on the
-        // move it does not touch them: it falls through and comes to rest round them, as a toy let go on
-        // top of the player does, and is solid again once they have stepped out of it.
-        void GuardThePlayer(Game game)
-        {
-            if (Domino == null || Domino.Removed || Domino.Held) return;
-            float fastest = Domino.Velocity.magnitude + Domino.Body.angularVelocity.magnitude * Domino.Radius;
-            if (Domino.Mass > Player.Mass && fastest > FallingSpeed)
-            {
-                GadgetKit.IgnorePlayer(game, Domino.Colliders, true);
-                passing = true;
-            }
-            else if (passing && !GadgetKit.OverlapsPlayer(game, Domino.Colliders))
-            {
-                GadgetKit.IgnorePlayer(game, Domino.Colliders, false);
-                passing = false;
-            }
         }
 
         // Why the domino that lies or stands there did not bring the wall down (null: it is not a try at

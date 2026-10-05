@@ -10,15 +10,17 @@ using UnityEngine.UI;
 namespace Toybox.UI
 {
     /// <summary>
-    /// One canvas of the UI (ART_BIBLE 10.2): Scale With Screen Size against 1920 x 1080, matching height,
-    /// so every size in the UI code is a reference pixel. It also is the clock of its stickers: the
-    /// presenter that owns it calls <see cref="Advance"/> once per frame.
+    /// One canvas of the UI (ART_BIBLE 10.2): Scale With Screen Size against 1920 x 1080, so every size in
+    /// the UI code is a reference pixel. It matches the screen's height at 16:9 and wider and its width
+    /// below that (Expand), so the canvas is never smaller than the reference frame
+    /// (<see cref="CanvasSize"/>). It also is the clock of its stickers: the presenter that owns it calls
+    /// <see cref="Advance"/> once per frame.
     ///
     /// In the game it is a screen-space overlay. For a capture (<see cref="UiCapture"/>) it becomes a
-    /// world-space canvas that fills the game camera's view exactly, drawn by a camera stacked on top of
-    /// the game's (<see cref="UiCapture.OverlayFor"/>) - so the screenshot tool, which renders world
-    /// cameras into a texture, gets the UI into the same picture, and gets it the way the game shows it:
-    /// on top of the finished frame, after the post-processing, not through it.
+    /// world-space canvas of that same size that fills the game camera's view exactly, drawn by a camera
+    /// stacked on top of the game's (<see cref="UiCapture.OverlayFor"/>) - so the screenshot tool, which
+    /// renders world cameras into a texture, gets the UI into the same picture, and gets it the way the
+    /// game shows it: on top of the finished frame, after the post-processing, not through it.
     /// </summary>
     public sealed class UiRoot : MonoBehaviour
     {
@@ -100,18 +102,42 @@ namespace Toybox.UI
         }
 
         /// <summary>
-        /// Capture only: puts the canvas right behind the camera's near plane, sized so that its 1080
-        /// reference pixels fill the view's height and its width the width of the picture (<see cref="UiCapture.Aspect"/>).
+        /// The canvas of a screen of this shape (width over height), in reference pixels: what the scaler's
+        /// Expand mode makes of it. 1080 tall and as wide as the screen at 16:9 and wider; 1920 wide and
+        /// taller than 1080 below that - never smaller than the reference frame either way.
+        /// </summary>
+        public static Vector2 CanvasSize(float aspect)
+        {
+            float reference = UiTheme.ReferenceWidth / UiTheme.ReferenceHeight;
+            if (!(aspect > 0f) || float.IsInfinity(aspect)) aspect = reference;
+            return aspect >= reference
+                ? new Vector2(UiTheme.ReferenceHeight * aspect, UiTheme.ReferenceHeight)
+                : new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceWidth / aspect);
+        }
+
+        /// <summary>
+        /// Capture only: puts the canvas right behind the camera's near plane and makes it fill the view of
+        /// the picture (<see cref="UiCapture.Aspect"/>), with the size the game's own scaler would give a
+        /// screen of that shape (<see cref="CanvasSize"/>) - so a narrow or portrait picture shows the UI
+        /// as small as the game does.
         /// </summary>
         public void Fit(Camera camera)
         {
             if (!InWorld || camera == null) return;
             // The shape of the picture that will be taken, not of whatever the camera renders to right now.
-            float aspect = UiCapture.Aspect;
-            float distance = camera.nearClipPlane * 1.5f + (Canvas.sortingOrder > 15 ? 0f : camera.nearClipPlane * 0.1f);
+            Vector2 size = CanvasSize(UiCapture.Aspect);
+            // Right behind the near plane for the reference frame, and farther off by as much as the canvas
+            // is taller than that: the canvas keeps the scale it has at 16:9 (1.04e-4) whatever its shape.
+            // At the near plane a portrait canvas, 3413 pixels tall, would be scaled by 3.3e-5 - and
+            // measured, every TextMeshPro label of a world-space canvas is drawn at 7.2e-5 and gone at
+            // 6.7e-5: any picture narrower than 6:5 showed cards and pills without a word on them. (The
+            // faces, drawn by the UI's own shader, were fine; presumably the text shader's perspective
+            // filter, the one thing in it that needs the canvas's inverse matrix, is what gives out.)
+            // The overlay camera clears the depth before it draws, so nothing of the world gets in front
+            // of the canvas at any distance.
+            float distance = (camera.nearClipPlane * 1.5f + (Canvas.sortingOrder > 15 ? 0f : camera.nearClipPlane * 0.1f)) * (size.y / UiTheme.ReferenceHeight);
             float height = 2f * distance * Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
-            float scale = height / UiTheme.ReferenceHeight;
-            var size = new Vector2(UiTheme.ReferenceHeight * aspect, UiTheme.ReferenceHeight);
+            float scale = height / size.y;
             Transform view = camera.transform;
             Vector3 position = view.position + view.forward * distance;
             if (Rect.sizeDelta != size) Rect.sizeDelta = size;
@@ -246,6 +272,9 @@ namespace Toybox.UI
             data.renderType = CameraRenderType.Overlay;
             data.renderPostProcessing = false;
             data.renderShadows = false;
+            // An overlay camera clears the depth before it draws (clearDepth, on by default and read-only
+            // from here): the UI is on top of the world whatever is near the eye - a held toy can be
+            // nearer than a tall canvas (see Fit).
 
             game.cullingMask &= ~(1 << UiTheme.Layer);
             UniversalAdditionalCameraData gameData = game.GetUniversalAdditionalCameraData();

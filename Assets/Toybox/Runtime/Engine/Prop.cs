@@ -91,6 +91,9 @@ namespace Toybox.Engine
         Mover driveMover;
         Vector3 stepVelocity, stepForce;
         bool stepTracked;
+
+        /// <summary>The velocity the prop went into the physics step with (zero while it is held or kinematic).</summary>
+        internal Vector3 StepVelocity => stepTracked ? stepVelocity : Vector3.zero;
         int impactCooldown;
 
         /// <summary>Creation index within the level; gives props a deterministic order.</summary>

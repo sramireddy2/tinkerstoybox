@@ -995,7 +995,10 @@ namespace Toybox.Tests
                 }
             }
             Assert.Greater(highest, 0.3f * scale + 1f, "the player did get on top of the domino and jumped from it");
-            Assert.Less(farthest, Level04DominoEffect.BoardEnd - 0.25f, "and is still on this side of the wall");
+            // In the tick in which a sprint jump arrives at the wall the capsule is up to that tick's travel
+            // inside its face (measured here: 0.06 at 7.9 units a second; the wall is 1.2 thick), and is out
+            // again in the next. How far depends on where in the tick it arrives, so that is the bound.
+            Assert.Less(farthest, Level04DominoEffect.BoardEnd - Player.BaseRadius + Player.SprintSpeed * Sim.Dt, "and is still on this side of the wall");
             Assert.IsFalse(Game.LevelCompleted);
             Assert.IsFalse(level.Barricade.Broken);
         }

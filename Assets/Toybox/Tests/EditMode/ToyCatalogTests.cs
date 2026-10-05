@@ -253,12 +253,13 @@ namespace Toybox.Tests
                 Assert.AreEqual(triangles, def.Triangles, name);
                 Assert.AreEqual(draws, def.Draws, name);
 
-                // The body is in the toy's own recipe and colour.
+                // The toy wears its own recipe and colour: all over its body or - the silver thimble - as the
+                // band round its rim (TheThimble_IsSilver_AndWearsItsCandyAsABand).
                 bool main = false;
                 Material expected = Materials.Toy(def.Recipe, def.Color);
                 foreach (MeshRenderer renderer in toy.GetComponentsInChildren<MeshRenderer>(true))
                     foreach (Material material in renderer.sharedMaterials) main |= material == expected;
-                Assert.IsTrue(main, name + ": its body is Materials.Toy(recipe, colour)");
+                Assert.IsTrue(main, name + ": it wears Materials.Toy(recipe, colour)");
             }
         }
 
@@ -314,6 +315,161 @@ namespace Toybox.Tests
             GameObject machine = Keep(ToyFactory.DeskFan(grabbable: false));
             Assert.AreEqual(ToyRecipe.GadgetBody, ToyInfo.Of(machine).Recipe, "the fan of Level 5 is machinery: an Ink body");
             Assert.IsNotNull(machine.transform.Find(ToyFactory.DeskFanBlades), "the blades are a child of their own, to spin");
+        }
+
+        // ---- The silver thimble ------------------------------------------------------------------------------------
+
+        static MeshRenderer Part(GameObject toy, string name)
+        {
+            Transform part = toy.transform.Find(name);
+            Assert.IsNotNull(part, toy.name + " has no part called " + name);
+            return part.GetComponent<MeshRenderer>();
+        }
+
+        // The area of a mesh that is seen from outside the thimble: what faces away from its axis above a
+        // height, and what faces up.
+        static float OutsideArea(Mesh mesh, float above)
+        {
+            Vector3[] vertices = mesh.vertices;
+            int[] triangles = mesh.triangles;
+            float area = 0f;
+            for (int t = 0; t + 2 < triangles.Length; t += 3)
+            {
+                Vector3 a = vertices[triangles[t]], b = vertices[triangles[t + 1]], c = vertices[triangles[t + 2]];
+                Vector3 centre = (a + b + c) / 3f, cross = Vector3.Cross(b - a, c - a);
+                if (cross.sqrMagnitude < 1e-16f || centre.y < above) continue;
+                Vector3 face = cross.normalized;
+                Vector3 radial = new Vector3(centre.x, 0f, centre.z).normalized;
+                if (Vector3.Dot(face, radial) > 0.2f || face.y > 0.5f) area += cross.magnitude * 0.5f;
+            }
+            return area;
+        }
+
+        // The owner's brief for Level 2: "a tiny silver thimble". Candy is still what says "you can lift
+        // this", so the thimble wears its candy as a band round the rim - and is silver everywhere else.
+        [Test]
+        public void TheThimble_IsSilver_AndWearsItsCandyAsABand()
+        {
+            ToyDef def = ToyCatalog.Get(ToyId.Thimble);
+            Assert.IsTrue(Palette.Same(Palette.Tangerine, def.Color), "its candy: the band, the pool, the tag");
+            Assert.AreEqual(ToyRecipe.BrushedMetal, def.Recipe, "the band is anodised");
+
+            // Silver is a neutral: a cool grey, a good way darker than the Paper of the die-cut border (a
+            // body that is too pale melts into it) and nowhere near a candy colour.
+            Assert.IsFalse(Palette.IsCandy(Palette.Silver));
+            Color silverTone = Palette.Silver;
+            Assert.Less(Mathf.Max(silverTone.r, Mathf.Max(silverTone.g, silverTone.b)) - Mathf.Min(silverTone.r, Mathf.Min(silverTone.g, silverTone.b)), 0.05f, "grey");
+            Assert.GreaterOrEqual(silverTone.b, silverTone.r, "cool");
+            Assert.That(silverTone.grayscale, Is.InRange(0.55f, 0.75f), "pale, and well under Paper (" + Palette.Paper.grayscale.ToString("0.00") + ")");
+
+            // The recipe is metal that was never lacquered or anodised: brushed, with a toy's rim and pool.
+            ToyRecipe bare = ToyFactory.Silver;
+            Assert.AreEqual(LandSound.Metal, bare.Sound);
+            Assert.Greater(bare.Metallic, 0.5f);
+            Assert.AreEqual(0f, bare.Coat, "no lacquer");
+            Assert.AreEqual(DetailTexture.Streak, bare.Detail);
+            Assert.Greater(bare.Streak, ToyRecipe.BrushedMetal.Streak, "the brushing shows");
+            Assert.Greater(bare.Rim, 0f, "a toy has the rim");
+            Assert.Less(bare.Rim, ToyRecipe.BrushedMetal.Rim, "less of it: a Paper rim on silver is what melts into the border");
+            Assert.IsTrue(bare.Pool);
+
+            GameObject toy = Make(def);
+            MeshRenderer body = Part(toy, "Visual"), band = Part(toy, "Band"), dimples = Part(toy, "Detail");
+            Material silver = Materials.Toy(ToyFactory.Silver, Palette.Silver);
+            Assert.AreSame(silver, body.sharedMaterial, "the body is bare silver");
+            Assert.AreSame(Materials.Toy(ToyRecipe.BrushedMetal, Palette.Tangerine), band.sharedMaterial, "the band is anodised Tangerine");
+            Assert.AreNotSame(silver, dimples.sharedMaterial, "the dimples are hollows: a material of their own");
+            Assert.AreNotSame(band.sharedMaterial, dimples.sharedMaterial);
+
+            // What the game is told about it is its candy: the tag, and so the pool on the floor.
+            ToyInfo info = ToyInfo.Of(toy);
+            Assert.IsTrue(Palette.Same(Palette.Tangerine, info.Candy));
+            Color pool = info.Recipe.PoolColor(info.Candy), tangerine = Palette.Lin(Palette.Tangerine);
+            Assert.Less(Mathf.Abs(pool.r - tangerine.r) + Mathf.Abs(pool.g - tangerine.g) + Mathf.Abs(pool.b - tangerine.b), 1e-4f, "its pool is its candy's");
+
+            // Silver first: the band is the rolled rim and a collar, the lowest fifth, and a sixth of what
+            // is seen from outside.
+            Mesh bandMesh = band.GetComponent<MeshFilter>().sharedMesh, bodyMesh = body.GetComponent<MeshFilter>().sharedMesh;
+            float rim = -ToyFactory.ThimbleHeight * 0.5f, bandTop = rim + ToyFactory.ThimbleBandHeight;
+            Assert.AreEqual(rim, bandMesh.bounds.min.y, 1e-4f, "the band starts at the rim");
+            Assert.AreEqual(bandTop, bandMesh.bounds.max.y, 1e-4f);
+            Assert.That(ToyFactory.ThimbleBandHeight / ToyFactory.ThimbleHeight, Is.InRange(0.15f, 0.25f));
+            float candy = OutsideArea(bandMesh, rim - 1f), metal = OutsideArea(bodyMesh, bandTop);
+            Debug.Log("[Toybox] thimble, seen from outside: silver " + metal.ToString("0.00") + ", candy " + candy.ToString("0.00"));
+            Assert.That(candy / (candy + metal), Is.InRange(0.1f, 0.22f), "enough candy to say 'yours', little enough to be silver first");
+            // Seated in the well of Level 2 its top is the floor: no candy up there.
+            Assert.Less(bandMesh.bounds.max.y, 0f);
+
+            // Everything it draws stays within the box of its collider (the dimples stand 0.003 proud of the top).
+            foreach (MeshFilter filter in toy.GetComponentsInChildren<MeshFilter>())
+                foreach (Vector3 vertex in filter.sharedMesh.vertices)
+                {
+                    Assert.LessOrEqual(new Vector2(vertex.x, vertex.z).magnitude, ToyFactory.ThimbleRimRadius + 1e-4f, filter.name + " at " + vertex);
+                    Assert.LessOrEqual(Mathf.Abs(vertex.y), ToyFactory.ThimbleHeight * 0.5f + 0.0031f, filter.name + " at " + vertex);
+                }
+
+            // In another colour only the band changes; a room that bans Tangerine gives it its hero candy.
+            GameObject other = Make(def, Palette.Lagoon);
+            Assert.AreSame(silver, Part(other, "Visual").sharedMaterial, "silver whatever the colour asked for");
+            Assert.AreSame(Materials.Toy(ToyRecipe.BrushedMetal, Palette.Lagoon), Part(other, "Band").sharedMaterial);
+            Assert.AreSame(dimples.sharedMaterial, Part(other, "Detail").sharedMaterial);
+            Assert.IsTrue(Palette.Same(Palette.Lagoon, ToyInfo.Of(other).Candy));
+            Assert.IsTrue(Palette.Same(Palette.Lagoon, def.ColorIn(Palette.Peach)), "Peach bans Tangerine");
+            Assert.IsTrue(Palette.Same(Palette.Tangerine, def.ColorIn(Palette.Pool)), "Level 2's room: its own");
+        }
+
+        // What keeps a silver thimble from being a flat grey: its collider is all but a cylinder, and a
+        // mirror cylinder shows one band of the room from top to bottom. So the wall's normals lean as a
+        // domed thimble's would (the ceiling at the shoulder, the floor at the foot), and the top is turned
+        // in rings that lean in and out by turns.
+        [Test]
+        public void TheThimble_MirrorsTheRoom_WithADomedWallAndATurnedTop()
+        {
+            GameObject toy = Make(ToyCatalog.Get(ToyId.Thimble));
+            Mesh mesh = Part(toy, "Visual").GetComponent<MeshFilter>().sharedMesh;
+            Vector3[] vertices = mesh.vertices, normals = mesh.normals;
+            float half = ToyFactory.ThimbleHeight * 0.5f, bandTop = -half + ToyFactory.ThimbleBandHeight;
+
+            // The wall, above the band: its lean (degrees above the level) by height.
+            var leans = new SortedDictionary<int, float>();
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                Vector3 p = vertices[i];
+                var radial = new Vector3(p.x, 0f, p.z);
+                if (radial.magnitude < 0.47f || p.y < bandTop - 1e-4f || p.y > 0.33f + 1e-4f) continue;
+                if (Vector3.Dot(normals[i], radial.normalized) < 0.9f) continue;
+                leans[Mathf.RoundToInt(p.y * 1000f)] = Mathf.Asin(normals[i].y) * Mathf.Rad2Deg;
+            }
+            Assert.GreaterOrEqual(leans.Count, 4, "rows up the wall, for the lean to turn on");
+            float previous = float.NegativeInfinity, first = float.NaN, last = float.NaN;
+            foreach (KeyValuePair<int, float> row in leans)
+            {
+                Assert.Greater(row.Value, previous, "the higher, the more it leans (at y = " + row.Key * 0.001f + ")");
+                if (float.IsNaN(first)) first = row.Value;
+                previous = last = row.Value;
+            }
+            Assert.That(first, Is.InRange(0f, 6f), "all but level at the band");
+            Assert.That(last, Is.InRange(10f, 20f), "and into the shoulder at the top");
+
+            // The top: flat, at the collider's top, in rings whose normals lean toward the axis and away from
+            // it by turns.
+            var rings = new HashSet<int>();
+            int inward = 0, outward = 0;
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                Vector3 p = vertices[i];
+                var radial = new Vector3(p.x, 0f, p.z);
+                if (p.y < half - 0.01f || radial.magnitude > 0.4f + 1e-4f || normals[i].y < 0.97f) continue;
+                Assert.AreEqual(half, p.y, 1e-5f, "the top is the collider's: flat");
+                rings.Add(Mathf.RoundToInt(radial.magnitude * 1000f));
+                if (radial.magnitude < 1e-4f) continue;
+                float tilt = Vector3.Dot(normals[i], radial.normalized);
+                if (tilt > 0.03f) outward++;
+                if (tilt < -0.03f) inward++;
+            }
+            Assert.GreaterOrEqual(rings.Count, 7, "ring after ring");
+            Assert.Greater(inward, 0, "some lean toward the axis");
+            Assert.Greater(outward, 0, "and their neighbours away from it");
         }
 
         // ---- Colliders ------------------------------------------------------------------------------------------
@@ -476,7 +632,10 @@ namespace Toybox.Tests
             Assert.AreEqual(def.Volume, thimble.BaseVolume, 1e-4f);
             Assert.AreEqual(def.Radius, thimble.BaseRadius, 1e-4f);
             Assert.AreEqual(0.123f * 0.8f * 0.8f * 0.8f, thimble.Mass, 0.002f, "0.123 s^3");
+            // Silver; the candy it is known by is the band round its rim (Mint does not ban Tangerine).
             Assert.IsTrue(Palette.Same(Palette.Tangerine, ToyInfo.Of(thimble.GameObject).Candy));
+            Assert.AreSame(Materials.Toy(ToyFactory.Silver, Palette.Silver), Part(thimble.GameObject, "Visual").sharedMaterial);
+            Assert.AreSame(Materials.Toy(ToyRecipe.BrushedMetal, Palette.Tangerine), Part(thimble.GameObject, "Band").sharedMaterial);
 
             Assert.AreEqual(2.094f, apple.Mass, 0.02f);
             Assert.AreEqual(0.5f, apple.BaseRadius, 1e-4f);

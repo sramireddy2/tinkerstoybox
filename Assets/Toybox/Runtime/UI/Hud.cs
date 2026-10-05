@@ -1,6 +1,7 @@
 using TMPro;
 using Toybox.Engine;
 using Toybox.Platform;
+using Toybox.Render;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -16,6 +17,8 @@ namespace Toybox.UI
     public sealed class HudPresenter : IPresenter
     {
         public const float LookPromptDelay = 0.6f;
+        /// <summary>How far below the top edge the look prompt and the autoplay pill hang.</summary>
+        public const float NoteMargin = 48f;
 
         Game game;
         PresentationContext context;
@@ -54,8 +57,11 @@ namespace Toybox.UI
             IPrefStore store = context.Flow != null ? context.Flow.Progress.Store : new MemoryStore();
             Controls = new ControlPills(Root.Rect, store);
 
-            LookPrompt = Pill(Root.Rect, "Look Prompt", "Click to look around", new Vector2(0f, 150f));
-            AutoplayPill = Pill(Root.Rect, "Autoplay", "Autoplay  ·  P to take over", new Vector2(0f, 48f));
+            // What the HUD says about the game itself hangs from the top edge's middle, between the level
+            // card and the readout's corner: the bottom edge's middle is the scale readout's, and nothing
+            // goes over the toy. The two share the place - the prompt is never up while the bot plays.
+            LookPrompt = Pill(Root.Rect, "Look Prompt", "Click to look around", UiKit.Top, new Vector2(0f, -NoteMargin));
+            AutoplayPill = Pill(Root.Rect, "Autoplay", "Autoplay  ·  P to take over", UiKit.Top, new Vector2(0f, -NoteMargin));
 
             game.Events.LevelLoaded += OnLevelLoaded;
             game.Events.LevelUnloading += OnLevelUnloading;
@@ -73,10 +79,10 @@ namespace Toybox.UI
             Frame(0f, 1f);
         }
 
-        static Sticker Pill(RectTransform parent, string name, string text, Vector2 position)
+        static Sticker Pill(RectTransform parent, string name, string text, Vector2 anchor, Vector2 position)
         {
             Sticker pill = Sticker.Create(parent, name, StickerShape.Pill, UiTheme.Ink, new Vector2(320f, 40f));
-            pill.Rect.Place(UiKit.Bottom, position, new Vector2(320f, 40f));
+            pill.Rect.Place(anchor, position, new Vector2(320f, 40f));
             TextMeshProUGUI label = UiKit.Label(pill.Content, "Label", text, UiFont.Body, UiTheme.SmallSize, UiTheme.Paper);
             label.rectTransform.Fill(8f);
             pill.Tween.Hide(true);
@@ -99,6 +105,12 @@ namespace Toybox.UI
                 }
                 bool holding = game.Grabber.IsHolding;
                 Reticle.Frame(dt, !holding, !holding && game.Grabber.Focus != null);
+                // The readout keeps out of the held toy's way; once the toy is let go it stays where it is.
+                if (holding)
+                {
+                    Vector2 canvas = HudFrame.Size(Root.Rect);
+                    if (HeldSticker(canvas, out Rect toy)) Readout.Avoid(toy, canvas);
+                }
                 Readout.Frame(dt);
                 Hints.Frame(dt);
                 LevelCard.Frame(dt);
@@ -110,6 +122,25 @@ namespace Toybox.UI
                 AutoplayPill.Tween.Set(context.Autoplay);
             }
             Root.Advance(dt);
+        }
+
+        /// <summary>
+        /// What the held toy takes up on the HUD's canvas right now, die-cut border and peel shadow included
+        /// (see <see cref="HudFrame"/> for the coordinates); false when nothing is held. It is measured
+        /// through the game's camera, where the rig has just put the toy for this frame.
+        /// </summary>
+        public bool HeldSticker(Vector2 canvas, out Rect sticker)
+        {
+            sticker = default;
+            Prop held = game != null && !game.IsDisposed ? game.Grabber.Held : null;
+            if (held == null) return false;
+            Camera camera = context.Camera;
+            Vector3 eye = camera != null ? camera.transform.position : game.Player.Eye;
+            Quaternion look = camera != null ? camera.transform.rotation : game.Player.LookRotation;
+            float fieldOfView = camera != null ? camera.fieldOfView : Settings.FieldOfView;
+            if (!HudFrame.BoxOf(held, eye, look, fieldOfView, canvas.y, out Rect box)) return false;
+            sticker = HudFrame.StickerOf(box, canvas.y);
+            return true;
         }
 
         public void Dispose()
@@ -166,6 +197,122 @@ namespace Toybox.UI
         }
 
         void OnMessage(MessageEvent e) => Hints.Say(e.Text, e.Seconds);
+    }
+
+    /// <summary>
+    /// Who gets which part of the HUD's frame (ART_BIBLE 9.6, 10.5). The held toy is drawn on the crosshair
+    /// and what it is aimed at lies around it, so the middle of the frame is theirs
+    /// (<see cref="AimArea"/>); the HUD's furniture lives on the edges - the level card top left, the
+    /// toasts bottom left, the control pills bottom right, the scale readout on the bottom edge's middle
+    /// or, when the toy comes down that far, in the top right corner.
+    ///
+    /// Rects here are in canvas pixels measured from the middle of the canvas, x to the right and y up.
+    /// The canvas is 1920 x 1080 on a 16:9 screen, wider on a wider one and taller on a narrower one
+    /// (<see cref="UiRoot.CanvasSize"/>), and the camera's field of view is the frame's height at any
+    /// shape: a toy is as many canvas pixels tall as its share of that height.
+    /// </summary>
+    public static class HudFrame
+    {
+        /// <summary>The share of the frame's width and of its height, around the crosshair, that is kept for aiming.</summary>
+        public const float AimShare = 0.7f;
+
+        /// <summary>The size of a HUD canvas; the reference frame while it has not been laid out.</summary>
+        public static Vector2 Size(RectTransform canvas)
+        {
+            Rect rect = canvas != null ? canvas.rect : default;
+            return rect.width > 1f && rect.height > 1f ? rect.size : new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
+        }
+
+        /// <summary>
+        /// The middle of the frame: where the held toy and its target are. Nothing of the scale readout
+        /// ever lies in it, whatever the shape of the screen.
+        /// </summary>
+        public static Rect AimArea(Vector2 canvas)
+        {
+            Vector2 size = canvas * AimShare;
+            return new Rect(-size * 0.5f, size);
+        }
+
+        /// <summary>
+        /// The box around what a view from <paramref name="eye"/> shows of a prop, in pixels of a canvas
+        /// this tall. Parts of the prop behind the eye are cut off (the box then runs far out of the
+        /// frame); false if nothing of it is in front of the eye.
+        /// </summary>
+        public static bool BoxOf(Prop prop, Vector3 eye, Quaternion look, float fieldOfView, float canvasHeight, out Rect box)
+        {
+            box = default;
+            if (prop == null || prop.Removed || prop.Transform == null) return false;
+            Matrix4x4 toView = Matrix4x4.TRS(eye, look, Vector3.one).inverse * prop.Transform.localToWorldMatrix;
+            Vector3 centre = prop.LocalCenter, half = prop.LocalHalfExtents;
+            float pixels = canvasHeight * 0.5f / Mathf.Tan(Mathf.Clamp(fieldOfView, 1f, 179f) * 0.5f * Mathf.Deg2Rad);
+            // Just in front of the eye: an edge that passes it is cut there.
+            float near = Mathf.Max(1e-4f, 0.01f * Mathf.Abs(toView.MultiplyPoint3x4(centre).z));
+
+            var min = new Vector2(float.MaxValue, float.MaxValue);
+            var max = new Vector2(float.MinValue, float.MinValue);
+            // The twelve edges of the prop's box: corner i to the corner that differs from it in one axis.
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 a = Corner(toView, centre, half, i);
+                for (int axis = 1; axis <= 4; axis <<= 1)
+                {
+                    if ((i & axis) != 0) continue;
+                    Vector3 b = Corner(toView, centre, half, i | axis);
+                    if (a.z < near && b.z < near) continue;
+                    Vector3 from = a.z < near ? Vector3.Lerp(a, b, (near - a.z) / (b.z - a.z)) : a;
+                    Vector3 to = b.z < near ? Vector3.Lerp(b, a, (near - b.z) / (a.z - b.z)) : b;
+                    Vector2 p = new Vector2(from.x, from.y) * (pixels / Mathf.Max(from.z, near));
+                    Vector2 q = new Vector2(to.x, to.y) * (pixels / Mathf.Max(to.z, near));
+                    min = Vector2.Min(min, Vector2.Min(p, q));
+                    max = Vector2.Max(max, Vector2.Max(p, q));
+                }
+            }
+            if (min.x > max.x) return false;
+            // Far enough out of any frame, and still numbers a Rect can hold.
+            const float Limit = 1e6f;
+            min = Vector2.Max(min, new Vector2(-Limit, -Limit));
+            max = Vector2.Min(max, new Vector2(Limit, Limit));
+            box = Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+            return true;
+        }
+
+        static Vector3 Corner(in Matrix4x4 toView, Vector3 centre, Vector3 half, int index) =>
+            toView.MultiplyPoint3x4(centre + new Vector3((index & 1) == 0 ? -half.x : half.x, (index & 2) == 0 ? -half.y : half.y, (index & 4) == 0 ? -half.z : half.z));
+
+        /// <summary>
+        /// A held toy's box with what its sticker adds (ART_BIBLE 9): the die-cut border all round and the
+        /// peel shadow to the right and below - both sized to the frame's height, like the toy.
+        /// </summary>
+        public static Rect StickerOf(Rect box, float canvasHeight)
+        {
+            float scale = canvasHeight / UiTheme.ReferenceHeight;
+            float border = StickerLook.BorderWidth * scale;
+            Vector2 peel = StickerLook.PeelOffset * scale;
+            return Rect.MinMaxRect(box.xMin - border + Mathf.Min(0f, peel.x), box.yMin - border + Mathf.Min(0f, peel.y),
+                box.xMax + border + Mathf.Max(0f, peel.x), box.yMax + border + Mathf.Max(0f, peel.y));
+        }
+
+        /// <summary>What a UI sticker of this face takes up: the face, its border and its peel shadow.</summary>
+        public static Rect Footprint(Rect face)
+        {
+            float border = UiTheme.BorderWidth;
+            Vector2 shadow = UiTheme.ShadowOffset;
+            return Rect.MinMaxRect(face.xMin - border + Mathf.Min(0f, shadow.x), face.yMin - border + Mathf.Min(0f, shadow.y),
+                face.xMax + border + Mathf.Max(0f, shadow.x), face.yMax + border + Mathf.Max(0f, shadow.y));
+        }
+
+        /// <summary>True if the two come closer to each other than <paramref name="gap"/> (0: they overlap).</summary>
+        public static bool Meet(Rect a, Rect b, float gap = 0f) =>
+            a.xMin < b.xMax + gap && a.xMax > b.xMin - gap && a.yMin < b.yMax + gap && a.yMax > b.yMin - gap;
+    }
+
+    /// <summary>Where the scale readout is (ART_BIBLE 9.6).</summary>
+    public enum ReadoutDock
+    {
+        /// <summary>On the bottom edge of the frame, in the middle: below the toy, between the toasts and the control pills.</summary>
+        Low,
+        /// <summary>The top right corner: where it goes when the held toy comes down into the low dock.</summary>
+        Corner,
     }
 
     /// <summary>
@@ -228,18 +375,29 @@ namespace Toybox.UI
     }
 
     /// <summary>
-    /// The scale readout (ART_BIBLE 9.6): a sticker pill centred at 72% of the screen's height, there while
-    /// a toy is held and for 1.2 s after it was let go.
+    /// The scale readout (ART_BIBLE 9.6): a sticker pill, there while a toy is held and for 1.2 s after it
+    /// was let go.
     ///
     ///   factor   "x3.2" = projected scale now / scale at the grab; Ink within 5% of x1, Lagoon below, Cherry above
     ///   ruler    logarithmic, x1/8 to x8 at 40 px per octave, ticks at 1/4, 1/2, 1, 2, 4; the solid marker is
     ///            now, the hollow one the grab
     ///   figure   a 14 px figure beside a bar as tall as the toy really is, with a notch at the jump apex;
     ///            past 56 px the bar stays and the figure shrinks (to 3 px at the least)
+    ///
+    /// It never covers what the player aims with or at. It is docked on the bottom edge of the frame, in
+    /// the middle (<see cref="ReadoutDock.Low"/>): right below the toy's foot, outside the frame's aiming
+    /// area. A toy picked up from so near that its sticker comes down into that dock sends the readout to
+    /// the top right corner (<see cref="ReadoutDock.Corner"/>), the place a toy on the crosshair reaches
+    /// last. Once a toy is let go the readout stays where it was.
     /// </summary>
     public sealed class ScaleReadout
     {
-        public const float ScreenHeight = 0.72f, Linger = 1.2f;
+        public const float Linger = 1.2f;
+        /// <summary>The low dock's distance from the bottom edge; the corner dock's from the top and the right edge.</summary>
+        public const float LowMargin = 24f, CornerMargin = 48f;
+        /// <summary>The held toy's sticker and the readout's keep this much apart; and this much more before the readout comes back down.</summary>
+        public const float Clearance = 16f, ComeBack = 24f;
+        public static readonly Vector2 Size = new Vector2(392f, 96f);
         public const float PixelsPerOctave = 40f, Octaves = 3f;
         public const float FigureHeight = 14f, MaxBar = 56f, MinFigure = 3f;
         public const float NeutralBand = 0.05f, JumpStep = 0.05f;
@@ -253,11 +411,13 @@ namespace Toybox.UI
         readonly char[] buffer = new char[96];
 
         float factor = 1f, lastScale, trueHeight, lingering, markerX, flash;
-        bool holding;
+        bool holding, settled;
         int shownValue = int.MinValue, shownDecimals = -1;
 
         public Sticker Pill => pill;
         public bool Shown => pill.Tween.IsShown;
+        /// <summary>Where the readout is right now.</summary>
+        public ReadoutDock Dock { get; private set; }
         /// <summary>Scale now relative to the scale at the grab.</summary>
         public float Factor => factor;
         /// <summary>What the factor label says, without its spacing tags: "×3.2".</summary>
@@ -285,9 +445,8 @@ namespace Toybox.UI
 
         public ScaleReadout(RectTransform parent)
         {
-            var size = new Vector2(392f, 96f);
-            pill = Sticker.Create(parent, "Scale Readout", StickerShape.Pill, UiTheme.Paper, size);
-            pill.Rect.Place(new Vector2(0.5f, 1f - ScreenHeight), UiKit.Centre, Vector2.zero, size);
+            pill = Sticker.Create(parent, "Scale Readout", StickerShape.Pill, UiTheme.Paper, Size);
+            Place(ReadoutDock.Low);
             RectTransform content = pill.Content;
 
             factorLabel = UiKit.Label(content, "Factor", "", UiFont.Display, UiTheme.ReadoutSize, UiTheme.Ink);
@@ -329,9 +488,55 @@ namespace Toybox.UI
             rule.rectTransform.Place(UiKit.Centre, position, size);
         }
 
+        /// <summary>The readout's face in a dock, on a canvas of this size (see <see cref="HudFrame"/> for the coordinates).</summary>
+        public static Rect FaceIn(ReadoutDock dock, Vector2 canvas)
+        {
+            Vector2 half = canvas * 0.5f;
+            return dock == ReadoutDock.Low
+                ? new Rect(-Size.x * 0.5f, -half.y + LowMargin, Size.x, Size.y)
+                : new Rect(half.x - CornerMargin - Size.x, half.y - CornerMargin - Size.y, Size.x, Size.y);
+        }
+
+        /// <summary>
+        /// The dock for a held toy whose sticker takes up <paramref name="toy"/> of the canvas
+        /// (<see cref="HudFrame.StickerOf"/>): the low one unless the toy comes down into it. A readout
+        /// that is in the corner already (<paramref name="from"/>) only comes back once the toy has left
+        /// the low dock well alone, so that a toy at the limit does not send it to and fro.
+        /// </summary>
+        public static ReadoutDock DockFor(Rect toy, Vector2 canvas, ReadoutDock? from = null)
+        {
+            float gap = Clearance + (from == ReadoutDock.Corner ? ComeBack : 0f);
+            return HudFrame.Meet(toy, HudFrame.Footprint(FaceIn(ReadoutDock.Low, canvas)), gap) ? ReadoutDock.Corner : ReadoutDock.Low;
+        }
+
+        /// <summary>
+        /// Called every frame of a hold with what the held toy's sticker takes up of the canvas: the
+        /// readout moves out of its way. Moved while it is up, it sticks on again in its new place.
+        /// </summary>
+        public void Avoid(Rect toy, Vector2 canvas)
+        {
+            ReadoutDock dock = DockFor(toy, canvas, settled ? Dock : (ReadoutDock?)null);
+            settled = true;
+            if (dock == Dock) return;
+            Place(dock);
+            if (!pill.Tween.IsShown) return;
+            pill.Tween.Hide(true);
+            pill.Tween.Show();
+        }
+
+        // Anchored to the frame's edge, so the dock is right at any shape of the screen.
+        void Place(ReadoutDock dock)
+        {
+            Dock = dock;
+            if (dock == ReadoutDock.Low) pill.Rect.Place(UiKit.Bottom, new Vector2(0f, LowMargin), Size);
+            else pill.Rect.Place(UiKit.TopRight, new Vector2(-CornerMargin, -CornerMargin), Size);
+        }
+
         public void Grab(PropHoldEvent e)
         {
             holding = true;
+            // A new toy: where the last one sent the readout says nothing about this one.
+            settled = false;
             lingering = 0f;
             factor = 1f;
             lastScale = e.Scale;
@@ -375,8 +580,10 @@ namespace Toybox.UI
         public void Reset()
         {
             holding = false;
+            settled = false;
             lingering = 0f;
             pill.Tween.Hide(true);
+            if (Dock != ReadoutDock.Low) Place(ReadoutDock.Low);
         }
 
         public void Frame(float dt)
@@ -711,8 +918,9 @@ namespace Toybox.UI
 
     /// <summary>
     /// The held-control pills: key caps at the bottom right while a toy is held - "Q / wheel: turn",
-    /// "F: flip", "click: drop". Each stops appearing once its control has been used three times (kept in
-    /// the player's store, so they stay away).
+    /// "F: flip", "click: let go". Each stops appearing once its control has been used three times (kept in
+    /// the player's store, so they stay away). (The art bible wrote "click: drop". Every line and hint of
+    /// the levels says "let go" - one verb for one act - and the pill is on screen beside them.)
     /// </summary>
     public sealed class ControlPills
     {
@@ -729,7 +937,7 @@ namespace Toybox.UI
 
         static readonly string[] Keys = { "turn", "flip", "drop" };
         static readonly string[] Caps = { "Q / wheel", "F", "click" };
-        static readonly string[] Actions = { "turn", "flip", "drop" };
+        static readonly string[] Actions = { "turn", "flip", "let go" };
 
         readonly IPrefStore store;
         readonly Sticker[] pills = new Sticker[3];

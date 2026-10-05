@@ -128,6 +128,12 @@ namespace Toybox.Art
         public static readonly Color Birch = Hex("#E9C9A0");
         /// <summary>Gadget metal parts; non-grabbable metal props.</summary>
         public static readonly Color Steel = Hex("#C9CED8");
+        /// <summary>
+        /// Bare toy metal: the body of the Level 2 thimble, the one toy that is not candy all over (it wears
+        /// its candy as a band). A step darker and greyer than Steel: the room gives a mirror its tint, and
+        /// the die-cut border of a held toy has to show against it.
+        /// </summary>
+        public static readonly Color Silver = Hex("#B4B6B9");
 
         // ---- 2.2 Candy: grabbable toys only ----------------------------------------------------------
         public static readonly Color Cherry = Hex("#FF2E55");

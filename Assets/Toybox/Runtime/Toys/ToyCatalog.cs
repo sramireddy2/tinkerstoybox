@@ -55,9 +55,12 @@ namespace Toybox.Toys
         public string Slug { get; }
         /// <summary>The authored size, X x Y x Z: the box around the colliders.</summary>
         public Vector3 Size { get; }
-        /// <summary>The recipe of the toy's main material (ART_BIBLE 4.3).</summary>
+        /// <summary>The recipe of the toy's main material (ART_BIBLE 4.3); for the silver thimble, of its candy band.</summary>
         public ToyRecipe Recipe { get; }
-        /// <summary>The toy's own colour: a candy colour for a toy, Birch for a set piece. sRGB.</summary>
+        /// <summary>
+        /// The toy's own colour: a candy colour for a toy (all over it; the silver thimble wears it as a
+        /// band), Birch for a set piece. sRGB.
+        /// </summary>
         public Color Color { get; }
         public float Friction { get; }
         public float Bounciness { get; }
@@ -328,6 +331,10 @@ namespace Toybox.Toys
                     1f, 0.6f, 0.7f, 0f, 0.2f, 10f, GrabPose.Snap90, new[] { 4, 11 }, View(-25f, 30f)),
                 new ToyDef(ToyId.CheeseWedge, "Cheese Wedge", ToyFactory.CheeseWedgeSize, ToyRecipe.GlossyPlastic, Palette.Lemon, ToyFactory.CheeseWedge,
                     0.20f, 0.3f, 0.9f, 0f, 0.2f, 14f, GrabPose.Upright, new[] { 1 }, View(0f, 90f)),
+                // Silver, by the owner's brief ("a tiny silver thimble"): its body is ToyFactory.Silver in
+                // Palette.Silver whatever the room. Recipe and colour here are those of its candy - the
+                // anodised band round its rim, its pool, its tag - so a room that bans Tangerine recolours
+                // the band and nothing else.
                 new ToyDef(ToyId.Thimble, "Thimble", new Vector3(1f, 0.8f, 1f), ToyRecipe.BrushedMetal, Palette.Tangerine, ToyFactory.Thimble,
                     0.616f, 0.2f, 0.6f, 0f, 0.3f, 13f, GrabPose.Upright, new[] { 2 }, View(-18f, 0f)),
                 new ToyDef(ToyId.Apple, "Apple", Vector3.one, ToyRecipe.GlossyPlastic, Palette.Cherry, ToyFactory.Apple,

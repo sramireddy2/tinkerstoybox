@@ -660,7 +660,8 @@ namespace Toybox.UI
             float seconds = flow != null && flow.LastCompletion.Level != null ? flow.LastCompletion.Time : game.Time;
             title.text = level != null ? (level.Title ?? "").ToUpperInvariant() : "";
             int grabs = Menu.Grabs;
-            stats.text = UiKit.Time(seconds) + "  ·  " + grabs + (grabs == 1 ? " grab" : " grabs");
+            // (The levels' word: toys are picked up and let go.)
+            stats.text = UiKit.Time(seconds) + "  ·  " + grabs + (grabs == 1 ? " pick-up" : " pick-ups");
             best.gameObject.SetActive(flow != null && flow.LastCompletionWasBest && flow.Progress.Completions(flow.LevelId) > 1);
 
             // The flash of 9.7 is an exposure flash and the post-processing's to show (+1.5 EV in the card's

@@ -29,7 +29,9 @@ editing settings by hand.
 `Physics.simulationMode = SimulationMode.Script`. `Game.Tick()` advances exactly one 1/60 s step:
 
 ```
-sample input -> player -> grab / drop -> level + gadgets -> PhysicsScene.Simulate(dt)
+sample input -> player -> grab / drop -> level + gadgets -> heavy props that come at the player are let through
+             -> PhysicsScene.Simulate(dt)
+             -> a throw by a heavy prop is taken back
              -> ground probe, held-prop placement, prop impacts, triggers, exits, kill plane -> events
 ```
 
@@ -214,6 +216,9 @@ Details of `Engine/Player.cs` that levels and gadgets can rely on:
   axis. On walkable ground the controller steers along the surface and cancels the part of gravity that
   lies in the plane the capsule rests on, so the frictionless capsule neither sticks to walls nor creeps
   down slopes. `GroundCollider`, `GroundNormal`, `GroundPoint` and `GroundProp` describe it.
+  What the capsule does not collide with (`Physics.IgnoreCollision`: a prop that is passing through the
+  player, a gadget part that would have crushed them) is not ground and not a face in the way either -
+  the probes skip it, so a plank that slides through the player's feet does not carry them off.
 - **Steeper than 50° is not ground.** A face between a wall and a walkable slope stops the player or
   turns them aside, but never lifts them: walking into it does not bob, and jumping at it reaches the
   ordinary jump height and no more. Two such faces leaning against each other (a crevice) do carry the
@@ -230,11 +235,15 @@ Details of `Engine/Player.cs` that levels and gadgets can rely on:
     abruptly). Above that the rider is thrown: a piston that stops after rising at 12 keeps none of them.
   - *A launch*: anything else that leaves the player rising faster than 1.5 units·s⁻¹ relative to the
     ground - a seesaw, a prop from below, a bounce after coming down hard, `AddImpulse`, `SetVelocity` -
-    releases the ground. Less than that is swallowed.
+    releases the ground. Less than that is swallowed. (A dynamic prop that outweighs the player lifts
+    or launches them at up to `PerspectiveGrabber.CarrySpeed` = 6 only; one that comes up faster passes
+    through them - "Props and the player's body". A kinematic `Mover` has no such limit.)
 - **Steps.** The foot of the capsule rolls over a static lip up to about 0.1 high (a third of its
   radius) without leaving the ground; anything higher is a wall. Design steps accordingly, or use ramps.
 - Ground velocity is inherited from kinematic `Mover`s and from dynamic bodies (point velocity). A turning
-  mover reports the chord of its arc (`Mover.PointVelocity`), so a rider stays on a turntable.
+  mover reports the chord of its arc (`Mover.PointVelocity`), so a rider stays on a turntable. A dynamic
+  prop heavier than the player carries them at up to 6 units·s⁻¹ (`CarrySpeed`); faster, it is not
+  ground any more and goes on without them.
 - **Air steering turns the velocity toward the input direction and adds speed up to walk / sprint
   speed, never beyond**; it does not brake momentum from a launch either. Steering in the air cannot
   lengthen a jump, and chained jumps do not build up speed.
@@ -266,6 +275,13 @@ modification; nothing else in the scene is affected):
   of the next (floor tiles, a ramp box meeting a platform box); it would turn walking speed into a bump.
   Contacts that lie in the plane the player walks on and have not been reached yet are dropped, so a
   floor may be built from flush boxes. A real lip sticks out of that plane and is kept.
+
+Its `Prepare` runs on the main thread as the last thing before the physics step. That is also where the
+props that must not touch the capsule in this step at all are taken out of it
+(`PerspectiveGrabber.BeforePhysics`, see "Props and the player's body" below): at that moment every
+velocity of the tick is known - the player's, and whatever levels and gadgets did to the props. What
+the step itself sets going and throws at the player in one go cannot be known then; that is looked at
+right after the step, before the controller reads its result (`PerspectiveGrabber.AfterPhysics`).
 
 ## The perspective mechanic (`Engine/PerspectiveGrabber.cs`)
 
@@ -328,13 +344,75 @@ placement and restores it when the next tick begins, so frames do not change res
 scale, becomes dynamic again with zero velocity, its mass becomes `density × volume × scale³` (never
 less than `Prop.MinMass` = 0.01), and sleeping bodies are woken. A `Fixed` prop stays where it is dropped.
 
-**Props and the player's body.** Nothing crushes the player. A prop that overlaps the player at the
-moment of release passes through them until they have separated. The same goes for a dynamic prop
-heavier than the player that sinks more than 0.15 into the capsule from above or from the side - the
-prop let go overhead that grows and comes down on its owner, or one a respawn put the player inside of:
-it comes to rest around the player, who walks out, and then it is solid for them again. (A prop the
-player lands *on* is not affected.) With the default `MaxScale` of 80 a prop held against the open sky
-reaches some 40 units and tens of tonnes; levels with open sky should set `MaxScale`.
+**Props and the player's body.** Nothing crushes the player and nothing throws them. "Passing through"
+below always means the same thing: the prop's colliders ignore the capsule (`Physics.IgnoreCollision`),
+the prop goes on colliding with everything else, and the player's ground and foot probes do not see it.
+Four rules switch it on, one switches it off; levels need no guard of their own. Together they hold
+this: **no dynamic prop that outweighs the player ever moves them at 9 units·s⁻¹ or more** - not from
+the side, not from above, not from under their feet (`HeavyPropTests`, `HeavyPropAttackTests`).
+
+1. *Let go around the player.* A prop that overlaps the capsule at the moment of release passes through.
+2. *Coming at the player* (`PerspectiveGrabber.BeforePhysics`, run right before every physics step). A
+   dynamic prop that outweighs the player (mass > 3) and whose surface moves toward them faster than
+   `PassSpeed` = 1 unit·s⁻¹ passes through - decided *before* it touches, as soon as the gap is no more
+   than what the two close in 0.05 s plus 0.1. Sliding, rolling, falling, toppling, from any side, onto
+   a player who stands, walks into it or is in the air: they are not touched (before the rule a heavy
+   prop handed them its own speed, and an edge that caught the capsule against the floor squirted them
+   out at four times that: 12 to 76 units·s⁻¹ measured).
+   - What counts is the speed of the prop's own surface along the line to the capsule, at the point of
+     the prop nearest the capsule and at the points nearest its foot and its head (a toppling slab's
+     nearest part is not always the part that arrives first). **Walking into a heavy prop, or being
+     carried into one that rests, never makes it give way**: the smaller of "speed in the world" and
+     "speed relative to what the player stands on" is taken, so a heavy prop that rides the same
+     platform is at rest too.
+   - **What the player stands on is exempt** (`GroundProp`): it carries them. And where the prop is
+     under the foot (a contact the player could stand on) only its sideways speed counts: a prop that
+     comes up from below lifts or launches the player, as a seesaw does, and that is meant.
+   - **…up to `CarrySpeed` = 6 units·s⁻¹** (less than the player's own jump, 7.6). A heavy prop under
+     the foot - stood on, or about to be landed on - whose surface there moves faster than that,
+     sliding, rolling or rising, is no ground: it passes through them and goes on without them (they
+     drop to whatever is underneath). Before this limit a block knocked away under the player carried
+     them off at up to 25, and the low end of a plank flung them upward at 37 when a block came down
+     on its high end.
+   - Slower than `PassSpeed` a heavy prop is solid and shoves the player. If it goes on shoving faster
+     than `PushSpeed` = 0.3 for `PushSeconds` = 0.25, it passes through as well - a boulder rolling at
+     walking pace moves the player a hand's width, not across the room.
+   - `Kinematic`, `Fixed`, frozen, held and driven props are not this rule's business: a platform a
+     gadget carries is the gadget's (crush guard, `GhostToPlayer`).
+   - The speeds are per unit of player scale, like the player's own. Props at or below the player's
+     mass never pass: they push the player and are pushed, by their momentum (half the player's mass
+     at 25 gives them 8).
+3. *Lying on the player.* A dynamic prop heavier than the player that has sunk more than 0.15 into the
+   capsule from above or from the side without coming at them - let go just overhead, or put there by a
+   respawn - passes through too (`LetHeavyPropsPass`, after the step). A prop the player lands *on* is
+   not affected.
+4. *Thrown all the same* (`PerspectiveGrabber.AfterPhysics` → `TakeBackThrows`, right after every step
+   and before the controller reads its result). Rule 2 needs a prop that is already moving. A step can
+   set a resting one going and hit the player with it at once: a block that rests against them is
+   struck by another, the block they stand on is knocked away or tipped up under their feet. So: if
+   the step left the player more than `PassSpeed` faster than they were going by themselves
+   (`Player.ExpectedVelocity`: what the controller set, and gravity), moving at more than `CarrySpeed`
+   the way they were pushed, and a heavy dynamic prop that is moving is at the capsule, the throw is
+   **taken back** - `Player.TakeBack` puts them where, and as fast as, they would be had nothing
+   touched them in that step - and the prop passes through from then on. Likewise what they stood on
+   during the step and is now faster than `CarrySpeed` passes before the controller takes its speed
+   for the ground's. A kinematic `Mover` that launches its rider is recognised (it moves that way
+   itself) and left alone, also with a heavy toy riding beside the player.
+
+*Solid again* (after every step): as soon as the prop is not held, does not overlap the capsule, and
+is not coming at the player by rule 2. For a prop that fell on the player that means: it has come to
+rest round them and they have walked out of it. A boulder that has rolled through them is solid again
+behind them. A prop that slid away under them is solid again once it is no longer under their feet,
+or slower than `CarrySpeed`.
+
+Known limits: props at or below the player's mass are outside all of this (they push by their
+momentum: 0.9 of the player's mass at 25 gives them 11.7). A loose heavy toy that rides a kinematic
+platform faster than `CarrySpeed` cannot be stood on while it does (to the rule it is a prop moving at
+that speed); toys a gadget carries (`PropCarrier`, `BeginDrive`) are kinematic and not affected. A
+heavy ball that comes to rest across a corner can shut the player in behind it; they pick it up.
+
+With the default `MaxScale` of 80 a prop held against the open sky reaches some 40 units and tens of
+tonnes; levels with open sky should set `MaxScale`.
 
 `PropGrabbed`, `PropHeld` (every tick of a hold, after the placement) and `PropDropped` carry
 `{ Prop, OldScale, NewScale, GrabDistance, DropDistance }`; unless a clamp was hit,
@@ -754,11 +832,12 @@ ReturnPort { Mouth, EjectVelocity, PlayerPosition, PlayerYaw, RetrySeconds } -> 
 FitGauge { Target (Socket) | MinScale..MaxScale, Near, Tag, Lamp } -> State, Scale, Fit(scale) [GaugeChanged]
 WindStream { Center, Size, Rotation, Direction, Strength, PlayerAirPush 3, PlayerGroundPush 0, PropDrag 12, MaxPropAcceleration 40, MaxPropMass 1, PropLift 0.9 }
       -> Strength {get;set}, Contains, PlayerInside, PropAcceleration(scale, mass) [WindChanged]
-SailRaft { Prop, Stream, Launch, Area, LiftPressure, MoorAbove, RiderMass, BoardDelay, CruiseSpeed, Acceleration, CruiseHeight, Landing, AlignDistance }
-      -> State (Loose|Moored|Stall|Glide|Docked), Capacity(s), Carries(s), RiderAboard [SailMoored, SailStalled, SailLaunched, SailDocked]
+SailRaft { Prop, Stream, Launch, Area, LiftPressure, MoorAbove, RiderMass, BoardDelay, CruiseSpeed, Acceleration, CruiseHeight, Landing, AlignDistance, Settle 0, SettleSeconds 0.2 }
+      -> State (Loose|Moored|Stall|Glide|Docked), Capacity(s), Carries(s), RiderAboard, RiderOverhead [SailMoored, SailStalled, SailLaunched, SailDocked]
 BouncePad { Prop | Surface + Scale, GainPerScale 1.75, MinImpact 3, MinNormalY 0.9, Cooldown 0.1 } -> BounceCount, LaunchSpeed(s), Apex(s) [Bounced]
 Seesaw { Pivot, ArmADirection | Axis, ArmA, ArmB, Width, Thickness, TipTaper, Plank (prop), RestSide, PlankBias, RiderBias, TipMargin, PadHeight, ReturnRate, FloorY, ProjectileArm, SeatArm }
-      -> State (Rest|Swing|Tipped|Return), Angle, F(M, m), LaunchSpeed(f, x), PointAt(...) [SeesawStruck, SeesawLaunched, SeesawReturned, SeesawProjectile]
+      -> State (Rest|Swing|Tipped|Return), Angle, F(M, m), LaunchSpeed(f, x), PointAt(...), RiderOverhead; consts HoldLoad 0.5, ReleaseTicks 30, MinStrikeShare 0.1, OverheadReach 1.5
+         [SeesawStruck, SeesawLaunched, SeesawReturned, SeesawProjectile]
 Train { Center, Radius 14, DeckY, AngularSpeed 24, StartBearing, EngineArc, CarArc, Cars 8, StationBearing, BedHeight, DeckSize, EngineFactory, CarFactory } : ICarrierBeds
       -> EngineBearing, CarBearing(i), CarMover(i), BedBox(i), PoseAt(bearing), LapSeconds, DeckSpeed [TrainAtStation]
 PropCarrier { Beds (ICarrierBeds), AcceptTag, FlatDot, MinRadius, MaxRadius, RadiusCenter, EaseSeconds } -> Captured, CarIndex, CarriedProp, Release [CarrierCaptured, CarrierDropped]
@@ -787,6 +866,26 @@ Names in brackets are the mirrors on `game.Events`. What a level author has to k
 - `Seesaw` given a `Plank` prop needs that prop already lying in the rest pose. `PropCarrier` is created
   after its `Train`. `WindStream.PropLift` makes anything under `MaxPropMass` nearly weightless in the stream.
 - `prop.BeginDrive()` can return null (held, removed): gadgets check it, and `prop.Driven` every tick.
+- **A rider who hops is still a rider.** A jump pressed just before landing goes off on the tick the
+  feet touch down, so a gadget that only asks `GadgetKit.PlayerStandsOn` never sees such a rider
+  standing. `SailRaft.RiderOverhead` and `Seesaw.RiderOverhead` are true while the player is in the
+  air over the thing they rode, not under it. The raft does not let go of a rider who is overhead; the
+  seesaw goes further, because its plank comes up faster than a jumper falls: instead of ghosting
+  through them (the crush guard's answer to anybody else in the way of a swing) it gives them, tick by
+  tick, the upward speed that keeps their feet on its top, and throws them with the rule's speed when
+  the swing ends. Only a jump at the very end of the swing, which is higher and faster than the throw
+  by the player's own doing, keeps its own speed.
+- **A seesaw's swing is called off when what tipped it is picked up again** (`prop.Held` or `Removed`
+  in mid-swing): the riders keep the speed the plank has given them so far and the plank swings back.
+  A tipped plank whose weight was picked up, or that only the player held down, swings back at once;
+  one whose weight is merely not touching it for a moment waits `ReleaseTicks`, and a swing with less
+  than `MinStrikeShare` of the travel ahead of it raises no strike or launch cue: one let-go is one
+  `SeesawStruck`.
+- `SailRaft.Settle` presses a moored sail `Settle × scale` into the deck: a flat toy rests on its
+  thickest part with its rim in the air, and moored (pinned) that rim is a lip nobody walks over.
+- `Funnel`'s chamber floor is a sheet without thickness: a marble under about 0.35 coming down the tube
+  at 11 units·s⁻¹ goes through it. Level 8 stands solid boxes under its lid and chamber floors and a
+  net under those; anything else that drops small balls through a `Funnel` needs the same.
 - Not built (LEVELS lists them as fallbacks only): HingeChain's single-piece mode, `LaunchSeat`, `FunnelCapture`.
 - Gadget sounds are bound by name (`Audio/GadgetSounds.Named`): add a line there for a new mirror.
 
@@ -1168,11 +1267,15 @@ What building them taught, and every later level should take over:
   pea; Level 1's crumb leash covers it.
 - **Dashed paint is the size language** (LEVELS 0.3): a `RoomLit` decal of the toy at the size that
   works, on the surface it stops against or stands on. Level 2's is also its `FitGauge` read-out.
-- **A heavy toy that falls is the level's to guard.** `PerspectiveGrabber.LetHeavyPropsPass` only lets
-  a prop pass through the player once it is 0.15 deep, so a house-sized domino toppling sideways onto
-  the player threw them at 35–50 units a second. Level 4 switches the collision off while the domino
-  outweighs the player and moves (`GadgetKit.IgnorePlayer`, on again once `GadgetKit.OverlapsPlayer` is
-  false). Not fixed in the engine: levels 5 to 15 with heavy dynamic toys need the same guard.
+- **A heavy toy that falls is the engine's to guard, not the level's.** A house-sized domino toppling
+  sideways onto the player used to throw them at 35–50 units a second, and Level 4 had a guard of its
+  own for it. The engine now lets every dynamic prop that outweighs the player and comes at them pass
+  through before it touches ("Props and the player's body"; `HeavyPropTests`), and Level 4's guard is
+  gone. Levels 5 to 15 need none. (The old guard was blind to direction: it also turned a domino the
+  player shoved into air. Now a toy the player shoves is solid, like any other.) The same goes for a
+  heavy toy *under* the player: it carries or lifts them at up to 6 units·s⁻¹ and no faster, so a
+  level cannot use a loose heavy toy as a fast raft or a catapult for the player - that is a gadget's
+  job (a kinematic `Mover`, `BeginDrive`, `player.SetVelocity`).
 - **Walls may be drawn lower than they are.** Level 4's colliders reach its sky cap; the drawn rows of
   blocks are low so that the sun reaches the board. Anything opaque between the eye and a held toy still
   needs a collider, never the other way round.
@@ -1181,8 +1284,58 @@ What building them taught, and every later level should take over:
   levels to that.
 
 Known limits the levels live with: Level 2 tolerates ±2.9° of yaw from its spawn (±7° two steps on);
-the scale pill at 72% of the screen's height covers the foot of Level 4's held domino; a toy at its
-smallest cannot be put down nearer than `MinScale / ratio`.
+a toy at its smallest cannot be put down nearer than `MinScale / ratio`. (The scale readout no longer
+lies on the held toy: it is docked on the bottom edge and moves to the top right corner when the toy
+reaches down to it - `ART_BIBLE.md` §9.6, `HudLayoutTests`.)
+
+## The campaign so far: phase 2 as built (levels 5–9)
+
+`Levels/Level05FanFeather.cs` (+ `Level05Shapes.cs`), `Level06BouncingEraser.cs`, `Level07TeeterTotter.cs`
+(+ `Level07Set.cs`), `Level08FunnelPhysics.cs` (+ `Level08Shapes.cs`), `Level09MovingTrain.cs`
+(+ `Level09Shapes.cs`). Levels 5 and 6 draw their sets with `Level01Set.cs`, which is shared for that
+reason (its header says so). `LEVELS.md` has an "As built" note at the end of each of these levels and
+Appendix E with the five side by side; the logs are `tools/out/notes/level0N-build.md` /
+`level0N-review.md` and `phase-2-campaign.md`; contact sheets are in `tools/out/shots/phase-2`.
+
+| Level | Room | Solver's let-go | Works | Solve (game s) | Gadgets as built |
+|---|---|---|---|---|---|
+| 5 The Fan and the Feather | `sunny-rug`, `GroundY` −15, `KillY` −13 | feather 1.0 → 9.33 | 6.5–12 | 17.35 | `WindStream`, `SailRaft`, `PropLeash`, `SkyCap` |
+| 6 Bouncing Eraser | `block-hall` | eraser 0.8 → 9.37 | 7.08–10.5 | 12.12 | `BouncePad`, `PropLeash` × 3 (cabinet top, crumb, room), `SkyCap` |
+| 7 The Teeter-Totter | `high-shelf` | pebble 0.6 → 4.63 | 2.7–7 | 3.68 | `Seesaw`, `PropLeash`, `SkyCap` |
+| 8 Funnel Physics | `pegboard-workbench`, `GroundY` −6.6 | marbles → 0.651 / 1.221 / 2.413 | 0.50–0.76 / 1.00–1.52 / 2.00–3.04 | 20.50 | `Funnel` × 3, `PressurePlate` × 3, `FitGauge` × 3, `HazardZone` × 3, `ReturnPort`, `PropLeash` × 2 (jam, niche), `Door`, `SkyCap` |
+| 9 The Moving Train | `high-shelf`, `GroundY` −14, `KillY` −12 | plank 0.65 → 4.086 | 3.68–4.4 | 11.75 | `Train`, `PropCarrier`, `PropLeash` × 2 (crumb, stranded), `SkyCap` |
+
+What building them added to phase 1's list:
+
+- **The start is the first pick-up.** Every level of the batch starts the player one step from the toy
+  with the crosshair on it; the text's spawns were three to five units away, from where the toy looks
+  a third as big and cannot be made to work. (Level 8, with three toys, starts on a picture of all
+  three and their holes, two of them at the player's feet.) What stands between the start and the
+  target counts too: Level 5's spool had to be lower for the most natural first try - click, turn to
+  the outline, click - to pass over it.
+- **A pick-up can also be too near.** A toy picked up again from close by looks big, reaches its clamp
+  or meets something before it is where it should be, and Levels 7 and 9 say so at the pick-up
+  ("From this close it looks too big ..."); Level 6 hides the spool under an eraser that comes down on
+  it for the same reason.
+- **Decide every try quickly, and say what it was.** Level 9 judges a plank within 2.5 s of the let-go
+  (gripped, fallen, or sent back with its line); a boulder, an eraser or a feather is judged when it has
+  come to rest. A try that needs the player in place (Level 7) says so before the moment, while there
+  is time to read it.
+- **Lamps must not say more than is true.** Level 8's gauge used to turn green for a marble that would
+  land on the lid beside the hole. A read-out is only on while the thing it judges is where it will be
+  judged; until then something else points at where to hold it (the blinking dashes).
+- **A toy that fits or works as it lies is a way round the mechanic.** Level 8's middling marble was
+  rolled into its hole by walking into it; no toy of the batch now does its job at the size it starts
+  with.
+- **Fast kinematic parts and the player:** Level 7's throw sets the player's velocity explicitly at
+  the end of the swing; Level 9 needed `Player.LimitSteepFaces` to measure the speed into a steep face
+  relative to the face's own sideways motion (a hop at a step riding the same train cost the train's
+  whole speed); `GadgetKit.SteadyRider` adds the turn a rider of a circling mover is owed.
+- **Words.** `Phase2CampaignTests` holds the five to phase 1's voice and adds two rules: every hint is
+  set at the pause card's full size (five lines of the panel; a sixth shrinks the type), and a toast is
+  at most 110 characters.
+
+Known limits the levels live with are listed at the end of `LEVELS.md` Appendix E.
 
 ## Where the game departs from the art bible
 
@@ -1204,7 +1357,8 @@ code. (The areas' own deviations are in `tools/out/notes/m2-*.md`.)
 | §3.2 bump height | `TOYBOX_BUMP_UNIT` 0.07 authored units per unit of detail | 1.0 tilts normals by 80°; 0.1 still read as corrugation on painted wood |
 | §7.4 HDR-less devices: clamp the glint gain | Not done | An 8-bit target clamps at 1 by itself; no device to try it on |
 | §9.4 the callout's 1.7-unit figure at the toy's base, always | `DimensionCallout`: no figure nearer than 2.1 figure heights from the camera, and the factor sized for the distance | Level 3 lets its marble go a step and a half from the eye: the figure stood half the picture tall between the player and the flap that falls open |
-| §2.5 rule 3 / the owner's brief: a chrome thimble | Level 2's thimble is anodised Tangerine | Rule 3 itself ("metal toys are anodised candy… the Level 2 thimble is anodised Tangerine"); candy is what says "you can lift this" |
+| §10.5 held-control pill "click: drop"; the level-complete card's "N grabs" | "click: let go"; "N pick-ups" (`UI/Hud.cs` `ControlPills`, `UI/MenuScreens.cs`) | Every line and hint of the levels says *pick up* and *let go* - one verb for one act, held to by the campaign tests - and the pill is on screen beside them. The pill's stored key is still `drop` |
+| §2.5 rule 3 as first written: every metal toy is anodised candy | Level 2's thimble is bare `Palette.Silver` (`ToyFactory.Silver`) with an anodised Tangerine band round its rim | The owner's brief says "a tiny silver thimble". Rule 3 now names it as the one exception; the band is the candy that says "you can lift this", and it is what the pool, the tag and a room's banned-colour swap use |
 
 ## Testing and verification
 
@@ -1218,6 +1372,23 @@ code. (The areas' own deviations are in `tools/out/notes/m2-*.md`.)
   solved by its bot, reloads, triggers and removed props, events around a level switch, replays) and
   `PlatformTests` (the held prop and a ridden platform against the camera at 75 and 144 Hz, pointer lock
   and cursor, a fuzzed session through `GameRunner`, the Web build's settings).
+- `HeavyPropTests` — nothing throws the player: props from half to 200 times the player's mass sliding,
+  rolling, falling and toppling at them at 1 to 25 units·s⁻¹ (speed under 9 and less than 1.5 units
+  moved, always; untouched when the prop is heavy and fast), and everything that must still work around
+  it: standing, walking and landing on a heavy prop at rest and under way, pushing props light and
+  heavy, platforms, the slab that fell being solid again. Its explicit test
+  `Probe_WhatAPropDoesToThePlayer` (`-Filter "HeavyPropTests.Probe"`) writes the table of measurements
+  the thresholds were decided from to `tools/out/notes/prelude-engine-fling-probe.txt`.
+- `HeavyPropAttackTests` — the checker's attacks on that rule, kept: a long plank that sweeps round, a
+  tall beam and a real domino that topple (foot, middle, tip), a domino knocked over by another, a
+  ball down a ramp (the player at its foot, on it, in the notch against a wall), a block dropped on a
+  player who walks or sprints, a toy grown in the hand and let go overhead or at the feet, jumping
+  into a block that slides toward, away or across, pinned against a wall or in a corner, standing on
+  a heavy prop that another one hits (slide, roll, fall, catapult), a block at rest beside the player
+  struck by another. In each: under 9 units·s⁻¹ sideways and upward, never more than a second inside
+  a prop that is solid, the player walks away, the prop at rest can be stood on, and the same run
+  twice gives the same bits. Every run writes its tables to `Temp/ToyboxHeavyPropAttacks.txt`; those of
+  the run that checked the rule are in `tools/out/notes/prelude-verify-attacks.txt`.
 - `Tests/EditMode/TestHelpers.cs` — derive a fixture from `SimTest` (it disposes the Game after every
   test), build ad-hoc geometry with `Build(ctx => ...)` and `TestHelpers.Floor / Box / Room / Ramp`,
   steer with `ScriptedInput`, and run a level's own solution with `TestHelpers.PlayLevel(game)`.
@@ -1232,6 +1403,17 @@ code. (The areas' own deviations are in `tools/out/notes/m2-*.md`.)
   toy, room colour, COLLECTED, best time), progress written to the store and continued in a new
   session, the bot solving all four in one `Game` forwards and backwards with the same times to the
   tick, one hero toy per level in view at the start, and one voice across the levels' texts.
+- `Tests/EditMode/Levels/Phase2CampaignTests.cs` — the same for levels 5 to 9, played on from phase 1:
+  the order after level 4, title → nine completions each offering the next, the nine cards, progress
+  continued in phase 2, the bot solving the five in one `Game` forwards and backwards (17.35 / 12.12 /
+  3.68 / 20.50 / 11.75 s, the same to the tick), the hero toy under the crosshair at the start and
+  nothing else to pick up, one voice with phase 1, and every hint at the pause card's full size.
+  `Level05Tests` to `Level09Tests` are of the same kind as phase 1's, and larger.
+- **Explicit tests run when the filter names them.** The levels' probes and picture tours are
+  `[Explicit]`; a run without a filter skips them, but `-Filter "Level09Tests"` matches their names and
+  runs them (minutes of pictures and tables). Filter them out:
+  `"Level05Tests\."` (the tour is the class `Level05Tour`), `"Level06Tests\.(?!Probe|Tour|Review_)"`,
+  `"Level08Tests\.(?!Probe)"`, `"Level09Tests\.(?!Tour)"`.
 - `Tests/EditMode/PresentationTests.cs` — input latching across frames that run zero, one or three ticks,
   pointer lock and focus loss (`HumanInputTests`, through `FakeDevices`), URL parsing and level order
   (`LaunchOptionsTests`), the runner's level flow, autoplay and camera (`GameRunnerTests`, by calling
@@ -1281,13 +1463,11 @@ code. (The areas' own deviations are in `tools/out/notes/m2-*.md`.)
   `playcheck -UnityArgs '-toyboxUrl','?level=3&autoplay=1'` plays that level: with autoplay already on
   in the address the check waits for one load after the completion (the next level), otherwise for two
   (its own `SetAutoplay` reloads the level first).
-- **One test fails as of 2026-10-04:** `ToyShadingTests.HeldToy_IsDrawnByTheStickerPassAlone_WithBorderAndPeelShadow`.
-  It is right to fail. On the editor's Direct3D 12 device, with MSAA on (Medium, High), the `PeelShadow`
-  pass of `Sticker.shader` (`Blend DstColor Zero`) brightens what it covers by about 1.9 instead of
-  darkening it by 0.78, so the held toy's hard shadow shows as a second pale border; with MSAA off (Low)
-  it is correct. Not the lens blur, not a presenter, not the dynamic-batching flag (each ruled out by
-  measurement; `tools/out/notes/phase-1-campaign.md`). The shader has not been changed; what to try is
-  the same product with the destination as the factor (`Blend Zero SrcColor`).
+- **The suite is green as of 2026-10-05.** (The one test that failed through phase 1,
+  `ToyShadingTests.HeldToy_IsDrawnByTheStickerPassAlone_WithBorderAndPeelShadow`, passes since the
+  `PeelShadow` pass of `Sticker.shader` blends with the destination as the factor, `Blend Zero SrcColor`:
+  with MSAA on, the editor's Direct3D 12 device brightened what `Blend DstColor Zero` should have
+  darkened.)
 - Not covered by anything: the WebGL build - so §7.5 item 8 (a held glossy toy in the browser with bloom
   on its glint, the vignette, the border and the peel shadow) is still to be looked at -, real keyboard
   and mouse, the browser's pointer lock (including the `stickyCursorLock` line, which only the Web player

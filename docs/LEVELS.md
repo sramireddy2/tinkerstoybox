@@ -17,17 +17,19 @@ have allowed is not counted).
 **Status.** Geometry and arithmetic are checked by script. The numbers are what the level classes
 should be built from, and the scale windows in Appendix B are what the bot tests should assert. Physics
 behaviour that only PhysX can confirm is listed in Appendix C with a fallback per level.
-**Levels 1 to 4 are built** (2026-10-04) and solved by their bots in the simulation: each of their
-sections ends with an "As built" note saying where the level departs from the text above and what was
-measured, and Appendix D puts the four side by side. Where a note and the text above it disagree, the
-note is what the game does. Levels 5 to 15 have not been run in Unity.
+**Levels 1 to 9 are built** (1 to 4 on 2026-10-04, 5 to 9 on 2026-10-05) and solved by their bots in
+the simulation: each of their sections ends with an "As built" note saying where the level departs from
+the text above and what was measured; Appendix D puts the first four side by side and Appendix E the
+next five. Where a note and the text above it disagree, the note is what the game does. Levels 10 to 15
+have not been run in Unity.
 
 **Restart marker.** Sections are appended in order. The file is complete only when its last line is
 `END OF LEVELS.md`.
 
 **Contents.** 0 Conventions and rules · 1 Campaign overview · 2 Gadget catalog · 3 Toy catalog ·
 4 Settings and environment presets · 5 Levels 1–15 · Appendix A Design corrections · Appendix B Scale
-windows for the bot tests · Appendix C Risks and fallbacks · Appendix D As built: phase 1
+windows for the bot tests · Appendix C Risks and fallbacks · Appendix D As built: phase 1 ·
+Appendix E As built: phase 2
 
 ---
 
@@ -155,6 +157,11 @@ ignores `MoveTo` while held); what is missing is switching a `Dynamic` prop to d
   close pickup was removed (the pebble now sits beside the seat), so its single idea is the lever.
   The pickup-distance idea ("what you carry is how big it looks") is taught once, in Level 8, where a
   lamp gauge makes it visible, and is then *required* in Level 11.
+  *As built:* as in phase 1, the pick-up distance decides the outcome in every level of phase 2 as
+  well, long before Level 8 names it. All five start the player a step from the toy with the crosshair
+  on it (Level 8: two of its three marbles at the player's feet), say Level 1's sentence on a pick-up
+  from too far away, and return a toy that is of no use where it lies. Levels 7 and 9 also say the
+  mirror image for a pick-up from too near ("From this close it looks too big ..."). See Appendix E.
 - Phase 3 is about roles: many toys from one (10), held versus released (11), one toy with two jobs
   (12), a toy as a container (13), a toy that changes the player (14), and the exam (15). Level 12 is
   the first level that needs both a shrink and a grow; Level 15 reuses backstop growing (2, 6), the
@@ -477,7 +484,7 @@ level. Every toy takes the room's dip like everything else and its own Candy col
 | Toy | Authored size X × Y × Z | Collider(s) | Volume | Density (mass) | Friction | Bounce | Clamps | `GrabPose` | Levels |
 |---|---|---|---|---|---|---|---|---|---|
 | `CheeseWedge` | 0.8 × 0.5 × 1.0; height 0 at −Z rising to 0.5 at +Z | 1 convex (6 vertices) | 0.20 | 0.3 (0.06·s³) | 0.9 | 0 | 0.2–14 | `Upright` | 1 |
-| `Thimble` | rim radius 0.5, top radius 0.49, height 0.8, closed top up | 1 convex (16-gon frustum) | 0.616 | 0.2 (0.123·s³) | 0.6 | 0 | 0.3–13 | `Upright` | 2 |
+| `Thimble` | rim radius 0.5, top radius 0.49, height 0.8, closed top up; **silver**, with its candy as a band 0.16 high round the rim | 1 convex (16-gon frustum) | 0.616 | 0.2 (0.123·s³) | 0.6 | 0 | 0.3–13 | `Upright` | 2 |
 | `Apple` | sphere radius 0.5 | sphere | 0.524 | 4 (2.094·s³) | 0.6 | 0.1 | 0.15–12 | `Keep` | 3 |
 | `Domino` | 1.0 × 2.0 × 0.3 | box | 0.60 | 0.8 (0.48·s³) | 0.7 | 0 | 0.3–6 | `Upright` | 4 |
 | `Feather` | 0.4 × 0.03 × 1.0 lozenge, 0.03 thick on the quill tapering to 0.004 at the outline; plan area 0.30 | 1 convex | 0.0036 | 1.5 (0.0054·s³) | 0.6 | 0 | 0.5–12 | `Upright` | 5 |
@@ -500,6 +507,10 @@ level. Every toy takes the room's dip like everything else and its own Candy col
 Notes.
 - Spheres are four different toys (apple, pebble, marble, bouncy ball) only in looks, density and
   bounce; they share one collider and one mesh generator.
+- The `Thimble` is the one toy that is not candy all over (the owner's brief: "a tiny silver thimble").
+  Its body is bare Silver in every room; the colour the catalog gives it - Tangerine, or the room's hero
+  candy where Tangerine is banned - is the anodised band round its rim, its pool and its tag
+  (`ART_BIBLE.md` §2.5 rule 3, §4.3).
 - `Domino` and the pieces of `DominoSet` share a mesh generator; `Plank`, `CatapultRuler` and the
   Level 7 ruler share another.
 - **Walk-on rule.** Toys the player must walk onto without jumping have a tapered or chamfered edge:
@@ -694,7 +705,7 @@ on the centre line it is 14. There is no ledge: the silo wall is the well wall.
 
 | Prop | Start | Options |
 |---|---|---|
-| `Thimble` | centre (0, 1.42, −4.5) on the spool, scale 0.8 (0.8 across, 0.64 tall), directly in front of the spawn | clamps 0.3–**13**, tag `plug`, `GrabPose.Upright`, grabbable until seated |
+| `Thimble` (silver, Tangerine band round the rim) | centre (0, 1.42, −4.5) on the spool, scale 0.8 (0.8 across, 0.64 tall), directly in front of the spawn | clamps 0.3–**13**, tag `plug`, `GrabPose.Upright`, grabbable until seated |
 
 **Intended solution.**
 1. Grab from the spawn: eye (0, 1.55, −6), thimble centre 1.5 ahead: `g = 1.51`, `k = 0.531`.
@@ -760,18 +771,26 @@ yield return bot.WalkTo(new Vector3(0, 0, 34f));
   painted outline above the little door, and let go."
 
 **Wow beats.**
-- The drop: an eleven-unit chrome thimble falls past the camera into the well, pegboard dots
-  streaking in its mirror finish, with a deep metallic clunk; its shadow appears on the silo wall the
+- The drop: an eleven-unit silver thimble falls past the camera into the well, the room streaking in
+  its brushed finish, with a deep metallic clunk; its shadow appears on the silo wall the
   moment it is released and slides down with it.
-- The grommet squeezing shut around it, and the dimples on top now the size of stepping stones.
+- The grommet squeezing shut around it, and the dimples on top now the size of stepping stones on a
+  floor of turned metal.
 
 **Confidence.** High: the seat is a scripted ease, and the only free physics is a too-small thimble
 falling onto a flat pad. If the capture feels too magnetic, shrink its radius to 4 and keep the leash.
 
-**As built (2026-10-04; `Level02ThimbleChasm.cs`, `Level02Shapes.cs`, 43 test cases).**
+**As built (2026-10-04; `Level02ThimbleChasm.cs`, `Level02Shapes.cs`, 43 test cases and 3 of pictures).**
 - **Spool at (0.9, 0, −4.8), spawn yaw 12°** (text: (0, 0, −4.5), yaw 0): the thimble dead ahead hid
-  the hole, the door and half the outline. The thimble is **anodised Tangerine** (`ART_BIBLE.md` §2.5
-  rule 3), not chrome, and `AllowPitch` is off: it always lands on its rim.
+  the hole, the door and half the outline. `AllowPitch` is off: it always lands on its rim.
+- **The thimble is silver** (the owner's brief: "Grab a tiny silver thimble"; it was anodised Tangerine
+  until the brief overruled `ART_BIBLE.md` §2.5 rule 3, which now names the exception). Brushed bare
+  metal - `ToyFactory.Silver` in `Palette.Silver` `#B4B6B9` - with dark dimples, and one candy accent:
+  a Tangerine band round the rim, 0.16 of its 0.8, which is also the colour of its pool. From the spawn
+  it is grey against the Pool room's blue (`#83919D` beside `#426F96`); in the hand the white die-cut
+  border is a line 3 px deep over its top; at 11.6 its wall mirrors the floor at its foot and the
+  ceiling at its shoulder, and its top - the floor once it is seated, the band then below the walkway -
+  is eight rings of turned metal. Checked in pictures on all three tiers by `Level02LookTests`.
 - **The solve.** Grab from the spawn (`k` = 0.53), let go from (0, 0, 3) at the outline's centre:
   **s = 11.62** (text: 11.5). Seated and level complete after **9.28 s**.
 - **Where it works.** Picked up from the spawn and aimed at the outline's centre it seats from every
@@ -1065,9 +1084,9 @@ was not needed: the domino pivots on the board and the impact is sampled.
 - **Walls.** The colliders reach the sky cap at 14 as specified; what is drawn are rows of blocks 3.4
   to 7 high, so the sun reaches the footprint. A held toy aimed over them stops at the unseen wall.
   (Lower colliders would let a sprint jump from the balcony reach the row beside the board.)
-- **Nothing crushes the player:** while the domino outweighs the player and its fastest point moves
-  faster than 1.5 it passes through them (a domino toppling onto somebody on the board threw them at
-  35–50 units a second).
+- **Nothing crushes the player:** a domino that outweighs the player and comes at them passes through
+  them (a domino toppling onto somebody on the board threw them at 35–50 units a second). That is the
+  engine's rule now (`ARCHITECTURE.md`, "Props and the player's body"); the level's own guard is gone.
 - The barricade's body is the level's own (eight courses, a block missing as a peephole to the exit
   mark, a shudder on a bonk); the `Breakable` options are the text's. After every break at least 1.2 is
   free beside the fallen domino. A `PropLeash` covers the whole hall.
@@ -1187,6 +1206,39 @@ yield return bot.WalkTo(new Vector3(-1, 0, 55));
 on a flat deck. Without `BeginDrive`, parent the feather's visual to an invisible kinematic platform of
 the same footprint for the glide.
 
+**As built (2026-10-05; `Level05FanFeather.cs`, `Level05Shapes.cs`, `Level05Tests` and the picture
+tour `Level05Tour`).** Solved by its bot in **17.35 s**: feather 1.0 → **9.33**, glide 8.0 s.
+
+- **Start and spool.** Spawn (9.37, 3, 2.06), one step (1.37) from the feather, crosshair on it
+  (`k` = 0.73). The spool stands at (8.95, 3.2), two steps from the balcony edge, and is **0.9** high
+  (text: spawn (11, 3, −2.5), spool (11, 2), 1.1 high). From the text's spawn `k` is 0.22 and nothing
+  the balcony overlooks makes that fly; from beside the text's spool the balcony floor hides the
+  blotter; over a 1.1 spool the held feather grazed the rim on the most natural first try (click, turn
+  to the outline, click) and stopped there.
+- **Target.** A dashed feather at 9.2 is painted on the blotter at (−1, ·, 11.6); a mat with shoe
+  prints marks the edge spot (7.7, 3, 3.5). From the edge mark along X = −1: aimed at Z 2 → 7.3,
+  8 → 7.8, 12 → 9.2, 16 → 11.3, 17.4 → 12 (clamp); every aim with X ≤ −1 flies. Straight from the
+  start mark over the outline it comes out 10.7 and flies too.
+- **Window.** Flies from 6.5 (the rule; 6.6 measured) to 12. Pick-up distance: 1.3 away → 9.3,
+  1.9 (`k` 0.52) → 6.7, 2.2 → 5.8 (stalls). Level 1's sentence is said below `k` = 0.52 (between 0.45
+  and 0.52 the far end of the blotter would still do: the line is a warning there, not a verdict).
+- **Every try gets a word:** stalled under its rider, blown away, too small and left lying, into the
+  canyon, on the far box without the player, out of the wind, on the balcony, leaning, and - new at
+  the close-out - stopped by its own spool ("Its spool was in the way ..."). A feather under 2.5 at
+  rest anywhere but on its spool goes back after 1.5 s (`PropLeash`).
+- **Gadgets.** `WindStream.MaxPropMass` is the feather's mass at 2.5 (the gadget's default of 1 pushed
+  moored feathers about). `SailRaft` has two additions that are in the shared gadget: `Settle` (a
+  moored sail is levelled and pressed 0.013 × scale into the deck - it rests on its quill and its rim
+  was a lip nobody could walk over) and `RiderOverhead` (a rider who hops is still aboard). The level
+  adds a lee rule: over a gliding feather the stream's push on a rider in the air is taken back.
+  Launch zone X −6.5..4.5, Z −6.5..18; the feather is `AllowPitch = false`.
+- **Layout.** Back wall at Z = −6 with the fan's guard just behind the box rim (hub (−1, 5, −8.7));
+  walls are colliders to 12, drawn as rows of blocks 1.9 to 2.5 high; checkpoints on the balcony, the
+  first box and the far box. `WindVisuals` stretches the streamers' sway with the stream's length.
+- **Bypass, measured:** the farthest anybody gets without flying is Z 28.3 (the far box begins at 42).
+- **Not in the first picture:** the fan (behind and to the left; its ribbons are). Hint 3 fills the
+  pause card's five lines exactly.
+
 ---
 
 ### Level 6 — Bouncing Eraser
@@ -1291,6 +1343,29 @@ yield return bot.WalkTo(new Vector3(0, 14, 27));
 **Confidence.** High. The bounce is a velocity set and the eraser is a heavy convex slab on a flat
 floor. Keep the cabinet's top edge square and flush so the capsule does not catch on it.
 
+**As built (2026-10-05; `Level06BouncingEraser.cs`, `Level06Tests`).** Solved by its bot in
+**12.12 s**: eraser 0.8 → **9.37**, one bounce, nothing said.
+
+- **Start.** Spawn at the pick-up spot (−8.4, 0, 7.9), pitch −15, looking at the eraser on its spool at
+  (−8.4, 9) (`k` = 0.69). Side walls at X = ±16 and the back wall at Z = −2.5 (text ±12 and −10: there
+  the spool stopped the held eraser, and an eraser at its clamp lay 10 from the cabinet).
+- **Target.** The eraser's outline at 9.5 is painted on the cabinet at (0, 3.5, 18), shoe prints at
+  (0, 0, 2). Held against the cabinet, scale = 0.59 × distance to it. The first try from the start is
+  6.05 (top of the bounce 11.96, two short), as the text intends.
+- **The rule, measured:** top of a bounce = 2.0 × scale − 0.2. Reaches from **7.08**, comfortable from
+  7.5, clamp 10.5 (20.7). Turned 60 to 90° in the hand at the shoe prints it is only 7.14 to 7.27:
+  the edge of the window.
+- **The spool gives way.** An eraser of 4.8 or more let go above its spool comes down flat; the spool
+  is hidden (no collider) while the eraser lies there. Before: 24 of 96 second tries came down crooked
+  or balanced on it.
+- **Lines:** too far a pick-up (`k` < 0.45), stopped short, not high enough, high enough but not
+  steered, high enough but too far from the cabinet, crumb, back on the spool, landed on the cabinet,
+  stand, flip, crooked. Leashes: cabinet top (2 s, unless the player is up there), crumb (< 1.0 off
+  the spool, 1.5 s), room.
+- **Blurb:** "Rubber remembers how to jump. The way out is up top." (the exit cannot be seen from the
+  floor). Hint 3 was shortened to five lines of the pause card.
+- **No way up without a bounce:** highest grounded point before one is 2.89; a leaned eraser tops out
+  at 9.82.
 
 ---
 
@@ -1412,6 +1487,40 @@ sets the velocity explicitly.
 **Fallback (`LaunchSeat`).** Keep the ruler as a visual lever and make the seat a static 3 × 3 pad.
 When a `weight` prop comes to rest in pad B, wait the same swing time, apply the same launch velocity
 to a player on the seat, and swap the ruler's static collider to the tipped pose.
+
+**As built (2026-10-05; `Level07TeeterTotter.cs`, `Level07Set.cs`, `Level07Tests`; the lever is
+`Gadgets/Seesaw.cs`, `SeesawTests`).** Solved by its bot in **3.68 s**: pebble 0.6 → **4.63**, `f` 0.89,
+thrown at about 19 units a second to an apex of nearly 14.
+
+- **Start.** On a book 0.9 high lying beside the bobbin, at (−3.17, 0.9, −0.67), yaw 38: the pebble is
+  at eye height under the crosshair, 1.75 away (`k` = 0.343, the text's own pick-up). The text's spawn
+  is 5.1 away (`k` 0.118): 1.7 at the wall, and the ruler does not move.
+- **Layout changes.** The spines of the books stand at X = **1.7**, 0.2 from the ruler's edge (text 2.0):
+  leaning on them is standing on the ruler, so the push toward the books may begin at any time from
+  the click to about 0.9 s after the throw. The outline's centre is at Y **8** (text 6.6): at 6.6 the
+  pebble that looks biggest landed on the player's own end when aimed half a unit low.
+- **Window.** Hard minimum **2.7** (apex 11.05), the rule's 3.0 is what the level calls heavy enough,
+  clamp 7 (apex 14.7). Pitch from the bullseye: 12 to 56° with the start's pick-up, 16 to 46° with the
+  nearest possible (`k` 0.507), 10 to 56° picked up on the bullseye (`k` 0.26); yaw ±10°. Standing 8.0
+  from the pivot instead of 9.3 still makes it with a 4.5 boulder; 7.5 does not.
+- **The pebble goes home by itself** (`PropLeash`, 1.5 s) whenever it has been let go and is not on
+  the high end heavy enough; the text left it lying. Level 1's sentence below `k` = 0.23, its mirror
+  image above 0.575 (a boulder picked up again from close by).
+- **Lines:** nobody on the low end, not on the bullseye, let go before the ruler was back, own end,
+  too big, touched the books, the ruler came up without you, the other way round, clamp, missed, too
+  light (two causes), "Here it comes ..." as the boulder is let go, and "High enough ... push toward
+  the tall books" after a throw that was not steered.
+- **The seesaw's rules, changed at the close-out** (all three were found by the review):
+  a rider who jumps while the ruler swings is still its rider - the ruler takes them along from under
+  their feet and throws them like anybody else (before, it passed through them and threw nobody);
+  the boulder picked up again in mid-swing ends the swing (the rider keeps the little speed it had
+  given them, the ruler swings back, nothing is said); and one let-go is one `SeesawStruck` (a tipped
+  ruler whose boulder hops waits half a second before swinging back, and a swing with under a tenth
+  of the travel left is not announced). `f` and the launch speed are the text's.
+- **Not as the text says:** "standing on the short end with the boulder on the long end" throws
+  nobody at all (the gadget only strikes on its short arm; the level says which end is which).
+- **In the first picture** the upper half of the outline is under the level card for its 3.5 s; with
+  the ruler tipped its raised end hides the boulder from the ruler's own line.
 
 ---
 
@@ -1562,6 +1671,40 @@ already switches small or fast props to continuous detection).
 touches the cone, drive it with a `PathDrive`: under the throat radius, a fixed 0.8 s spiral into the
 throat and a drop onto the plate; otherwise seat it on the cone and hand it back to physics.
 
+**As built (2026-10-05; `Level08FunnelPhysics.cs`, `Level08Shapes.cs`, `Level08Tests`).** Solved by
+its bot in **20.50 s**: marbles 0.25 / 0.9 / 5.0 → **0.651 / 1.221 / 2.413**.
+
+- **Start.** Spawn (0, 0, −9.5) looking down the lid: the three funnels, the gate, and all three
+  marbles are in the first picture - the red one on a spool at (−0.95, −8.2), a step ahead and left;
+  the yellow one on the lid at (2, 0.45, −6.4); the purple one in the niche. (Text: spool at (−10, −6),
+  yellow at (10, 0.6, −8): neither was in the picture.) The crosshair is on the gate, not on a marble:
+  the two at the player's feet are picked up with a turn of the head.
+- **The yellow marble is 0.9, not 1.2.** At 1.2 it fitted the middle hole as it lay and is light
+  enough to shove: walked into, it pressed its plate in 11.6 s with nothing picked up. At 0.9 no
+  marble fits any hole as it lies, as the blurb says; "stay about the same" became "grow by a third".
+- **Windows** are the text's (0.50–0.76, 1.00–1.52, 2.00–3.04). Standing bands, measured back from the
+  funnel's axis with the marble held over the far side: S 2.2 to 4.6 (`k` 0.152), M 2.3 to 5.3
+  (`k` 0.242; 2.8 to 5.3 picked up from the start), L 7 to 11 (`k` 0.216). The solver stands in the
+  middle of each: S (−8, 5.6), M (−2, 5.2), L (6.5, 0.2). (The text's S stand, 2.0 back, is too small
+  with the as-built pick-up.)
+- **The lamps tell the truth.** The gauge reads only a marble whose middle is over the mouth (text:
+  mouth radius + 0.5), so green means "let go and it presses the plate" (0 misses in 384 let-gos).
+  While a held marble's picture lies over a funnel and its middle is not over the mouth, the dashes
+  painted on the funnel's far side blink amber: hold it over here. The lamp stands on a post behind
+  each funnel; studs round the mouth are amber / red-blinking / green.
+- **Lines:** too big, too small for the plate, the hole is taken (two cases), stopped short, met the
+  lid first ("go closer"), went over, and Level 1's sentence below `k` = 0.06. The third hint works by
+  the lamps, not by step counts.
+- **Built differently:** marble colours Cherry / Lemon / Grape (Lagoon is the room's banned candy);
+  `MinScale` 0.2; marbles have angular damping 2.5 and the port ejects at 5; chambers are as wide as
+  the throat; the port is an alcove in the wall; the jam rule's zone is below the throat; walls are
+  drawn 5 high (colliders to the sky cap at 14); the gate is a grille that slides up; there are solid
+  boxes under the lid and under each chamber floor, and a net under those (`Funnel`'s chamber floor is
+  a sheet that small fast marbles pass through - Level 15's hopper will need the same); a marble left
+  in the niche goes back where it started.
+- **Still costs a first-timer a let-go:** held over the throat itself a marble stops on the lid in
+  front of the hole (the flat lid meets its underside first). The lamps stay dark, the dashes blink,
+  and a line says what to do.
 
 ---
 
@@ -1686,6 +1829,40 @@ air: grip a falling plank whose support conditions are already met.
 **Fallback (straight ferry).** A straight out-and-back track between the station and a platform 24
 away; the cars are open bunks (two cross-beams, 4 apart). A plank dropped lengthwise across two bunks
 is gripped and becomes the deck. Same sizing rule, same timing rule, no rotation.
+
+**As built (2026-10-05; `Level09MovingTrain.cs`, `Level09Shapes.cs`, `Level09Tests`).** Solved by its
+bot in **11.75 s**: plank 0.65 → **4.086**, gripped by a wagon 13 ticks after it is let go.
+
+- **Start.** A step (1.4) behind the plank on its spool, looking along it at the lighthouse, pitch −11
+  (`k` = 0.446); text: (0, 0, −7).
+- **Track radius 14.6** (text 14). At 14 a step off the platform at a walk came down in the 1.2 gap;
+  at 14.6 the gap is 0.6 and a step off lands on a wagon at a walk or a run. The decks are 9.6 from the
+  doorstep; platform, doorstep and the plank's clamp are the text's.
+- **Aim at the foot of the door**, (0, −0.75, 18), where the dashed outline of the plank's end is
+  painted (text: above the door, Y 0.9). Aimed there the plank lies below the eye and is seen from
+  above, from the player's feet to the lighthouse; at eye height it was a yellow rectangle that hid
+  the door. Anything from Y −2.5 to +14 on the lighthouse, ±3 across, bridges all the same.
+- **Window 3.68 to 4.4.** Standing band: from the edge back to Z = 0.5 (text 0.3). Farther back the
+  plank is at its full size before it touches the lighthouse, and the level says so.
+- **Every try is decided within 2.5 s:** gripped, fallen, or sent back to the spool with the line for
+  what was wrong (too short; too short from a wagon; nothing under its near end; not end-on; full
+  size before it touched; below the train; crumb; out of reach). The engine's roof is slick and its
+  funnel has no collider, so a plank let go over the engine slides onto the first wagon instead of
+  riding the roof for a lap. Level 1's sentence below `k` = 0.2, its mirror image above 0.6.
+- **Boarding.** The plank on a wagon is a kerb of half a unit: it takes a running jump along the
+  train (a hop from a standstill comes down where it went up, and the level says so). A jump from the
+  platform goes clean over the three-wide deck; the level says to step off the edge instead.
+  The engine fix this needed is shared: `Player.LimitSteepFaces` measures the speed into a steep face
+  relative to the face's own sideways motion (a hop at a step that rides the same train used to cost
+  the train's whole speed).
+- **Second route, accepted as the text accepts the diving board:** carried onto a wagon and put down
+  pointing inward, the plank is gripped as a pier (2.1 to 2.3, inner end 6.9 to 7.4 from the axis)
+  and a sprint jump off its end lands on the doorstep. It needs a scaled plank on a moving wagon but
+  neither the lighthouse wall nor the timing. A pier that ends more than 7.5 out is told at once that
+  it has to reach. (To allow only the lighthouse route: grip a plank only when its inner end is over
+  the doorstep.) A diving board off the platform ends 1.2 short of the doorstep's rim.
+- The kill plane takes the plank when its lowest point is 0.5 below it (a 12-unit plank stood on end
+  with its middle well above the plane). Hint 3 was shortened to five lines of the pause card.
 
 ---
 
@@ -2856,11 +3033,75 @@ Still open after phase 1 (none of it stops a level from being solved):
 - A pick-up from too far away remains a second, unstated variable in Levels 1, 2 and 4; it is said out
   loud and undone for free, not designed out.
 - Level 2: from the spawn itself the throw tolerates only ±2.9° of yaw.
-- Level 4: the scale pill (72% of the screen's height, `ART_BIBLE.md` §9.6) lies over the held
-  domino's foot when it is swung onto the footprint.
-- Engine: a heavy prop that hits the player from the side at speed throws them (the grabber only lets
-  a prop pass once it is 0.15 deep). Level 4 guards its own domino; Levels 5 to 15 with heavy dynamic
-  toys need the same guard or an engine fix.
+- Not checked: a WebGL build of these levels.
+
+Closed since (the prelude to phase 2):
+
+- The scale readout no longer lies over the held toy: it is docked on the bottom edge and moves to the
+  top right corner when the toy reaches down to it (`ART_BIBLE.md` §9.6, `HudLayoutTests`).
+- The engine lets every dynamic prop that outweighs the player pass through them instead of throwing
+  them - coming at them, knocked into them, or going off under their feet faster than 6 units a second
+  (`ARCHITECTURE.md`, "Props and the player's body"; `HeavyPropTests`, `HeavyPropAttackTests`).
+  Level 4's own guard is gone and Levels 5 to 15 need none. The other side of it: a loose heavy toy
+  cannot carry or launch the player faster than 6; that is a gadget's job.
+- Level 2's thimble is silver, with a Tangerine band (section 3; `ART_BIBLE.md` §2.5 rule 3).
+
+## Appendix E — As built: phase 2 (Levels 5–9)
+
+Measured in the Unity simulation on 2026-10-05 with each level's own bot solver. Times are game seconds
+from the load to `LevelCompleted`; `Phase2CampaignTests` plays the five in one `Game`, forwards and
+backwards, and gets the same times to the tick. The details are in each level's "As built" note and in
+`tools/out/notes/level0N-build.md`, `level0N-review.md` and `phase-2-campaign.md`; contact sheets are in
+`tools/out/shots/phase-2`.
+
+| Level | Toy: start → solver's let-go (text) | Works from → to | Solve | Pick-up `k` (solver; told below) | Said in the solve |
+|---|---|---|---|---|---|
+| 5 The Fan and the Feather | Feather 1.0 → **9.33** (9.2) | 6.5 → 12 (clamp) | **17.35 s** | 0.73; 0.52 | nothing |
+| 6 Bouncing Eraser | Eraser 0.8 → **9.37** (9.5) | 7.08 → 10.5 (clamp) | **12.12 s** | 0.69; 0.45 | nothing |
+| 7 The Teeter-Totter | Pebble 0.6 → **4.63** (4.6) | 2.7 (rule 3.0) → 7 (clamp) | **3.68 s** | 0.343; 0.23 (too near above 0.575) | "Here it comes ..." |
+| 8 Funnel Physics | Marbles 0.25 / 0.9 / 5.0 → **0.651 / 1.221 / 2.413** (0.64 / 1.32 / 2.45) | 0.50–0.76 / 1.00–1.52 / 2.00–3.04 | **20.50 s** | 0.152 / 0.242 / 0.216; 0.06 | nothing |
+| 9 The Moving Train | Plank 0.65 → **4.086** (4.03) | 3.68 → 4.4 (clamp) | **11.75 s** | 0.446; 0.2 (too near above 0.6) | nothing |
+
+What the five agree on, with each other and with phase 1 (and `Phase2CampaignTests` asserts):
+
+- **The toy is under the crosshair at the start and the first click picks it up** (Level 8 shows all
+  three marbles and their holes instead; two marbles lie at the player's feet). Nothing but the level's
+  hero toy can be picked up; it wears a candy colour the room allows.
+- **One sentence for a pick-up from too far away,** Level 1's, in all five. Three hints: the first
+  names no place to stand, the third begins with the pick-up and says when to let go. Every hint is
+  set at the pause card's full size (five lines; a sixth is set smaller). Lines are plain ASCII, toys
+  are *picked up* and *let go*, a toast is at most 110 characters (three lines).
+- **Dashed paint in the toy's colour is where it goes:** the feather on the blotter (5), the eraser on
+  the cabinet (6), the boulder on the far wall (7), the far side of each funnel (8), the plank's end at
+  the foot of the lighthouse door (9). **Shoe prints on a pad are where to stand** (5 edge mark, 6,
+  7's bullseye, 9); nothing else looks like either.
+- **A toy that is of no use where it lies comes back by itself,** and every try that fails gets one
+  line saying why.
+
+Shared code that phase 2 changed (each with a regression test next to the area's tests):
+
+| File | Change | For |
+|---|---|---|
+| `Gadgets/SailRaft.cs` | `Settle` / `SettleSeconds` (a moored sail is pressed flat); `RiderOverhead` (a rider who hops is aboard) | 5 |
+| `Render/GadgetVisuals/WindVisuals.cs` | streamers' sway stretched with the stream's length | 5 |
+| `Gadgets/Seesaw.cs` | a rider in the air over their arm is carried and thrown (`RiderOverhead`); a weight picked up in mid-swing ends the swing; `ReleaseTicks`, `MinStrikeShare`: one let-go, one strike | 7 |
+| `Engine/Player.cs` | `LimitSteepFaces` measures speed relative to the face's own sideways motion | 9 |
+| `UI/Hud.cs`, `UI/MenuScreens.cs` | the held-control pill says "click: let go" (was "drop"), the level-complete card counts "pick-ups" (was "grabs"): the levels' words | all |
+
+Still open after phase 2 (none of it stops a level from being solved):
+
+- Level 9's second route (a pier on a wagon) skips the lighthouse wall and the timing. It is the
+  owner's call whether to keep it; the one-line change that removes it is in the level's note.
+- Level 9: getting onto the riding plank takes a running jump at a half-unit kerb; a first-timer will
+  need a try or two, and a fall costs the walk back from the start.
+- Level 8: a marble held over the throat (the natural first aim) stops on the lid in front of the
+  hole; it is signalled and explained, not designed out.
+- Level 6: turned 60 to 90° in the hand the eraser is at the very edge of its window.
+- Level 5: the fan is not in the first picture; between `k` 0.45 and 0.52 the "from closer" line is a
+  warning, not a verdict.
+- Level 7: the level card covers the upper half of the outline for the first 3.5 s.
+- `Gadgets/Funnel.cs`: the chamber floor is a zero-thickness sheet (Level 8 has its own blocks and a
+  net under it; Level 15's hopper needs the same or a fix in the gadget).
 - Not checked: a WebGL build of these levels.
 
 END OF LEVELS.md

@@ -15,6 +15,10 @@ namespace Toybox.UI
     {
         const float HoverGap = 0.04f;
         static float lastHover = float.NegativeInfinity;
+        // Whose tick that was. The gap is between two ticks of one game: the first tick of another game (a
+        // new runner; the next test, which may well run in the same editor frame) is never swallowed by
+        // the last tick of the one before it.
+        static readonly WeakReference<Toybox.Audio.AudioPresenter> lastListener = new WeakReference<Toybox.Audio.AudioPresenter>(null);
 
         /// <summary>The focus moved to another control, or a slider moved a step.</summary>
         public static void Hover()
@@ -23,8 +27,10 @@ namespace Toybox.UI
             if (audio == null) return;
             // A dragged slider moves every frame; one tick per 40 ms is a purr, more is a buzz.
             float now = Time.unscaledTime;
-            if (now >= lastHover && now - lastHover < HoverGap) return;
+            bool same = lastListener.TryGetTarget(out Toybox.Audio.AudioPresenter last) && ReferenceEquals(last, audio);
+            if (same && now >= lastHover && now - lastHover < HoverGap) return;
             lastHover = now;
+            lastListener.SetTarget(audio);
             audio.PlayUi(Toybox.Audio.UiSound.Hover);
         }
 

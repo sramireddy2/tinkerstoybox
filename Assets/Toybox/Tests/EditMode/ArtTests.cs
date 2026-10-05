@@ -26,6 +26,8 @@ namespace Toybox.Tests
             Assert.AreEqual("#C99A62", Palette.ToHex(Palette.Kraft));
             Assert.AreEqual("#E9C9A0", Palette.ToHex(Palette.Birch));
             Assert.AreEqual("#C9CED8", Palette.ToHex(Palette.Steel));
+            Assert.AreEqual("#B4B6B9", Palette.ToHex(Palette.Silver));
+            Assert.IsFalse(Palette.IsCandy(Palette.Silver), "bare toy metal is a neutral: the thimble's candy is its band");
 
             string[] candy = { "#FF2E55", "#FF7A1A", "#FFCE1F", "#7FDB2E", "#18A8FF", "#8A4BFF", "#FF5FB0" };
             Assert.AreEqual(7, Palette.Candy.Length);

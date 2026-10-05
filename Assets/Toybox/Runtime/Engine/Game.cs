@@ -284,6 +284,8 @@ namespace Toybox.Engine
                     if (!props[i].Removed) props[i].BeginStep();
                 world.Physics.Simulate(Sim.Dt);
 
+                // Before the controller reads the step's result: a throw by a heavy prop is taken back.
+                Grabber.AfterPhysics();
                 Player.PostPhysics();
                 Grabber.PostPhysics();
                 for (int i = 0; i < props.Count; i++)

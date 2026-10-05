@@ -29,6 +29,10 @@ namespace Toybox.Engine
     ///
     /// PhysX calls the modification callback while the scene is being stepped, possibly from a worker
     /// thread, so it only reads plain data that was prepared on the main thread before the step.
+    ///
+    /// Heavy props are the other end of the scale, and not a matter of adjusting a contact: one that comes
+    /// at the player must not touch them at all. That pair is taken out of the step before it starts
+    /// (PerspectiveGrabber.BeforePhysics, called from <see cref="Prepare"/>).
     /// </summary>
     internal sealed class PlayerContactScaler : IDisposable
     {
@@ -58,9 +62,16 @@ namespace Toybox.Engine
             Physics.ContactModifyEvent += handler;
         }
 
-        /// <summary>Main thread, right before the physics step: snapshot what the callback needs.</summary>
+        /// <summary>
+        /// Main thread, right before the physics step: decide which props do not touch the capsule in this
+        /// step at all, and snapshot what the callback needs for the rest.
+        /// </summary>
         public void Prepare(PhysicsScene physicsScene, Player player, IReadOnlyList<Prop> props)
         {
+            // This is the last moment before the step, and the first at which every velocity of the tick is
+            // known (the player's, and whatever levels and gadgets did to the props).
+            player.Game.Grabber.BeforePhysics();
+
             scene = physicsScene;
             playerBody = player.Body.GetEntityId();
             playerMass = player.Body.mass;

@@ -24,6 +24,13 @@ namespace Toybox.Render
     public sealed class WindVisuals : GadgetVisual
     {
         const int Segments = 5;
+        /// <summary>
+        /// Radians of sway per unit along a stream no longer than <see cref="SwayReference"/>. A longer stream
+        /// has longer streamers (a share of its length) drawn in the same five pieces, so its sway is
+        /// stretched with it: at this rate the 50-unit gale of Level 5 put a whole wave into every piece, and
+        /// its streamers came out as zigzags.
+        /// </summary>
+        public const float SwayRate = 1.9f, SwayReference = 10f;
         /// <summary>How opaque the volume's sides are at the mouth and at the far end, at full strength; and its edges.</summary>
         public const float VolumeAlpha = 0.3f, VolumeFarAlpha = 0.06f, EdgeAlpha = 0.6f;
         /// <summary>Degrees per second: a fan in a stream of strength 1, and the most any fan turns.</summary>
@@ -196,6 +203,9 @@ namespace Toybox.Render
             s.Travel += speed * dt;
             float time = Now;
 
+            // The same number of bends per streamer whatever the stream's length.
+            float swayRate = SwayRate * Mathf.Min(1f, SwayReference / Mathf.Max(s.Length, 1e-3f));
+
             s.Ribbons.Clear();
             for (int pass = 0; pass < 2; pass++)
             {
@@ -220,7 +230,7 @@ namespace Toybox.Render
                     {
                         float t = (float)k / Segments;
                         float along = head - length * t;
-                        float wave = along * 1.9f + time * 2.6f + phase * 6.283f;
+                        float wave = along * swayRate + time * 2.6f + phase * 6.283f;
                         Vector3 p = s.Centre + s.Axis * (Mathf.Clamp(along, 0f, s.Length) - s.Length * 0.5f)
                             + s.A * (u + Mathf.Sin(wave) * sway) + s.B * (v + Mathf.Cos(wave * 0.83f) * sway);
                         // Thin at both tips; gone where the ribbon is outside the stream.

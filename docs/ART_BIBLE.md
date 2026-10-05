@@ -87,6 +87,7 @@ depends on lighting ratios staying in tune and directly fights "colourful".
 | Kraft | `#C99A62` | Cardboard toys, locked level cards |
 | Birch | `#E9C9A0` | Raw wood at chipped edges; non-grabbable wooden physics props |
 | Steel | `#C9CED8` | Gadget metal parts; non-grabbable metal props |
+| Silver | `#B4B6B9` | Bare toy metal: the body of the Level 2 thimble and of nothing else (§2.5 rule 3). A step darker and greyer than Steel, so that the Paper border of a held toy shows against it |
 
 ### 2.2 Candy — grabbable toys only
 
@@ -145,8 +146,14 @@ Each environment preset (§6.4) owns one dip. A dip is four colours.
 3. **Toys** carry one candy colour on at least 60% of their surface. Paper and Ink are allowed for details.
    Never the preset's banned candy (it is too close to the room's hue). The level's key toy takes the
    preset's hero candy, the complement of the dip, unless the object has an obvious colour of its own
-   (cheese is Lemon, an apple is Cherry). Metal toys are anodised candy, not bare silver (the Level 2 thimble is
-   anodised Tangerine). Cardboard toys are Kraft with a candy tape strip covering at least 40%.
+   (cheese is Lemon, an apple is Cherry). Metal toys are anodised candy, not bare silver. Cardboard toys are
+   Kraft with a candy tape strip covering at least 40%.
+   **The one exception is the Level 2 thimble**, by the owner's brief ("a tiny silver thimble"): its body is
+   bare Silver (§2.1, recipe in §4.3) and it carries its candy - Tangerine, the Pool room's hero - as an
+   anodised band round the rim: the rolled rim and a collar, a fifth of its height, a sixth of what is seen
+   of it. Silver first, and still "yours": the band, the kicker rim and a pool in the band's colour. A room
+   that bans the band's candy recolours the band, never the body. Seated in the well the band is below the
+   floor, and what is walked on is plain metal. No other toy may be neutral.
 4. **Non-grabbable physics props** (barricade blocks, fixed dominoes) use `ToyLit` in Birch, Kraft, Steel or
    a dip tone, with rim 0 and no colour pool. Candy plus rim plus pool means "you can lift this", always.
    When a toy stops being grabbable (the seated thimble), its rim and pool fade to 0 over 300 ms.
@@ -559,6 +566,7 @@ One packed data texture per recipe: **R = albedo modulation, G = smoothness modu
 | **Painted wood** | candy | 0 | 0.45 | 0.25 | 0.3 | 0.35 | 0.35 / 0.25 / 1 | 0.40 / 3 | 0.03 | `Brush`, 0.08 / 0.2 / 0.6 |
 | **Rubber** | candy × 0.92 | 0 | 0.18 | 0.50 | 0.1 | 0 | 0.12 / 0.5 / 1 | 0.65 / 2.5 | 0.04 | `Stipple`, 0 / 0.3 / 0.15 |
 | **Brushed metal** (anodised) | candy | 1 | 0.66 | 0 | 1.2 | 0.3 | 0.8 / 0.15 / 3 | 0.30 / 3 | 0 | `Streak`, 0.06 / 0.5 / 0 |
+| **Silver** (bare; the thimble's body only) | Silver | 0.75 | 0.72 | 0 | 0.85 | 0 | 0.45 / 0.15 / 1.5 | 0.10 / 3 | 0 | `Streak`, 1.0 / 1.0 / 0 |
 | **Glass** | `lerp(white, candy, 0.35)` | 0 | 0.96 | 0 | 1.6 | 1.0 | 1.4 / 0.01 / 1 | 0.8 / 2.5 | 0 | none |
 | **Felt / fabric** | `lerp(candy, #808080, 0.1)` | 0 | 0 | 0.60 | 0 | 0 | 0 | 0.9 / 2 | 0.05 | `Fibre`, 0.16 / 0 / 1.0 |
 | **Cardboard / paper** | Kraft or Paper | 0 | 0.08 | 0.30 | 0.05 | 0 | 0 | 0.35 / 3 | 0.02 | `Speckle`, 0.12 / 0 / 0.3 |
@@ -573,6 +581,7 @@ One packed data texture per recipe: **R = albedo modulation, G = smoothness modu
 | Painted wood | The toy builder tints bevel-ring vertices 30% toward Birch with seeded noise: chipped edges |
 | Rubber | `_RimColor = lerp(candy, white, 0.6)`. No sharp highlight at all. Squashes 14% on impact |
 | Brushed metal | `_Streak = 0.18`. UVs run along the brush direction. The stretched glint and the three hard StudioEnv bands are what make it read as metal |
+| Silver | `ToyFactory.Silver`, `_Streak = 0.3`. A quarter of it is plain grey, because a mirror takes all its colour from the room (in the Pool room: baby blue). No coat, Env 0.85 and rim 0.10, because all three whiten the silhouette and a white silhouette melts into the die-cut border (§8); in the hand the body under the border is about `#CACDD0` within four pixels of it. The thimble's collider is all but a cylinder with a flat lid, and a mirror of that shape shows one StudioEnv band from top to bottom: so the wall's normals lean 6° at the band to 12° at the shoulder (the floor band at its foot, the ceiling at its shoulder, as a domed thimble has them), and the top is eight rings whose normals lean 9° toward the axis and away from it by turns (turned metal: neighbouring rings mirror ceiling and floor). The geometry stays the collider's. Its dimples are a matte hollow of the same colour × 0.35 |
 | Glass | Blend SrcAlpha / OneMinusSrcAlpha, `_ZWrite 0`, queue 3000. `_AlphaFace 0.22`, `_AlphaEdge 0.85`, `_AlphaPow 2.5`. `_RimColor = candy`. `_ShadowDither 1` (half-density shadow). Medium and High add a back shell: a second material on the same renderer with `_Cull Front`, flat alpha 0.18, queue 2999. Its colour pool is tinted × 1.6, which reads as a caustic |
 | Felt / fabric | `_RimColor = lerp(candy, white, 0.35)`: the rim is the fuzz |
 | Cardboard / paper | Each cardboard toy carries a candy tape strip (plastic recipe, smoothness 0.7) covering at least 40%. Paper sheets: `_Cull Off`, `_Translucency 0.5` |
@@ -1164,7 +1173,37 @@ There is no scale punch and no squash on grab. The footprint is sacred.
 
 ### 9.6 Scale readout (HUD, only while holding, plus 1.2 s after release)
 
-A sticker pill centred at 72% of screen height.
+A Paper sticker pill, 392 × 96 px. **It never lies on what the player aims with or at.**
+
+**Where it is.** The held toy is drawn on the crosshair and what it is aimed at lies around it, so the
+middle of the frame is theirs: the **aiming area** is the middle 70% of the frame's width and of its
+height (`HudFrame.AimArea`). Nothing of the readout — face, border or peel shadow — is ever inside it,
+at any aspect ratio. It has two docks, both hung on the frame's edges:
+
+| Dock | Place | When |
+|---|---|---|
+| **Low** | Bottom edge, centred, 24 px above it. Its middle line is that of the lowest toast and of the "drop" pill | Always, unless the held toy comes down into it. A toy whose on-screen box fits the aiming area never does |
+| **Corner** | Top right, 48 px from both edges: the one corner no other HUD piece lives in, and the place a toy on the crosshair reaches last (on 16:9 only a toy wider than half the frame) | The held toy's sticker (its on-screen box plus the die-cut border and the peel shadow) is nearer than 16 px to the low dock — a toy picked up from so near that it is taller than the aiming area |
+
+- The dock is chosen from the toy's on-screen box, measured through the game camera every frame of a hold
+  (`HudFrame.BoxOf`). The held image is stable (§9.3), so the readout only moves when the toy is turned or
+  flipped; it then sticks on again in its new place (no slide across the toy). From the corner it comes
+  back down only once the toy clears the low dock by 40 px, so a toy at the limit does not send it to
+  and fro. After the release it lingers where it was.
+- If the toy fills the frame (both docks covered) it stays in the corner: on the toy's shoulder, never
+  on its foot.
+- The UI canvas keeps the whole 1920 × 1080 reference frame on screen (`UiRoot`, Expand mode): it is
+  taller than 1080 on 4:3 and portrait screens. The docks are anchored to the edges, so there the low
+  dock is farther below the toy, not higher.
+- Neighbours, none of which it touches at any shape of screen: hint toasts bottom left, control pills
+  bottom right, level card top left; the "click to look" prompt and the autoplay pill hang from the top
+  edge's middle (48 px down; never both up).
+- Not done, and why: following the side of the toy's box, or a compact readout beside the crosshair —
+  the things a toy is aimed at lie beside it (Level 2's well rim and gauge marks are level with the
+  thimble's middle); stepping aside along the bottom edge — between the toasts and the control pills
+  there is room only for a toy narrower than 30% of a 16:9 frame, and it would sit beside the foot.
+
+**What it shows.**
 
 - **Factor**: "×3.2" = current projected scale ÷ scale at grab. Unbounded 22 px, tabular spacing. Ink
   within ±5% of ×1, Lagoon below, Cherry above.
@@ -1217,7 +1256,9 @@ Fonts are the only shipped assets that are not generated, and both are open-lice
 
 ### 10.2 Sizes and colours
 
-`CanvasScaler`: Scale With Screen Size, reference 1920×1080, match height. Sizes in reference pixels.
+`CanvasScaler`: Scale With Screen Size, reference 1920×1080, Expand (`UiRoot.CanvasSize`): the same as
+matching height at 16:9 and wider; below that the canvas stays 1920 wide and grows taller, so the
+whole reference frame is on screen at 4:3 and in portrait. Sizes in reference pixels.
 
 | Role | Font | Size |
 |---|---|---|
