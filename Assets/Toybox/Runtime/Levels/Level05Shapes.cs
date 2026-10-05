@@ -56,22 +56,19 @@ namespace Toybox.Levels
                 if (length < 1e-5f) continue;
                 Vector2 along = (b - a) / length;
                 Quaternion turn = Quaternion.LookRotation(new Vector3(along.x, 0f, along.y), Vector3.up);
-                float at = 0f;
-                while (at < length - 1e-4f)
+                // Dash k lies on [k * period, k * period + dash] of the whole path. Count the dashes that
+                // touch this stretch instead of stepping a float along it: a step that rounds to nothing
+                // never ends (it did not in the WebGL build, whose float arithmetic is strictly 32-bit).
+                float start = travelled, end = travelled + length;
+                int first = Mathf.FloorToInt(start / period), last = Mathf.FloorToInt(end / period);
+                for (int k = first; k <= last; k++)
                 {
-                    float phase = Mathf.Repeat(travelled + at, period);
-                    if (phase < dash - 1e-4f)
-                    {
-                        float run = Mathf.Min(dash - phase, length - at);
-                        Vector2 middle = a + along * (at + run * 0.5f);
-                        // A hair longer than its share, so that a dash that turns a corner has no notch in it.
-                        parts.Add(new MeshPart(MeshKit.Box(new Vector3(stroke, Coat, run + stroke * 0.25f)), new Vector3(middle.x, 0f, middle.y), turn));
-                        at += run;
-                    }
-                    else
-                    {
-                        at += Mathf.Min(period - phase, length - at);
-                    }
+                    float from = Mathf.Max(start, k * period), to = Mathf.Min(end, k * period + dash);
+                    float run = to - from;
+                    if (run <= 1e-4f) continue;
+                    Vector2 middle = a + along * (from - start + run * 0.5f);
+                    // A hair longer than its share, so that a dash that turns a corner has no notch in it.
+                    parts.Add(new MeshPart(MeshKit.Box(new Vector3(stroke, Coat, run + stroke * 0.25f)), new Vector3(middle.x, 0f, middle.y), turn));
                 }
                 travelled += length;
             }

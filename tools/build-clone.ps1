@@ -9,6 +9,7 @@
 .EXAMPLE
   .\tools\build-clone.ps1                 # sync + build
   .\tools\build-clone.ps1 -Deploy         # sync + build + publish to gh-pages
+  .\tools\build-clone.ps1 -Committed      # build what is committed (HEAD), leaving work in progress out
   .\tools\build-clone.ps1 -SeedLibrary    # first run only: copy the main Library (stop the batch server first)
 #>
 param(
@@ -17,6 +18,7 @@ param(
     [switch]$Deploy,
     [switch]$SeedLibrary,
     [switch]$SyncOnly,
+    [switch]$Committed,
     [int]$TimeoutMin = 100
 )
 
@@ -27,16 +29,32 @@ if (-not $cache) { $cache = Join-Path $env:USERPROFILE '.cache\tinkerstoybox' }
 $clone = Join-Path $cache 'buildclone'
 New-Item -ItemType Directory -Force $clone | Out-Null
 
+# What to build: the main folder as it stands, or (-Committed) a checkout of HEAD kept beside the clone, so
+# that levels still being written in the main folder do not end up in a build that gets published.
+$source = $root
+if ($Committed) {
+    $source = Join-Path $cache 'committed'
+    $head = (& git -C $root rev-parse HEAD).Trim()
+    # git reports progress on stderr, which must not count as a failure here.
+    $ErrorActionPreference = 'Continue'
+    if (-not (Test-Path (Join-Path $source '.git'))) { & git -C $root worktree add --quiet --detach $source $head }
+    else { & git -C $source checkout --quiet --detach --force $head }
+    $ErrorActionPreference = 'Stop'
+    $at = (& git -C $source rev-parse HEAD).Trim()
+    if ($at -ne $head) { Write-Output "BUILD-CLONE: could not check out $head for the build."; exit 1 }
+    Write-Output "BUILD-CLONE: building commit $($head.Substring(0, 7))"
+}
+
 function Sync-Folder([string]$name, [string[]]$extra) {
-    $robocopyArgs = @((Join-Path $root $name), (Join-Path $clone $name), '/MIR', '/COPY:DT', '/DCOPY:T', '/R:2', '/W:1', '/NFL', '/NDL', '/NP', '/NJH', '/NJS') + $extra
+    $robocopyArgs = @((Join-Path $source $name), (Join-Path $clone $name), '/MIR', '/COPY:DT', '/DCOPY:T', '/R:2', '/W:1', '/NFL', '/NDL', '/NP', '/NJH', '/NJS') + $extra
     & robocopy @robocopyArgs | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy failed for $name (exit $LASTEXITCODE)" }
 }
 
-Sync-Folder 'Assets' @('/XD', (Join-Path $root 'Assets\Resources'))
+Sync-Folder 'Assets' @('/XD', (Join-Path $source 'Assets\Resources'))
 Sync-Folder 'Packages' @()
 Sync-Folder 'ProjectSettings' @()
-Sync-Folder 'tools' @('/XD', (Join-Path $root 'tools\out'))
+Sync-Folder 'tools' @('/XD', (Join-Path $source 'tools\out'))
 
 if ($SeedLibrary -and -not (Test-Path (Join-Path $clone 'Library\PackageCache'))) {
     & robocopy (Join-Path $root 'Library') (Join-Path $clone 'Library') /E /COPY:DT /DCOPY:T /R:1 /W:1 /NFL /NDL /NP /NJH /NJS | Out-Null
