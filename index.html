@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="description" content="Tinker's Toybox - a forced-perspective puzzle platformer where a tiny action figure resizes the playroom.">
+    <title>Tinker's Toybox</title>
+    <style>
+      /* Loading screen per docs/ART_BIBLE.md 10.5: Paper background, the four-pane mark as an Ink spinner, a Cherry bar. */
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #FFFDF7; }
+      #unity-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #FFFDF7; outline: none; }
+      #loader { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px;
+        background: #FFFDF7; color: #2B2140; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; transition: opacity .32s ease; }
+      #loader.done { opacity: 0; pointer-events: none; }
+      #mark { width: 56px; height: 56px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; animation: turn 1.6s cubic-bezier(.6, 0, .4, 1) infinite; }
+      #mark i { background: #2B2140; border-radius: 6px; }
+      @keyframes turn { 0% { transform: rotate(0deg); } 50%, 100% { transform: rotate(90deg); } }
+      #bar { width: min(360px, 64vw); height: 10px; border-radius: 999px; background: rgba(43, 33, 64, .12); overflow: hidden; }
+      #fill { width: 0%; height: 100%; border-radius: 999px; background: #FF2E55; transition: width .18s ease; }
+      #note { font-size: 14px; font-weight: 600; letter-spacing: .04em; min-height: 1.2em; }
+      @media (prefers-reduced-motion: reduce) { #mark { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="loader">
+      <div id="mark"><i></i><i></i><i></i><i></i></div>
+      <div id="bar"><div id="fill"></div></div>
+      <div id="note"></div>
+    </div>
+    <script src="Build/2d64fb034de769eee8766843a0ab56b8.loader.js"></script>
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+      var loader = document.querySelector("#loader");
+      var fill = document.querySelector("#fill");
+      var note = document.querySelector("#note");
+      createUnityInstance(canvas, {
+        arguments: [],
+        dataUrl: "Build/ea8d76536d92542dddcb7124042e2a80.data.unityweb",
+        frameworkUrl: "Build/2b3007ebe55b4a7ee0c4ed3b66612e91.framework.js.unityweb",
+        codeUrl: "Build/23335c17b3eea32bfd992c4506948007.wasm.unityweb",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "Tinker's Toybox",
+        productName: "Tinker's Toybox",
+        productVersion: "0.1.0",
+      }, function (progress) {
+        fill.style.width = Math.round(progress * 100) + "%";
+      }).then(function (unityInstance) {
+        window.unityInstance = unityInstance;
+        loader.classList.add("done");
+        canvas.focus();
+      }).catch(function (message) {
+        note.textContent = "Could not start: " + message;
+      });
+    </script>
+  </body>
+</html>
