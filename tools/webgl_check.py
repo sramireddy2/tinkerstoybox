@@ -52,6 +52,157 @@ RENDERER_JS = """() => {
 
 NOISE = ("UnityCache", "IndexedDB", "favicon", "Failed to load resource")
 
+# Listens to what the page plays: every node wired to the speakers is wired through an analyser first,
+# and a timer notes how loud each 50 ms was. Installed before the page's own scripts run.
+AUDIO_TAP_JS = """(() => {
+  if (!window.AudioNode || !window.AudioDestinationNode) return;
+  const meter = window.__toyboxAudio = { contexts: 0, windows: 0, loud: 0, peak: 0, rmsSum: 0, clipped: 0 };
+  const taps = [];
+  const connect = AudioNode.prototype.connect;
+  AudioNode.prototype.connect = function (target, ...rest) {
+    try {
+      if (target instanceof AudioDestinationNode) {
+        const ctx = this.context;
+        if (!ctx.__toyboxTap) {
+          ctx.__toyboxTap = ctx.createAnalyser();
+          ctx.__toyboxTap.fftSize = 2048;
+          connect.call(ctx.__toyboxTap, ctx.destination);
+          taps.push(ctx.__toyboxTap);
+          meter.contexts++;
+        }
+        if (this !== ctx.__toyboxTap) return connect.call(this, ctx.__toyboxTap, ...rest);
+      }
+    } catch (error) { /* fall through to the plain connection */ }
+    return connect.call(this, target, ...rest);
+  };
+  const samples = new Float32Array(2048);
+  setInterval(() => {
+    for (const tap of taps) {
+      tap.getFloatTimeDomainData(samples);
+      let peak = 0, sum = 0;
+      for (let i = 0; i < samples.length; i++) { const v = Math.abs(samples[i]); if (v > peak) peak = v; sum += samples[i] * samples[i]; }
+      meter.windows++;
+      meter.rmsSum += Math.sqrt(sum / samples.length);
+      if (peak > 0.003) meter.loud++;
+      if (peak >= 0.99) meter.clipped++;
+      if (peak > meter.peak) meter.peak = peak;
+    }
+  }, 50);
+})();"""
+
+
+def audio_line(page, problems=None, expect_sound=True):
+    """What the page played so far, as one report line."""
+    meter = page.evaluate("() => window.__toyboxAudio || null")
+    if not meter or not meter["windows"]:
+        if problems is not None and expect_sound:
+            problems.append("no audio output was created at all")
+        return "  sound: none (no audio node reached the speakers)"
+    share = meter["loud"] / meter["windows"]
+    if problems is not None:
+        if expect_sound and meter["loud"] == 0:
+            problems.append("the page was silent the whole time")
+        if meter["clipped"] > meter["windows"] * 0.02:
+            problems.append(f"the sound clips ({meter['clipped']} of {meter['windows']} windows at full scale)")
+    return (f"  sound: audible in {share:.0%} of the time, peak {meter['peak']:.2f}, "
+            f"mean level {meter['rmsSum'] / meter['windows']:.3f}, clipped windows {meter['clipped']}")
+
+
+def picture(page, name, shots):
+    path = os.path.join(OUT, name + ".png")
+    try:
+        page.screenshot(path=path, timeout=8000)
+        shots.append(os.path.basename(path))
+    except Exception:
+        shots.append(name + " (no picture)")
+
+
+def play(page, base, width, height):
+    """A person at the keyboard: title, click to play, mouse capture, look, walk, pick up, let go, pause.
+
+    Returns (problems, lines). The pictures are for looking at; what can be measured is measured.
+    """
+    errors, logs = [], []
+    page.on("console", lambda m: (errors if m.type == "error" else logs).append(m.text))
+    page.on("pageerror", lambda e: errors.append("page error: " + str(e)))
+    lines, problems, shots = [], [], []
+    started = time.time()
+    page.goto(base, wait_until="load")
+    while time.time() - started < 120 and not any("UnloadTime" in line for line in logs):
+        time.sleep(0.25)
+        answers(page, 500)
+    page.wait_for_timeout(4000)
+    lines.append(f"play: title up after {time.time() - started:.1f} s")
+    picture(page, "play-0-title", shots)
+
+    def captured():
+        return page.evaluate("() => !!document.pointerLockElement")
+
+    # The big button sits at the middle, 78% down the 16:9 frame.
+    cursor_y = height * 0.78      # keep the pointer at this height: moving it up or down would tilt the view
+    page.mouse.click(width * 0.5, cursor_y)
+    page.wait_for_timeout(1500)
+    if not captured():
+        page.mouse.click(width * 0.5, cursor_y)          # the "click to look around" prompt
+        page.wait_for_timeout(1000)
+    lines.append(f"  after 'Click to play': mouse captured = {captured()}")
+    if not captured():
+        problems.append("clicking 'Click to play' did not capture the mouse")
+    picture(page, "play-1-started", shots)
+
+    # Look: with the pointer captured the browser reports movement, not position.
+    before = page.screenshot(timeout=8000)
+    for _ in range(12):
+        page.mouse.move(width * 0.5 + 25, cursor_y, steps=1)
+        page.mouse.move(width * 0.5 + 50, cursor_y, steps=1)
+        page.wait_for_timeout(30)
+    page.wait_for_timeout(400)
+    after = page.screenshot(timeout=8000)
+    lines.append(f"  moving the mouse changed the view = {before != after}")
+    picture(page, "play-2-looked", shots)
+    for _ in range(12):                                   # and back again
+        page.mouse.move(width * 0.5 + 25, cursor_y, steps=1)
+        page.mouse.move(width * 0.5, cursor_y, steps=1)
+        page.wait_for_timeout(30)
+
+    # Pick up what is under the crosshair (every level starts looking at its toy), then let it go.
+    page.wait_for_timeout(500)
+    page.mouse.down()
+    page.wait_for_timeout(120)
+    page.mouse.up()
+    page.wait_for_timeout(1200)
+    picture(page, "play-3-picked-up", shots)
+    page.keyboard.press("e")
+    page.wait_for_timeout(1200)
+    picture(page, "play-4-let-go", shots)
+
+    # Walk: hold S (backwards is free at a spawn), then W with a jump.
+    page.keyboard.down("s")
+    page.wait_for_timeout(900)
+    page.keyboard.up("s")
+    picture(page, "play-5-walked-back", shots)
+    page.keyboard.down("w")
+    page.wait_for_timeout(600)
+    page.keyboard.press("Space")
+    page.wait_for_timeout(500)
+    page.keyboard.up("w")
+    picture(page, "play-6-walked-jumped", shots)
+
+    # Pause frees the mouse and shows the menu.
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(1200)
+    lines.append(f"  after Esc: mouse captured = {captured()}")
+    if captured():
+        problems.append("Esc did not free the mouse")
+    picture(page, "play-7-paused", shots)
+
+    lines.append(audio_line(page, problems))
+    for e in [e for e in errors if not any(n in e for n in NOISE)][:8]:
+        problems.append("console error: " + e[:240].replace("\n", " "))
+    lines.append("  pictures: " + ", ".join(shots))
+    return problems, lines
+
+
 
 def answers(page, within_ms=2500):
     """True if the page's main thread runs script within the time given."""
@@ -113,6 +264,7 @@ def run(page, url, name, seconds, every):
         lines.append("  " + line[:220].replace("\n", " "))
     for e in [e for e in errors if not any(n in e for n in NOISE)][:8]:
         problems.append("console error: " + e[:240].replace("\n", " "))
+    lines.append(audio_line(page, problems, expect_sound=False))
     lines.append("  pictures: " + (", ".join(shots) if shots else "none"))
     return problems, lines
 
@@ -127,6 +279,7 @@ def main():
     parser.add_argument("--base", default="http://localhost:5180/")
     parser.add_argument("--size", default="1280x720")
     parser.add_argument("--headed", action="store_true", help="show the browser window")
+    parser.add_argument("--play", action="store_true", help="also play the first level by hand: click, mouse capture, look, walk, pick up, pause")
     args = parser.parse_args()
 
     os.makedirs(OUT, exist_ok=True)
@@ -136,7 +289,7 @@ def main():
         jobs.append((args.name, args.query))
 
     # A frozen page can freeze the driver with it: never run longer than the jobs can take.
-    limit = len(jobs) * (args.seconds + 150) + 60
+    limit = len(jobs) * (args.seconds + 150) + 60 + (240 if args.play else 0)
     threading.Timer(limit, lambda: (print(f"RESULT: FAILED - gave up after {limit:.0f} s", flush=True), os._exit(3))).start()
 
     failed = 0
@@ -157,6 +310,7 @@ def main():
 
         for number, (name, query) in enumerate(jobs):
             context = browser.new_context(viewport={"width": width, "height": height})
+            context.add_init_script(AUDIO_TAP_JS)
             page = context.new_page()
             if number == 0:
                 page.goto("about:blank")
@@ -167,6 +321,20 @@ def main():
             for problem in problems:
                 print("  PROBLEM: " + problem, flush=True)
             failed += 1 if problems else 0
+            try:
+                context.close()
+            except Exception:
+                pass
+        if args.play:
+            context = browser.new_context(viewport={"width": width, "height": height})
+            context.add_init_script(AUDIO_TAP_JS)
+            problems, lines = play(context.new_page(), args.base, width, height)
+            for line in lines:
+                print(line, flush=True)
+            for problem in problems:
+                print("  PROBLEM: " + problem, flush=True)
+            failed += 1 if problems else 0
+            jobs.append(("play", ""))
             try:
                 context.close()
             except Exception:
