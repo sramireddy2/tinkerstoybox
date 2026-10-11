@@ -82,10 +82,11 @@ namespace Toybox.Tests
             // With the game's menus a click beside the pause card does nothing: Esc or the Resume button goes on.
             StringAssert.DoesNotContain("a click resumes", readme);
             StringAssert.Contains("**Resume**", readme);
-            // While playing R is a hold, and the level keys and the bot's key are debug keys behind &debug=1.
+            // While playing R is a hold, and the level keys and the bot's key are debug keys behind &debug=1
+            // (the README is the short page; the developer's guide has the address parameters).
             StringAssert.DoesNotContain("(at once)", readme);
             StringAssert.Contains("hold it for half a second", readme);
-            StringAssert.Contains("`&debug=1` turns the debug keys on", readme);
+            StringAssert.Contains("`&debug=1` turns the debug keys on", Read("docs/DEVELOPMENT.md"));
             // The quarter-turn and the yaw step are the engine's.
             Assert.AreEqual(15f, PerspectiveGrabber.YawStepDegrees);
             Assert.AreEqual(90f, PerspectiveGrabber.PitchStepDegrees);
@@ -96,10 +97,15 @@ namespace Toybox.Tests
         [Test]
         public void TheReadme_NamesTheEditorTheProjectIsMadeWith_AndEveryTool()
         {
+            // The README is the short page a visitor reads; the tools and the release are in the developer's
+            // guide it links to.
             string readme = Read("README.md");
+            string guide = Read("docs/DEVELOPMENT.md");
             string architecture = Read("docs/ARCHITECTURE.md");
             StringAssert.Contains(Application.unityVersion, readme, "the Unity version to install");
+            StringAssert.Contains(Application.unityVersion, guide);
             StringAssert.Contains(Application.unityVersion, architecture);
+            StringAssert.Contains("](docs/DEVELOPMENT.md)", readme, "the README sends developers to the guide");
 
             string tools = Path.Combine(Root, "tools");
             int found = 0;
@@ -108,16 +114,16 @@ namespace Toybox.Tests
                 string name = Path.GetFileName(path);
                 if (!name.EndsWith(".ps1") && !name.EndsWith(".py")) continue;
                 found++;
-                StringAssert.Contains(name, readme, "the README says what tools/" + name + " is for");
+                StringAssert.Contains(name, guide, "docs/DEVELOPMENT.md says what tools/" + name + " is for");
                 StringAssert.Contains(name, architecture, "ARCHITECTURE names tools/" + name);
             }
             Assert.GreaterOrEqual(found, 6, "unity, typecheck, build-clone, deploy, editor-check, webgl_check");
 
             // The release is a procedure, and it is written down: the fast build is not the one to publish.
-            StringAssert.Contains("## Releasing", readme);
+            StringAssert.Contains("## Releasing", guide);
             StringAssert.Contains("## Releasing", architecture);
-            StringAssert.Contains("build-clone.ps1 -Committed -Opt RuntimeSpeed", readme);
-            StringAssert.Contains("deploy.ps1 -SkipBuild", readme);
+            StringAssert.Contains("build-clone.ps1 -Committed -Opt RuntimeSpeed", guide);
+            StringAssert.Contains("deploy.ps1 -SkipBuild", guide);
         }
 
         // ---- The documents point at what a clone has -------------------------------------------------------

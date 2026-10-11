@@ -136,9 +136,10 @@ Assets/TextMesh Pro/       TMP Essential Resources as Unity imports them: TMP's 
 Assets/WebGLTemplates/Toybox/   index.html (page shell and loading screen), licenses.txt (the three fonts'
                              copyright notices and the SIL Open Font License) and preview.png (the picture
                              a shared link shows), which Unity copies into every build beside the page
-docs/                      this contract; LEVEL_AUTHORING.md (the level author's short reference); LEVELS.md;
-                             ART_BIBLE.md; design-notes/ (historical drafts, the builders' close-out logs);
-                             media/ (pictures)
+docs/                      this contract; DEVELOPMENT.md (opening the project, the tools, the tests, releasing:
+                             what the short README leaves out); LEVEL_AUTHORING.md (the level author's short
+                             reference); LEVELS.md; ART_BIBLE.md; design-notes/ (historical drafts, the
+                             builders' close-out logs); media/ (the README's pictures)
 tools/unity.ps1            batch-mode wrapper (compile | test | exec | playcheck | build | status | stop)
 tools/typecheck.ps1        the three assemblies through Unity's own compiler, without Unity: seconds
 tools/build-clone.ps1      a WebGL build from a private copy of the project; the test editor keeps running
@@ -1803,8 +1804,10 @@ the repository; what matters of them is in this table and in the sections above.
   long toys, a signal's hue, flat faces of generated meshes, gadget sounds, friction being its
   coefficient, the screenshot tool's HDR - and `BuildSurvivalTests`,
   which walks `ART_BIBLE.md` §3.8 and §7.5 item by item against the assets on disk.
-- `ReleaseTests` reads what a stranger gets: the README lists the campaign's levels by the registry's
-  titles, uses the game's words for its controls and names the editor version and every tool; every
+- `ReleaseTests` reads what a stranger gets: the README (the short page) lists the campaign's levels by
+  the registry's titles, uses the game's words for its controls and names the editor version;
+  `docs/DEVELOPMENT.md` (the developer's guide the README links to) names every tool and the release
+  procedure; every
   link in the README and under `docs/` leads to a file in the repository and none into `tools/out`;
   no document carries a path on somebody's machine; every font file under `Assets/` has its copyright
   notice and the licence text in the template's `licenses.txt` and in the README's credits; the
