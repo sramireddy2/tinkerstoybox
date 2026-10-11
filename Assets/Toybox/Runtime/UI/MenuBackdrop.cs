@@ -35,6 +35,18 @@ namespace Toybox.UI
     /// nothing (culling mask 0, no shadows, no post-processing), clears the screen and carries the
     /// overlay, exactly the way the game's camera carries the HUD while playing. It only exists while it
     /// is needed.
+    ///
+    /// What the textures cost (ART_BIBLE 12.1 budgets render targets per tier, and these come on top):
+    /// - every one of them has a depth buffer, used or not: URP's render graph refuses a camera whose
+    ///   output texture has none ("the output Render Texture must have a depth buffer" - seen in Play
+    ///   Mode when the level-complete card was tried without);
+    /// - the pause's frame is a still: it has as many pixels as the camera really renders (the screen's
+    ///   size times the render scale in force - on a 4K canvas the tier's pixel budget, a quarter of the
+    ///   canvas), and is rendered at scale 1 into that;
+    /// - the blurred frame behind the pause card is half that size again: it lies under a full-screen blur
+    ///   and a Paper wash.
+    /// The level-complete card's texture stays the canvas's size: the camera renders into it live, at the
+    /// render scale the quality presenter keeps for whatever size the camera has.
     /// </summary>
     public sealed class MenuBackdrop
     {
@@ -205,7 +217,30 @@ namespace Toybox.UI
             if (image.gameObject.activeSelf != on) image.gameObject.SetActive(on);
         }
 
-        void EnsureTarget(Camera camera)
+        /// <summary>The size of the pause's still for a canvas of this size at this render scale: what the camera really renders.</summary>
+        public static Vector2Int StillSize(int width, int height, float renderScale)
+        {
+            float scale = Mathf.Clamp(renderScale, 0.1f, 1f);
+            return new Vector2Int(Mathf.Clamp(Mathf.RoundToInt(width * scale), 16, 4096), Mathf.Clamp(Mathf.RoundToInt(height * scale), 16, 4096));
+        }
+
+        /// <summary>The blurred frame behind the pause card: half the still each way.</summary>
+        public static Vector2Int BlurredSize(int width, int height) => new Vector2Int(Mathf.Max(16, width / 2), Mathf.Max(16, height / 2));
+
+        /// <summary>The blurred frame behind the pause card while there is one, else null.</summary>
+        public RenderTexture Blurred => blurred;
+
+        static float PipelineScale
+        {
+            get
+            {
+                var pipeline = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
+                return pipeline != null ? pipeline.renderScale : 1f;
+            }
+        }
+
+        // still: the picture is taken once (the pause) and need not be bigger than what the camera renders.
+        void EnsureTarget(Camera camera, bool still)
         {
             int width = Mathf.Clamp(camera.pixelWidth, 16, 4096), height = Mathf.Clamp(camera.pixelHeight, 16, 4096);
             if (root.InWorld)
@@ -213,6 +248,12 @@ namespace Toybox.UI
                 // A capture: the camera has no screen; the card's picture is as large as the one being taken.
                 height = UiCapture.PictureHeight;
                 width = Mathf.Clamp(Mathf.RoundToInt(height * UiCapture.Aspect), 16, 4096);
+            }
+            else if (still)
+            {
+                Vector2Int size = StillSize(width, height, PipelineScale);
+                width = size.x;
+                height = size.y;
             }
             int samples = Samples(camera);
             if (target != null && target.width == width && target.height == height && target.antiAliasing == samples) return;
@@ -232,10 +273,16 @@ namespace Toybox.UI
         // it draws straight into it, and the picture is only as smooth as the texture is.
         int Samples(Camera camera)
         {
-            UniversalAdditionalCameraData data = camera.GetUniversalAdditionalCameraData();
             var pipeline = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
-            bool direct = data == null || !data.renderPostProcessing;
-            return direct && pipeline != null ? Mathf.Clamp(pipeline.msaaSampleCount, 1, 8) : 1;
+            return Direct(camera) && pipeline != null ? Mathf.Clamp(pipeline.msaaSampleCount, 1, 8) : 1;
+        }
+
+        // Without post-processing the camera draws straight into its target; with it, the pipeline draws into
+        // its own intermediate target and resolves into this one.
+        static bool Direct(Camera camera)
+        {
+            UniversalAdditionalCameraData data = camera.GetUniversalAdditionalCameraData();
+            return data == null || !data.renderPostProcessing;
         }
 
         // In the game's own colour format (ART_BIBLE 7.3): URP takes the format of its intermediate colour
@@ -244,9 +291,11 @@ namespace Toybox.UI
         static RenderTexture NewTexture(string name, int width, int height, int samples)
         {
             const GraphicsFormat hdr = GraphicsFormat.B10G11R11_UFloatPack32;
+            // (Always with depth: the render graph will not render a camera into a texture that has none.)
+            const int depthBits = 24;
             RenderTexture texture = SystemInfo.IsFormatSupported(hdr, GraphicsFormatUsage.Render)
-                ? new RenderTexture(new RenderTextureDescriptor(width, height, hdr, 24) { msaaSamples = samples })
-                : new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB) { antiAliasing = samples };
+                ? new RenderTexture(new RenderTextureDescriptor(width, height, hdr, depthBits) { msaaSamples = samples })
+                : new RenderTexture(width, height, depthBits, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB) { antiAliasing = samples };
             texture.name = name;
             texture.hideFlags = HideFlags.HideAndDontSave;
             texture.Create();
@@ -261,12 +310,13 @@ namespace Toybox.UI
             Camera camera = context.Camera;
             if (camera != null && target != null)
             {
-                if (blurred == null || blurred.width != target.width || blurred.height != target.height)
+                Vector2Int size = BlurredSize(target.width, target.height);
+                if (blurred == null || blurred.width != size.x || blurred.height != size.y)
                 {
                     ReleaseBlurred();
-                    blurred = NewTexture("Menu Frame Blurred", target.width, target.height, 1);
+                    blurred = NewTexture("Menu Frame Blurred", size.x, size.y, 1);
                 }
-                Render(camera, blurred);
+                Render(camera, blurred, true);
                 full.texture = blurred;
             }
             Show(full, true);
@@ -276,18 +326,21 @@ namespace Toybox.UI
         // One frame of the game camera into the texture, without the menus in it.
         void Snapshot(Camera camera)
         {
-            EnsureTarget(camera);
+            EnsureTarget(camera, true);
             // Outside Play Mode nobody looks at the screen unless a capture is on: an EditMode test of the
             // pause gets its texture but no render (which would also be the pipeline's first, and leave its
             // pooled targets behind for whoever counts textures).
             if (!Application.isPlaying && !root.InWorld) return;
-            Render(camera, target);
+            Render(camera, target, !root.InWorld);
         }
 
-        void Render(Camera camera, RenderTexture into)
+        // sized: the texture already is as small as the render scale makes the picture - it is rendered at scale 1.
+        void Render(Camera camera, RenderTexture into, bool sized)
         {
             RenderTexture before = camera.targetTexture;
             bool wasEnabled = root.Canvas.enabled;
+            var pipeline = sized ? GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset : null;
+            float scaleBefore = pipeline != null ? pipeline.renderScale : 1f;
             // In a capture the canvases are drawn by a camera stacked on the game camera: it sits this one out.
             Camera overlay = root.InWorld ? UiCapture.Overlay : null;
             bool overlayWas = overlay != null && overlay.enabled;
@@ -295,12 +348,14 @@ namespace Toybox.UI
             {
                 root.Canvas.enabled = false;
                 if (overlay != null) overlay.enabled = false;
+                if (pipeline != null && scaleBefore != 1f) pipeline.renderScale = 1f;
                 camera.targetTexture = into;
                 camera.Render();
             }
             finally
             {
                 camera.targetTexture = before;
+                if (pipeline != null && pipeline.renderScale != scaleBefore) pipeline.renderScale = scaleBefore;
                 if (overlay != null) overlay.enabled = overlayWas;
                 root.Canvas.enabled = wasEnabled;
             }
@@ -308,7 +363,7 @@ namespace Toybox.UI
 
         void Redirect(Camera camera)
         {
-            EnsureTarget(camera);
+            EnsureTarget(camera, false);
             if (root.InWorld)
             {
                 // A capture: the tool owns the camera's target. Frame() takes a picture instead.

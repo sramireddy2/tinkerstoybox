@@ -432,6 +432,15 @@ namespace Toybox.UI
     /// move between rows, left and right within a row (unless the control under the focus uses them
     /// itself, like a slider). Whatever a button does is handed to <see cref="Run"/>, which the menu
     /// presenter points at its queue, so actions happen at a fixed point of the frame.
+    ///
+    /// Up and down land on the control of the next row that is nearest to the column they came from and
+    /// can take the focus (a row with none is skipped). The first <see cref="GridRows"/> rows are a grid:
+    /// within it left and right go on past the end of a row, like reading - to the next control of the
+    /// grid that can take the focus, in the next row if need be.
+    ///
+    /// A direction key that is already down when a menu opens is the player still walking, not the player
+    /// choosing: while <see cref="MoveBlocked"/> is set the screen ignores every move. The menu presenter
+    /// sets it when it opens a menu and clears it in the first frame in which no direction is held.
     /// </summary>
     public sealed class UiScreen
     {
@@ -448,6 +457,10 @@ namespace Toybox.UI
         public Action<Action> Run = action => action();
         /// <summary>False while the screen is closed or peeling away: it then ignores every input.</summary>
         public bool Enabled { get; set; } = true;
+        /// <summary>So many rows from the top are a grid of cards: left and right run on from one of them into the next.</summary>
+        public int GridRows { get; set; }
+        /// <summary>Moves are ignored: a direction key has been down since before the screen opened.</summary>
+        public bool MoveBlocked { get; set; }
         public bool Visible => Root.gameObject.activeSelf;
         public int RowCount => rows.Count;
 
@@ -518,7 +531,7 @@ namespace Toybox.UI
         /// <summary>Moves the focus (or adjusts the control under it). Returns true if anything happened.</summary>
         public bool Move(MoveDirection direction)
         {
-            if (rows.Count == 0 || !Enabled) return false;
+            if (rows.Count == 0 || !Enabled || MoveBlocked) return false;
             if (Focused == null)
             {
                 Focus(First);
@@ -534,6 +547,29 @@ namespace Toybox.UI
                     int step = direction == MoveDirection.Right ? 1 : -1;
                     if (Focused.Adjust(step)) return true;
                     int to = c + step;
+                    int grid = Mathf.Min(GridRows, rows.Count);
+                    if (r < grid)
+                    {
+                        // In reading order to the next card that can take the focus; the grid's ends do not wrap.
+                        int row = r;
+                        while (row >= 0 && row < grid)
+                        {
+                            if (to < 0 || to >= rows[row].Count)
+                            {
+                                row += step;
+                                if (row < 0 || row >= grid) break;
+                                to = step > 0 ? 0 : rows[row].Count - 1;
+                                continue;
+                            }
+                            if (rows[row][to].Interactable)
+                            {
+                                Focus(rows[row][to]);
+                                return true;
+                            }
+                            to += step;
+                        }
+                        return false;
+                    }
                     if (to < 0 || to >= rows[r].Count) return false;
                     Focus(rows[r][to]);
                     return true;
@@ -547,8 +583,17 @@ namespace Toybox.UI
                     for (int i = 1; i < rows.Count; i++)
                     {
                         List<UiControl> row = rows[((r + step * i) % rows.Count + rows.Count) % rows.Count];
-                        UiControl target = row[Mathf.Min(c, row.Count - 1)];
-                        if (!target.Interactable) continue;
+                        // The same column if it can take the focus, else the nearest one that can (the left one of two).
+                        UiControl target = null;
+                        int from = Mathf.Min(c, row.Count - 1), best = int.MaxValue;
+                        for (int k = 0; k < row.Count; k++)
+                        {
+                            int away = Mathf.Abs(k - from);
+                            if (!row[k].Interactable || away >= best) continue;
+                            best = away;
+                            target = row[k];
+                        }
+                        if (target == null) continue;
                         Focus(target);
                         return true;
                     }

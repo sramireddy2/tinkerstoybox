@@ -299,14 +299,22 @@ namespace Toybox.Levels
             cachedScale = 0f;
 
             Dip dip = ctx.Dip;
-            BuildBox(ctx, dip);
-            BuildLowWalls(ctx);
+            // What is only drawn is merged per material (ART_BIBLE 12.1; the level drew 38 statics for 10
+            // materials): what casts a shadow in one set, the boxes whose shadow nobody sees in another. The
+            // colliders stay where they are. The outline is the gauge and stays a renderer of its own.
+            var set = new Level01Set();
+            var flat = new Level01Set();
+            BuildBox(ctx, dip, set, flat);
+            BuildLowWalls(ctx, set);
             outline = BuildPaint(ctx, dip, out paint);
-            BuildDressing(ctx);
+            BuildDressing(ctx, set);
 
             // The card on its spool, face up, its long side along the corridor. It stays put until it is
             // picked up: nobody knocks it off by walking into the spool.
             table = ctx.AddStatic(ToyFactory.ThreadSpool(TableRadius, TableHeight, grabbable: false), TableBase + Vector3.up * (TableHeight * 0.5f));
+            set.Absorb(table);
+            set.Finish(ctx, "Set");
+            flat.Finish(ctx, "Flat", castShadows: false);
             card = ToyCatalog.Add(ctx, ToyId.PlayingCard, CardHome, StartScale, options: o =>
             {
                 o.MinScale = MinScale;
@@ -459,7 +467,8 @@ namespace Toybox.Levels
         void Refused(LevelContext ctx)
         {
             Player player = ctx.Game.Player;
-            if (!player.Grounded || player.GroundProp != card || ctx.Game.Grabber.IsHolding) return;
+            // (Underfoot: on it, or in the air off it - there the engine does not let go of it either.)
+            if (player.Underfoot != card || ctx.Game.Grabber.IsHolding) return;
             if (ctx.Game.PhysicsScene.Raycast(player.Eye, player.Forward, out RaycastHit hit, 60f, Layers.SolidMask, QueryTriggerInteraction.Ignore) && PropRef.Of(hit.collider) == card)
                 Say(ctx, StandingLine);
         }
@@ -794,13 +803,12 @@ namespace Toybox.Levels
 
         // ---- Geometry ---------------------------------------------------------------------------------------
 
-        // A box of the level that is drawn.
-        static GameObject Slab(LevelContext ctx, Material material, float x0, float x1, float y0, float y1, float z0, float z1, bool shadow = true)
+        // A box of the level that is drawn: its collider stands in the level, its looks join the set that
+        // casts shadows or the one that casts none.
+        static void Slab(LevelContext ctx, Level01Set set, Level01Set flat, Material material, float x0, float x1, float y0, float y1, float z0, float z1, bool shadow = true)
         {
             GameObject slab = ctx.AddStatic(BasicToys.Slab(new Vector3(x1 - x0, y1 - y0, z1 - z0), material), new Vector3((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, (z0 + z1) * 0.5f));
-            if (!shadow)
-                foreach (MeshRenderer renderer in slab.GetComponentsInChildren<MeshRenderer>()) renderer.shadowCastingMode = ShadowCastingMode.Off;
-            return slab;
+            (shadow ? set : flat).Absorb(slab);
         }
 
         // A box nobody sees: it stops a held card and the player like any other.
@@ -814,7 +822,7 @@ namespace Toybox.Levels
         // The shoebox: bottom, sides, the far wall with the little door and the tunnel behind it, and the lid
         // over the far half. Where the lid does not reach, the sides are drawn low - the sun gets in and the
         // workbench shows over them - and stand, unseen, up to an unseen cap at the lid's height.
-        static void BuildBox(LevelContext ctx, Dip dip)
+        static void BuildBox(LevelContext ctx, Dip dip, Level01Set set, Level01Set flat)
         {
             const float t = WallThickness;
             float outX = HalfWidth + t, back = NearZ - t, far = FarZ + t, tunnelOut = TunnelEnd + t, tunnelX = DoorHalfWidth + t;
@@ -822,39 +830,38 @@ namespace Toybox.Levels
             Material cardboard = Materials.Room(RoomSurface.LevelStatic, dip, PatternSpec.Corrugated);
             Material ink = GadgetKit.Body;
 
-            Slab(ctx, bottom, -outX, outX, -FloorThickness, 0f, back, far, false);
-            Slab(ctx, bottom, -tunnelX, tunnelX, -FloorThickness, 0f, far, tunnelOut, false);
+            Slab(ctx, set, flat, bottom, -outX, outX, -FloorThickness, 0f, back, far, false);
+            Slab(ctx, set, flat, bottom, -tunnelX, tunnelX, -FloorThickness, 0f, far, tunnelOut, false);
 
             // The sides and the back: low where the box is open, whole under the lid.
-            Slab(ctx, cardboard, -outX, -HalfWidth, 0f, OpenWallTop, back, LidNear);
-            Slab(ctx, cardboard, HalfWidth, outX, 0f, OpenWallTop, back, LidNear);
-            Slab(ctx, cardboard, -HalfWidth, HalfWidth, 0f, OpenWallTop, back, NearZ);
+            Slab(ctx, set, flat, cardboard, -outX, -HalfWidth, 0f, OpenWallTop, back, LidNear);
+            Slab(ctx, set, flat, cardboard, HalfWidth, outX, 0f, OpenWallTop, back, LidNear);
+            Slab(ctx, set, flat, cardboard, -HalfWidth, HalfWidth, 0f, OpenWallTop, back, NearZ);
             Unseen(ctx, "Unseen Wall -X", -outX, -HalfWidth, OpenWallTop, LidY, back, LidNear);
             Unseen(ctx, "Unseen Wall +X", HalfWidth, outX, OpenWallTop, LidY, back, LidNear);
             Unseen(ctx, "Unseen Wall Back", -HalfWidth, HalfWidth, OpenWallTop, LidY, back, NearZ);
-            Slab(ctx, cardboard, -outX, -HalfWidth, 0f, LidY, LidNear, far);
-            Slab(ctx, cardboard, HalfWidth, outX, 0f, LidY, LidNear, far);
+            Slab(ctx, set, flat, cardboard, -outX, -HalfWidth, 0f, LidY, LidNear, far);
+            Slab(ctx, set, flat, cardboard, HalfWidth, outX, 0f, LidY, LidNear, far);
 
             // The far wall, round the little door.
-            Slab(ctx, cardboard, -HalfWidth, -DoorHalfWidth, 0f, LidY, FarZ, far);
-            Slab(ctx, cardboard, DoorHalfWidth, HalfWidth, 0f, LidY, FarZ, far);
-            Slab(ctx, cardboard, -DoorHalfWidth, DoorHalfWidth, DoorHeight, LidY, FarZ, far);
+            Slab(ctx, set, flat, cardboard, -HalfWidth, -DoorHalfWidth, 0f, LidY, FarZ, far);
+            Slab(ctx, set, flat, cardboard, DoorHalfWidth, HalfWidth, 0f, LidY, FarZ, far);
+            Slab(ctx, set, flat, cardboard, -DoorHalfWidth, DoorHalfWidth, DoorHeight, LidY, FarZ, far);
             // The tunnel behind it: dark, so that the way out's own light is what shows in the door.
-            Slab(ctx, ink, -tunnelX, -DoorHalfWidth, 0f, DoorHeight + t, far, tunnelOut, false);
-            Slab(ctx, ink, DoorHalfWidth, tunnelX, 0f, DoorHeight + t, far, tunnelOut, false);
-            Slab(ctx, ink, -DoorHalfWidth, DoorHalfWidth, 0f, DoorHeight + t, TunnelEnd, tunnelOut, false);
-            Slab(ctx, ink, -DoorHalfWidth, DoorHalfWidth, DoorHeight, DoorHeight + t, far, TunnelEnd, false);
+            Slab(ctx, set, flat, ink, -tunnelX, -DoorHalfWidth, 0f, DoorHeight + t, far, tunnelOut, false);
+            Slab(ctx, set, flat, ink, DoorHalfWidth, tunnelX, 0f, DoorHeight + t, far, tunnelOut, false);
+            Slab(ctx, set, flat, ink, -DoorHalfWidth, DoorHalfWidth, 0f, DoorHeight + t, TunnelEnd, tunnelOut, false);
+            Slab(ctx, set, flat, ink, -DoorHalfWidth, DoorHalfWidth, DoorHeight, DoorHeight + t, far, TunnelEnd, false);
 
             // The lid, and the cap nobody sees over the open end: together the level's ceiling.
-            Slab(ctx, cardboard, -outX, outX, LidY, LidY + 0.6f, LidNear, far);
+            Slab(ctx, set, flat, cardboard, -outX, outX, LidY, LidY + 0.6f, LidNear, far);
             SkyCap.Add(ctx, -outX, outX, back, LidNear, LidY);
         }
 
         // Two rows of building blocks, two courses each, the upper one staggered. What stops things is one
         // box per wall (a card lies on a flat top, not on a row of seams); the blocks are looks.
-        static void BuildLowWalls(LevelContext ctx)
+        static void BuildLowWalls(LevelContext ctx, Level01Set set)
         {
-            var set = new Level01Set();
             float course = LowWallTop * 0.5f;
             for (int side = -1; side <= 1; side += 2)
             {
@@ -870,7 +877,6 @@ namespace Toybox.Levels
                     from += length;
                 }
             }
-            set.Finish(ctx, "Low Walls");
         }
 
         // One building block of a low wall: its looks join the set, and it has no collider of its own.
@@ -934,21 +940,19 @@ namespace Toybox.Levels
             set.Box(paper, new Vector3(-DoorHalfWidth - frame * 0.5f, (DoorHeight + frame) * 0.5f, z), new Vector3(frame, DoorHeight + frame, proud));
             set.Box(paper, new Vector3(DoorHalfWidth + frame * 0.5f, (DoorHeight + frame) * 0.5f, z), new Vector3(frame, DoorHeight + frame, proud));
             set.Box(paper, new Vector3(0f, DoorHeight + frame * 0.5f, z), new Vector3(DoorHalfWidth * 2f, frame, proud));
+            StandMark(set, Spawn, Materials.Room(RoomRecipe.Solid(dip.Deep)), paper);
             set.Finish(ctx, "Paint", castShadows: false);
-
-            StandMark(ctx, "Stand Mark", Spawn, Materials.Room(RoomRecipe.Solid(dip.Deep)), paper);
             return outline;
         }
 
         const float PadRadius = 0.62f;
 
-        // Looks only: a renderer for the pad and one for each shoe, facing +Z, toes a little apart.
-        static void StandMark(LevelContext ctx, string name, Vector3 at, Material pad, Material print)
+        // Looks only: the pad and a shoe print for each foot, facing +Z, toes a little apart.
+        static void StandMark(Level01Set set, Vector3 at, Material pad, Material print)
         {
-            var mark = new GameObject(name);
-            ctx.AddStatic(mark, at + Vector3.up * 0.012f);
+            at += Vector3.up * 0.012f;
             Mesh disc = MeshKit.Cached(MeshKit.Key("Level11/Pad", PadRadius), () => MeshKit.Cylinder(PadRadius, 0.004f, 40));
-            GadgetKit.Visual(mark.transform, "Pad", disc, pad).shadowCastingMode = ShadowCastingMode.Off;
+            set.Shape(pad, disc, at, Quaternion.identity);
             Mesh sole = MeshKit.Cached(MeshKit.Key("Level11/Sole"), () =>
             {
                 // A sole in the XY plane, toe up: half a circle for the toe, a smaller half for the heel.
@@ -968,24 +972,25 @@ namespace Toybox.Levels
             for (int side = -1; side <= 1; side += 2)
             {
                 Quaternion flat = Quaternion.Euler(0f, side * 9f, 0f) * Quaternion.Euler(90f, 0f, 0f);
-                GadgetKit.Visual(mark.transform, "Shoe", sole, print, new Vector3(side * 0.24f, 0.006f, 0f), flat).shadowCastingMode = ShadowCastingMode.Off;
+                set.Shape(print, sole, at + new Vector3(side * 0.24f, 0.006f, 0f), flat);
             }
         }
 
         // A corner of a playroom: spare blocks and a marker in the back corners of the box, behind the start.
         // Nothing stands where a card held toward the far wall passes, or where it comes down.
-        static void BuildDressing(LevelContext ctx)
+        static void BuildDressing(LevelContext ctx, Level01Set set)
         {
             float corner = HalfWidth - 0.9f, backRow = NearZ + 0.9f;
-            Block(ctx, new Vector3(1.3f, 1.3f, 1.3f), new Vector3(-corner, 0f, backRow), 8f);
-            Block(ctx, new Vector3(0.9f, 0.9f, 0.9f), new Vector3(-corner + 0.05f, 1.3f, backRow), -16f);
-            Block(ctx, new Vector3(1.5f, 0.8f, 0.8f), new Vector3(-corner + 1.7f, 0f, backRow - 0.2f), -7f);
-            Block(ctx, new Vector3(1.1f, 1.1f, 1.1f), new Vector3(corner, 0f, backRow), -11f);
-            ctx.AddStatic(ToyFactory.Marker(0.35f, 2.8f), new Vector3(corner - 2.4f, 0.35f, backRow - 0.25f), Quaternion.Euler(0f, 86f, 0f));
+            Block(ctx, set, new Vector3(1.3f, 1.3f, 1.3f), new Vector3(-corner, 0f, backRow), 8f);
+            Block(ctx, set, new Vector3(0.9f, 0.9f, 0.9f), new Vector3(-corner + 0.05f, 1.3f, backRow), -16f);
+            Block(ctx, set, new Vector3(1.5f, 0.8f, 0.8f), new Vector3(-corner + 1.7f, 0f, backRow - 0.2f), -7f);
+            Block(ctx, set, new Vector3(1.1f, 1.1f, 1.1f), new Vector3(corner, 0f, backRow), -11f);
+            set.Absorb(ctx.AddStatic(ToyFactory.Marker(0.35f, 2.8f), new Vector3(corner - 2.4f, 0.35f, backRow - 0.25f), Quaternion.Euler(0f, 86f, 0f)));
         }
 
-        static void Block(LevelContext ctx, Vector3 size, Vector3 foot, float yaw) =>
-            ctx.AddStatic(ToyFactory.WoodenBlock(size, grabbable: false), foot + Vector3.up * (size.y * 0.5f), Quaternion.Euler(0f, yaw, 0f));
+        // A set piece: its collider stands in the level, its looks join the set.
+        static void Block(LevelContext ctx, Level01Set set, Vector3 size, Vector3 foot, float yaw) =>
+            set.Absorb(ctx.AddStatic(ToyFactory.WoodenBlock(size, grabbable: false), foot + Vector3.up * (size.y * 0.5f), Quaternion.Euler(0f, yaw, 0f)));
 
         // ---- The solution -----------------------------------------------------------------------------------
 

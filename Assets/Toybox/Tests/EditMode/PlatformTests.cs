@@ -73,8 +73,9 @@ namespace Toybox.Tests
             host = new GameObject("Test Game Runner") { hideFlags = HideFlags.DontSave };
             runner = host.AddComponent<GameRunner>();
             devices = new FakeDevices();
-            // These tests are about playing; the title has tests of its own (GameFlowTests).
-            runner.Begin(LaunchOptions.FromUrl(url), new RunnerOptions { Devices = devices, Levels = levels, Present = present, SkipTitle = true, Store = new MemoryStore() });
+            // These tests are about playing; the title has tests of its own (GameFlowTests). They step through
+            // the levels with the debug keys, which a launch has to ask for (GameFlowTests again).
+            runner.Begin(LaunchOptions.FromUrl(url), new RunnerOptions { Devices = devices, Levels = levels, Present = present, SkipTitle = true, Store = new MemoryStore(), DebugKeys = true });
             return runner;
         }
 
@@ -814,6 +815,79 @@ namespace Toybox.Tests
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Toybox", "Runtime", "Platform", "InputDevices.cs"));
             StringAssert.Contains("#if UNITY_WEBGL && !UNITY_EDITOR", source);
             StringAssert.Contains("WebGLInput.stickyCursorLock = false;", source);
+        }
+
+        // The page the build is published with (Assets/WebGLTemplates/Toybox/index.html) cannot be opened from
+        // a test either. What the final review found on it, pinned down as text:
+        // - on a phone or a tablet the menus answered touch, the game (keyboard and mouse only) did not, and
+        //   nothing said why: such a visitor is held before the game is fetched, told, and may load anyway;
+        // - a start that fails (no WebGL 2) left the spinner turning under the loader's message;
+        // - no icon for the tab (a 404 on every load) and nothing for a shared link to show.
+        [Test]
+        public void TheWebPage_HoldsAVisitorWithoutKeyboardAndMouse_StopsLookingBusyWhenItFails_AndHasItsIconAndPreview()
+        {
+            string folder = Path.Combine(Application.dataPath, "WebGLTemplates", "Toybox");
+            string page = File.ReadAllText(Path.Combine(folder, "index.html")).Replace("\r", "");
+
+            // The hold: the first pointer is a finger and nothing hovers - not a guess from the user agent, and
+            // not "has a touch screen" (a laptop with one plays). The loader starts from one place only.
+            StringAssert.Contains("matchMedia(\"(hover: none) and (pointer: coarse)\")", page);
+            StringAssert.DoesNotContain("userAgent", page);
+            StringAssert.DoesNotContain("maxTouchPoints", page);
+            StringAssert.Contains("Tinker's Toybox needs a keyboard and a mouse. Open this page on a computer.", page);
+            StringAssert.Contains("<button id=\"anyway\" type=\"button\" hidden>Load anyway</button>", page);
+            Assert.AreEqual(1, System.Text.RegularExpressions.Regex.Matches(page, @"createUnityInstance\(").Count, "the loader is started in one place");
+            int start = page.IndexOf("function start()", StringComparison.Ordinal), create = page.IndexOf("createUnityInstance(", StringComparison.Ordinal);
+            int gate = page.IndexOf("var hold = false;", StringComparison.Ordinal);
+            Assert.IsTrue(start > 0 && create > start && gate > create, "createUnityInstance is inside start(), and the hold comes after it");
+            StringAssert.Contains("if (started) return;", page, "pressed twice, it loads once");
+            // Whatever goes wrong in the hold, the game starts.
+            StringAssert.Contains("} catch (error) {\n        hold = false;\n      }\n      if (!hold) start();", page);
+
+            // The bot needs nobody's input: an address that asks for it is not held. The page's own test of
+            // the address agrees with the game's (LaunchOptions).
+            System.Text.RegularExpressions.Match own = System.Text.RegularExpressions.Regex.Match(page, @"!/(\[\?&\]autoplay[^/]+)/i\.test\(window\.location\.search\)");
+            Assert.IsTrue(own.Success, "the page looks for autoplay in its address");
+            var autoplay = new System.Text.RegularExpressions.Regex(own.Groups[1].Value, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            foreach (string query in new[]
+            {
+                "", "?level=3", "?autoplay=1", "?autoplay", "?level=3&autoplay=1", "?autoplay=1&level=3", "?autoplay&level=cheese-wedge", "?AUTOPLAY=TRUE",
+                "?autoplay=yes", "?autoplay=on", "?autoplay=0", "?autoplay=false", "?level=3&autoplay=0&plain=1", "?noautoplay=1", "?debug=1", "?autoplayer=1",
+            })
+                Assert.AreEqual(LaunchOptions.FromUrl("https://example.org/" + query).Autoplay, autoplay.IsMatch(query), "\"" + query + "\"");
+
+            // A start that fails: the loader's words, what to try, and a page that no longer looks busy.
+            StringAssert.Contains("}).catch(fail);", page);
+            StringAssert.Contains("loader.classList.add(\"failed\");", page);
+            StringAssert.Contains("\"Could not start: \" + text + \" Try a current Chrome, Edge or Firefox on a computer.\"", page);
+            StringAssert.Contains("#loader.held #mark, #loader.failed #mark { animation: none; }", page);
+            StringAssert.Contains("#loader.held #bar, #loader.failed #bar { display: none; }", page);
+            StringAssert.IsMatch(@"#note \{[^}]*max-width: 32em;[^}]*text-align: center;", page);
+
+            // The tab's icon is drawn in the page (nothing to fetch, nothing to miss), in Ink.
+            StringAssert.IsMatch("<link rel=\"icon\" href=\"data:image/svg\\+xml,[^\"]*%232B2140[^\"]*\">", page);
+            // A shared link: title, words, address and a picture that is in the folder Unity copies into the build.
+            foreach (string property in new[] { "og:type", "og:title", "og:description", "og:url", "og:image" })
+                StringAssert.Contains("<meta property=\"" + property + "\" content=\"", page);
+            StringAssert.Contains("<meta name=\"twitter:card\" content=\"summary_large_image\">", page);
+            System.Text.RegularExpressions.Match image = System.Text.RegularExpressions.Regex.Match(page, "property=\"og:image\" content=\"https://[^\"]+/([^/\"]+)\"");
+            Assert.IsTrue(image.Success, "the picture has an absolute address");
+            Assert.IsTrue(File.Exists(Path.Combine(folder, image.Groups[1].Value)), image.Groups[1].Value + " is beside the page");
+
+            // What Unity's template step needs left alone: its macros are the only triple braces, its
+            // conditions stand at the start of their lines, and no other line of the script begins with #.
+            string plain = System.Text.RegularExpressions.Regex.Replace(page, @"\{\{\{.*?\}\}\}", "");
+            StringAssert.DoesNotContain("{{{", plain);
+            StringAssert.DoesNotContain("}}}", plain);
+            int script = page.LastIndexOf("<script>", StringComparison.Ordinal);
+            int conditions = 0;
+            foreach (string line in page.Substring(script).Split('\n'))
+            {
+                if (!line.TrimStart().StartsWith("#", StringComparison.Ordinal)) continue;
+                Assert.IsTrue(line.StartsWith("#if ", StringComparison.Ordinal) || line == "#endif", "a line of the script begins with #: " + line);
+                conditions++;
+            }
+            Assert.AreEqual(4, conditions, "#if USE_WASM and #if SYMBOLS_FILENAME, each with its #endif");
         }
     }
 }

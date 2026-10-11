@@ -240,9 +240,24 @@ namespace Toybox.Tests
             // The third hint is the whole solution, in the order it is done, and does not send anybody jumping
             // off the platform (a jump goes over the train).
             string third = level.Hints[2].ToLowerInvariant();
-            foreach (string step in new[] { "pick the plank up", "platform edge", "foot of the lighthouse door", "wagons", "let go", "step down", "running jump", "walk in" })
+            foreach (string step in new[] { "pick the plank up", "platform edge", "foot of the lighthouse door", "wagons", "let go", "step down", "by its end", "face the lighthouse", "jump on", "walk in" })
                 StringAssert.Contains(step, third);
             StringAssert.DoesNotContain("hop on", third);
+            // Nothing in the level's words asks for a run (the final review): the sprint key is called "run",
+            // and with it a jump that has any run-up goes over the plank. What works at any speed is the
+            // plank's end, facing the lighthouse - the hint and the line after a failed hop both say so, and
+            // neither says "walk into it and jump", which from behind is the hop that just failed.
+            foreach (string text in texts)
+            {
+                string lower = " " + text.ToLowerInvariant();
+                Assert.IsFalse(lower.Contains(" run") || lower.Contains("sprint"), "\"" + text + "\" asks for a run");
+                StringAssert.DoesNotContain("walk into", lower);
+            }
+            StringAssert.Contains("its end", Level09MovingTrain.HopLine);
+            StringAssert.Contains("facing the lighthouse", Level09MovingTrain.HopLine);
+            Assert.LessOrEqual(Level09MovingTrain.HopLine.Length, 110, "a toast of three lines");
+            Assert.Less(third.IndexOf("step down"), third.IndexOf("by its end"));
+            Assert.Less(third.IndexOf("face the lighthouse"), third.IndexOf("jump on"));
             Assert.Less(third.IndexOf("platform edge"), third.IndexOf("let go"));
             Assert.Less(third.IndexOf("let go"), third.IndexOf("step down"));
             // Short enough for the hint card (it shrinks its type to fit): the third hints of Levels 1 to 7 run
@@ -1083,6 +1098,50 @@ namespace Toybox.Tests
             Assert.IsTrue(level.Carrier.IsCarrying(level.Plank), "the pier rides on: it can be picked up from the platform as it passes");
         }
 
+        // ---- The draws -------------------------------------------------------------------------------------
+
+        // ART_BIBLE 12.1: level statics are merged per material. The level drew 47 statics for 13 materials
+        // (every block, book cover, door and shoe print a renderer of its own, 28 of them shadow casters).
+        // Thirteen materials are thirteen draws; the train is the gadget's and is not counted.
+        [Test]
+        public void WhatIsOnlyDrawn_IsMergedPerMaterial()
+        {
+            Load();
+            int draws = 0, casters = 0;
+            var names = new List<string>();
+            var materials = new List<Material>();
+            foreach (MeshRenderer renderer in Game.LevelRoot.GetComponentsInChildren<MeshRenderer>())
+            {
+                if (renderer.GetComponentInParent<PropRef>() != null || renderer.GetComponentInParent<Rigidbody>() != null) continue;
+                draws += renderer.sharedMaterials.Length;
+                if (renderer.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.Off) casters++;
+                names.Add(renderer.transform.parent.name + "/" + renderer.sharedMaterial.name);
+                materials.Add(renderer.sharedMaterial);
+            }
+            Debug.Log("[Level09] statics: " + draws + " draws, " + casters + " casters: " + string.Join(", ", names));
+            Assert.LessOrEqual(draws, 14, string.Join(", ", names));
+            Assert.LessOrEqual(casters, 8, string.Join(", ", names));
+            CollectionAssert.AllItemsAreUnique(materials, "every material once: nothing is drawn piece by piece (" + string.Join(", ", names) + ")");
+
+            foreach (string name in new[] { "Set", "Paint" })
+            {
+                Transform set = Game.LevelRoot.Find(name);
+                Assert.IsNotNull(set, name);
+                Assert.AreEqual(0, set.GetComponentsInChildren<Collider>(true).Length, name + " is looks only");
+                foreach (MeshRenderer renderer in set.GetComponentsInChildren<MeshRenderer>(true))
+                    Assert.AreEqual(name == "Set", renderer.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.Off, name + "/" + renderer.sharedMaterial.name);
+            }
+            // The outline is still the level's own, where it was: on the lighthouse wall at the foot of the door.
+            Assert.IsNotNull(level.Outline);
+            Assert.AreEqual(Level09MovingTrain.OutlineY, level.Outline.bounds.center.y, 0.05f);
+            Assert.AreEqual(Level09MovingTrain.Axis.x, level.Outline.bounds.center.x, 0.05f);
+            // And the lighthouse stands as tall as it did: its lamp and roof above the sky cap.
+            Bounds drawn = new Bounds(Level09MovingTrain.Axis, Vector3.zero);
+            foreach (MeshRenderer renderer in Game.LevelRoot.Find("Set").GetComponentsInChildren<MeshRenderer>()) drawn.Encapsulate(renderer.bounds);
+            Assert.Greater(drawn.max.y, Level09MovingTrain.WallTop + 4f, "the roof");
+            Assert.Less(drawn.min.y, Level09MovingTrain.ShelfY + 0.5f, "down to the shelf");
+        }
+
         // ---- Getting onto the train ---------------------------------------------------------------------------
 
         // From the platform toward (0, 0, 12) at a walk or a run, with a jump at a line (99: none), timed so
@@ -1160,6 +1219,60 @@ namespace Toybox.Tests
             Assert.AreEqual(1, respawns);
             TestHelpers.RunSeconds(Game, 1f);
             Assert.IsEmpty(said);
+        }
+
+        // The other natural first try (the final review): a jump at a walk from a little back from the edge.
+        // It comes down on the far rim of the wagon's deck, the feet's middle past the edge (r 12.95), slides
+        // off and falls - and was told nothing, because the feet had touched something. Whatever the jump is
+        // taken from, between a quarter and nothing from the edge: a fall with a train there is never silent.
+        [Test]
+        public void AJumpAtTheTrain_ThatComesDownOnItsFarRimAndSlidesOff_IsSaidToo()
+        {
+            int clipped = 0;
+            var table = new List<string>();
+            foreach (float jumpAt in new[] { 2.85f, 2.95f, 3f, 3.05f, 3.1f, 3.15f, 3.2f, 3.25f })
+            {
+                Game?.Dispose();
+                Load();
+                List<string> said = Listen();
+                int respawns = 0, touched = 0;
+                bool jumped = false;
+                float rim = 0f;
+                Game.Events.PlayerRespawned += e => respawns++;
+                Game.Events.PlayerJumped += e => jumped = true;
+                Game.Events.PlayerLanded += e =>
+                {
+                    if (!jumped || respawns > 0) return;
+                    touched++;
+                    rim = Level09MovingTrain.RadiusOf(Game.Player.Position);
+                };
+                BotRunner.Run(Game, AtTheTrain(false, jumpAt), 60f);
+                // Somebody who jumped at the lighthouse and feels the deck's edge under their heels keeps
+                // the key down a moment longer (a fifth of a second), as they did all through the jump.
+                if (respawns == 0 && touched > 0 && rim < Level09MovingTrain.DeckInner + Level09MovingTrain.RimStrip)
+                {
+                    Input = new ScriptedInput();
+                    Game.Input = Input;
+                    TestHelpers.LookAt(Game.Player, new Vector3(Level09MovingTrain.Axis.x, Game.Player.Eye.y, Level09MovingTrain.Axis.z));
+                    Input.Hold.MoveZ = 1f;
+                    TestHelpers.RunSeconds(Game, 0.2f);
+                    Input.Hold.MoveZ = 0f;
+                }
+                TestHelpers.RunSeconds(Game, 2.5f);
+                string what = "jump at z " + jumpAt.ToString("0.00") + ": ";
+                if (respawns == 0)
+                {
+                    Assert.IsEmpty(said, what + "landed on the train and was told off");
+                    table.Add(what + "landed at r " + rim.ToString("0.00"));
+                    continue;
+                }
+                Assert.AreEqual(1, respawns, what + "one fall");
+                CollectionAssert.AreEqual(new[] { Level09MovingTrain.LeapLine }, said, what + (touched > 0 ? "came down on the rim at r " + rim.ToString("0.00") + ", slid off" : "went clean over") + " and fell");
+                if (touched > 0) clipped++;
+                table.Add(what + (touched > 0 ? "rim at r " + rim.ToString("0.00") + ", slid off, said" : "clean over, said"));
+            }
+            Debug.Log("[Level09] leaps at a walk:\n" + string.Join("\n", table));
+            Assert.Greater(clipped, 0, "none of the jumps came down on the rim: the case this test is for\n" + string.Join("\n", table));
         }
 
         // The hop line was said on the hop, also when it worked: with sprint held a hop from a standstill does

@@ -2838,7 +2838,9 @@ namespace Toybox.Tests
                 }
                 else if (place == Level14InfiniteHallway.Place.HallA)
                 {
-                    Runs(RecallHere(bot, level, level.RecallA, new Vector3(1.5f, 0f, 6f)), 40f);
+                    // (A walk to the plate that got nowhere: the bot stands where a jump took it and no walk
+                    // leads out - in the corner behind the spool, say. Out as a player gets out: walking and jumping.)
+                    if (!Runs(RecallHere(bot, level, level.RecallA, new Vector3(1.5f, 0f, 6f)), 40f)) Runs(MashAt(bot, new Vector3(0f, 0f, 7f), 6f, false), 10f);
                     if (size > Level14InfiniteHallway.MouseLimit)
                     {
                         how.Append("shrink ");
@@ -2852,7 +2854,7 @@ namespace Toybox.Tests
                 }
                 else
                 {
-                    Runs(RecallHere(bot, level, level.RecallB, new Vector3(1.5f, 0f, 20f)), 40f);
+                    if (!Runs(RecallHere(bot, level, level.RecallB, new Vector3(1.5f, 0f, 20f)), 40f)) Runs(MashAt(bot, new Vector3(0f, 0f, 20f), 6f, false), 10f);
                     if (size >= Level14InfiniteHallway.LedgeLimit)
                     {
                         how.Append("climb ");

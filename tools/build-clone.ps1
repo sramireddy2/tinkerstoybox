@@ -10,10 +10,14 @@
   .\tools\build-clone.ps1                 # sync + build
   .\tools\build-clone.ps1 -Deploy         # sync + build + publish to gh-pages
   .\tools\build-clone.ps1 -Committed      # build what is committed (HEAD), leaving work in progress out
+  .\tools\build-clone.ps1 -Committed -Opt RuntimeSpeed    # the release build
   .\tools\build-clone.ps1 -SeedLibrary    # first run only: copy the main Library (stop the batch server first)
+
+  -Opt is BuildTimes (quick to make, slower to run) unless -Deploy is given: what gets published is
+  built with RuntimeSpeed unless you say otherwise.
 #>
 param(
-    [string]$Opt = 'BuildTimes',
+    [string]$Opt = '',
     [switch]$Dev,
     [switch]$Deploy,
     [switch]$SeedLibrary,
@@ -23,6 +27,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $Opt) { $Opt = if ($Deploy) { 'RuntimeSpeed' } else { 'BuildTimes' } }
 $root = Split-Path -Parent $PSScriptRoot
 $cache = $env:TOYBOX_CACHE
 if (-not $cache) { $cache = Join-Path $env:USERPROFILE '.cache\tinkerstoybox' }

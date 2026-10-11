@@ -422,22 +422,22 @@ namespace Toybox.Tests
             Assert.AreSame(TexCache.Get(DetailTexture.Peel, QualityTier.High), TexCache.For(ToyRecipe.GlossyPlastic, QualityTier.High));
             Assert.AreSame(TexCache.Get(DetailTexture.Fibre, QualityTier.Medium), TexCache.For(ToyRecipe.Felt, QualityTier.Medium));
 
-            // The budget: nine textures under 3 MB.
-            int guard = 0;
-            while (TexCache.WarmNext(QualityTier.High)) Assert.Less(guard++, 20);
-            Assert.AreEqual(9, TexCache.Count);
-            Assert.Less(TexCache.Bytes, 3L * 1024 * 1024);
-            Assert.IsFalse(TexCache.WarmNext(QualityTier.High), "nothing left to make");
-
-            // The loading screen makes at most one per call (here: the half-size set, which does not exist on High).
-            int made = 0;
-            while (TexCache.WarmNext(QualityTier.Low))
+            // The budget: nine textures, and the half-size twins of seven of them (all but Neutral; the peel
+            // is High only), under 4 MB. A full-size texture brings its twin with it, so that a step down to
+            // Low - which the governor takes when the machine is too slow already - generates nothing.
+            int guard = 0, counted = TexCache.Count;
+            while (TexCache.WarmNext(QualityTier.High))
             {
-                made++;
-                Assert.AreEqual(9 + made, TexCache.Count, "one texture per call");
-                Assert.Less(guard++, 40);
+                Assert.LessOrEqual(TexCache.Count - counted, 2, "the loading screen makes one kind per call: the texture and its twin");
+                counted = TexCache.Count;
+                Assert.Less(guard++, 20);
             }
-            Assert.AreEqual(7, made, "seven kinds have a half-size version: all but Neutral, and the peel is High only");
+            Assert.AreEqual(9 + 7, TexCache.Count);
+            Assert.Less(TexCache.Bytes, 4L * 1024 * 1024);
+            Assert.IsFalse(TexCache.WarmNext(QualityTier.High), "nothing left to make");
+            Assert.IsFalse(TexCache.WarmNext(QualityTier.Low), "nor for Low");
+            Assert.AreEqual(128, TexCache.Get(DetailTexture.Brush, QualityTier.Low).width);
+            // (Whoever wants the memory back can still have it.)
             TexCache.Trim(QualityTier.High);
             Assert.AreEqual(9, TexCache.Count);
 
@@ -447,21 +447,33 @@ namespace Toybox.Tests
             Assert.IsTrue(wood.GetTexture("_DetailMap") != null, "what is in use is made again at once");
             Assert.AreSame(TexCache.Get(DetailTexture.Brush), wood.GetTexture("_DetailMap"));
             while (TexCache.WarmNext(QualityTier.High)) Assert.Less(guard++, 60);
-            Assert.AreEqual(9, TexCache.Count);
+            Assert.AreEqual(16, TexCache.Count);
 
-            // A tier change never leaves textures of the other size behind.
+            // A tier change destroys nothing and generates nothing: it used to remake the whole set of the
+            // other size in one frame (50 to 350 ms), in the very frame the governor had found the machine
+            // too slow, and to destroy the set it came from, so that the way back cost the same again.
+            int all = TexCache.Count;
+            double spent = TexCache.GenerationMilliseconds;
             Materials.Tier = QualityTier.Medium;
-            Assert.AreEqual(8, TexCache.Count, "below High the peel is not kept");
             Materials.Tier = QualityTier.Low;
-            while (TexCache.WarmNext(QualityTier.Low)) Assert.Less(guard++, 80);
-            Assert.AreEqual(8, TexCache.Count, "on Low only the half-size ones exist (Neutral is the same on every tier)");
-            Assert.Less(TexCache.Bytes, 1024 * 1024);
+            Assert.AreSame(TexCache.Get(DetailTexture.Brush, QualityTier.Low), wood.GetTexture("_DetailMap"), "the materials follow");
             Texture2D low = TexCache.Get(DetailTexture.Brush, QualityTier.Low);
             Assert.AreEqual(128, low.width);
             Assert.AreEqual(1, low.anisoLevel);
+            Assert.IsFalse(TexCache.WarmNext(QualityTier.Low));
+            Materials.Tier = QualityTier.High;
             Materials.Tier = QualityTier.Medium;
-            while (TexCache.WarmNext(QualityTier.Medium)) Assert.Less(guard++, 100);
-            Assert.AreEqual(8, TexCache.Count);
+            Assert.AreEqual(256, wood.GetTexture("_DetailMap").width);
+            Assert.AreEqual(all, TexCache.Count, "nothing was destroyed, nothing made");
+            Assert.AreEqual(spent, TexCache.GenerationMilliseconds, "and no time went into generating");
+
+            // A session that starts on Low (and stays there) only ever makes the half-size set.
+            Materials.Tier = QualityTier.Low;
+            TexCache.Clear();
+            while (TexCache.WarmNext(QualityTier.Low)) Assert.Less(guard++, 100);
+            Assert.AreEqual(8, TexCache.Count, "seven half-size textures and Neutral, which is the same on every tier");
+            Assert.Less(TexCache.Bytes, 1024 * 1024);
+            Materials.Tier = QualityTier.Medium;
 
             // Generation, measured: all nine pictures at full size.
             var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -578,7 +590,13 @@ namespace Toybox.Tests
             Materials.Tier = QualityTier.High;
             Assert.AreEqual(256, wood.GetTexture("_DetailMap").width);
             Assert.AreSame(TexCache.Get(DetailTexture.Peel, QualityTier.High), plastic.GetTexture("_DetailMap"), "and the orange peel on High");
-            Assert.LessOrEqual(TexCache.Count, 9, "switching tiers leaves no texture of the other size behind");
+            // Once round the tiers everything exists: a second round generates nothing.
+            double generated = TexCache.GenerationMilliseconds;
+            Materials.Tier = QualityTier.Low;
+            Materials.Tier = QualityTier.Medium;
+            Materials.Tier = QualityTier.High;
+            Assert.AreEqual(generated, TexCache.GenerationMilliseconds, "a change of tier makes no texture again");
+            Assert.LessOrEqual(TexCache.Count, 16);
             Materials.Tier = QualityTier.Medium;
             Assert.AreEqual(256, wood.GetTexture("_DetailMap").width);
             Assert.AreEqual(4, plastic.GetTexture("_DetailMap").width);

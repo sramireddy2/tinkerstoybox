@@ -178,16 +178,21 @@ namespace Toybox.Levels
             }));
             paint = Materials.Room(RoomRecipe.Solid(Palette.Paper));
 
-            BuildWalkway(ctx, board);
-            BuildSilo(ctx, staves);
-            BuildTunnel(ctx, board);
-            BuildPad(ctx);
+            // What is only drawn is merged per material (ART_BIBLE 12.1; the level drew 40 statics for 9
+            // materials): the walkway, the walls, the silo, the tunnel and what lies about on the bench are
+            // one set. The colliders stay where they are. Left as they were: the pad (it comes up under the
+            // seated thimble), and the paint that is lit - the band round the hole, the outline, the tapes.
+            var set = new Level01Set();
+            BuildWalkway(ctx, set, board);
+            BuildSilo(ctx, set, staves);
+            BuildTunnel(ctx, set, board);
+            BuildPad(ctx, set);
             BuildPaint(ctx);
-            BuildDressing(ctx);
+            BuildDressing(ctx, set);
             SkyCap.Add(ctx, -HalfWidth - WallThickness, HalfWidth + WallThickness, NearZ - WallThickness, TunnelEnd + WallThickness, WallTop);
 
             // The thimble on its spool.
-            ctx.AddStatic(ToyFactory.ThreadSpool(SpoolRadius, SpoolHeight, grabbable: false), SpoolBase + Vector3.up * (SpoolHeight * 0.5f));
+            Piece(ctx, set, ToyFactory.ThreadSpool(SpoolRadius, SpoolHeight, grabbable: false), SpoolBase + Vector3.up * (SpoolHeight * 0.5f), Quaternion.identity);
             ToyDef def = ToyCatalog.Get(ToyId.Thimble);
             thimble = ToyCatalog.Add(ctx, ToyId.Thimble, SpoolBase + Vector3.up * (SpoolHeight + def.RestHeight * StartScale + 0.005f), StartScale, options: o =>
             {
@@ -228,7 +233,8 @@ namespace Toybox.Levels
                 Name = "Outline", Target = well, Near = over, Tag = PlugTag,
                 Lamp = GaugeLamp, LampRadius = GaugeLampRadius,
             });
-            BuildLampMount(ctx);
+            BuildLampMount(ctx, set);
+            set.Finish(ctx, "Set");
             gauge.Changed += Tint;
             ctx.OnUpdate(dt => Pulse(ctx.Time));
 
@@ -295,7 +301,7 @@ namespace Toybox.Levels
         // ---- Geometry --------------------------------------------------------------------------------------
 
         // The walkway: x -7..7, z -10..23 without the disc of the hole, 0.6 thick, between walls 18 high.
-        void BuildWalkway(LevelContext ctx, Material board)
+        void BuildWalkway(LevelContext ctx, Level01Set set, Material board)
         {
             var root = new GameObject("Walkway");
             Mesh mesh = MeshKit.Cached("Level02|Walkway", () =>
@@ -313,7 +319,7 @@ namespace Toybox.Levels
                 MeshKit.Release(flat);
                 return laid;
             });
-            Visual(root, "Visual", mesh, board);
+            set.Shape(board, mesh, Vector3.zero, Quaternion.identity);
 
             // Colliders: a box up to where the hole begins, then columns between the hole and the walls.
             float edge = AxisZ - SiloRadius;
@@ -343,9 +349,16 @@ namespace Toybox.Levels
             float height = WallTop - WellFloor, middle = (WallTop + WellFloor) * 0.5f;
             float length = AxisZ - NearZ + WallThickness;
             for (int side = -1; side <= 1; side += 2)
-                ctx.AddStatic(BasicToys.Slab(new Vector3(WallThickness, height, length), board),
-                    new Vector3(side * (HalfWidth + WallThickness * 0.5f), middle, AxisZ - length * 0.5f));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(HalfWidth * 2f, height, WallThickness), board), new Vector3(0f, middle, NearZ - WallThickness * 0.5f));
+                Piece(ctx, set, BasicToys.Slab(new Vector3(WallThickness, height, length), board),
+                    new Vector3(side * (HalfWidth + WallThickness * 0.5f), middle, AxisZ - length * 0.5f), Quaternion.identity);
+            Piece(ctx, set, BasicToys.Slab(new Vector3(HalfWidth * 2f, height, WallThickness), board), new Vector3(0f, middle, NearZ - WallThickness * 0.5f), Quaternion.identity);
+        }
+
+        // A set piece: its colliders stand in the level, its looks join the set.
+        static void Piece(LevelContext ctx, Level01Set set, GameObject piece, Vector3 centre, Quaternion rotation)
+        {
+            ctx.AddStatic(piece, centre, rotation);
+            set.Absorb(piece);
         }
 
         // A point of the hole's rim on the near side: step 0 is the near point (0, 16), step 12 where the rim meets a wall.
@@ -358,16 +371,17 @@ namespace Toybox.Levels
         // The silo: a round wall of radius 7 from the bench up to 18. Beyond the hole's axis it stands on
         // the walkway's level and above; on the near side it is only the wall of the well under the floor.
         // The door is in its far point.
-        void BuildSilo(LevelContext ctx, Material staves)
+        void BuildSilo(LevelContext ctx, Level01Set set, Material staves)
         {
             var root = new GameObject("Silo");
+            var foot = new Vector3(0f, 0f, AxisZ);
             float outer = SiloRadius + WallThickness;
             float door = Mathf.Asin(DoorHalfWidth / SiloRadius) * Mathf.Rad2Deg;
-            Visual(root, "Wall Right", MeshKit.Cached("Level02|Silo|Right", () => Level02Shapes.Ring(SiloRadius, outer, WellFloor, WallTop, 0f, 90f - door, 22)), staves);
-            Visual(root, "Wall Left", MeshKit.Cached("Level02|Silo|Left", () => Level02Shapes.Ring(SiloRadius, outer, WellFloor, WallTop, 90f + door, 180f, 22)), staves);
-            Visual(root, "Lintel", MeshKit.Cached("Level02|Silo|Lintel", () => Level02Shapes.Ring(SiloRadius, outer, DoorHeight, WallTop, 90f - door, 90f + door, 4)), staves);
-            Visual(root, "Sill", MeshKit.Cached("Level02|Silo|Sill", () => Level02Shapes.Ring(SiloRadius, outer, WellFloor, -0.02f, 90f - door, 90f + door, 4)), staves);
-            Visual(root, "Liner", MeshKit.Cached("Level02|Silo|Liner", () => Level02Shapes.Ring(SiloRadius, outer, WellFloor, -FloorThickness, 180f, 360f, 48)), staves);
+            set.Shape(staves, MeshKit.Cached("Level02|Silo|Right", () => Level02Shapes.Ring(SiloRadius, outer, WellFloor, WallTop, 0f, 90f - door, 22)), foot, Quaternion.identity);
+            set.Shape(staves, MeshKit.Cached("Level02|Silo|Left", () => Level02Shapes.Ring(SiloRadius, outer, WellFloor, WallTop, 90f + door, 180f, 22)), foot, Quaternion.identity);
+            set.Shape(staves, MeshKit.Cached("Level02|Silo|Lintel", () => Level02Shapes.Ring(SiloRadius, outer, DoorHeight, WallTop, 90f - door, 90f + door, 4)), foot, Quaternion.identity);
+            set.Shape(staves, MeshKit.Cached("Level02|Silo|Sill", () => Level02Shapes.Ring(SiloRadius, outer, WellFloor, -0.02f, 90f - door, 90f + door, 4)), foot, Quaternion.identity);
+            set.Shape(staves, MeshKit.Cached("Level02|Silo|Liner", () => Level02Shapes.Ring(SiloRadius, outer, WellFloor, -FloorThickness, 180f, 360f, 48)), foot, Quaternion.identity);
 
             // Colliders: one box per 7.5 degrees, its inner face tangent to the round wall (so nothing is
             // nearer the axis than 7). The three over the door leave the opening free.
@@ -388,7 +402,7 @@ namespace Toybox.Levels
                 else
                     Wall(root, at, turn, length, WellFloor, WallTop);
             }
-            ctx.AddStatic(root, new Vector3(0f, 0f, AxisZ));
+            ctx.AddStatic(root, foot);
         }
 
         static void Wall(GameObject root, Vector3 at, Quaternion turn, float length, float y0, float y1)
@@ -401,28 +415,28 @@ namespace Toybox.Levels
         }
 
         // The way out: a tunnel from the door in the silo's far point, x -1..1, y 0..2.6, z 30..36.
-        void BuildTunnel(LevelContext ctx, Material board)
+        void BuildTunnel(LevelContext ctx, Level01Set set, Material board)
         {
             float far = AxisZ + SiloRadius;
             float mouth = AxisZ + Mathf.Sqrt(SiloRadius * SiloRadius - DoorHalfWidth * DoorHalfWidth);   // 29.93: the wall at the door's edges
             float outside = DoorHalfWidth + WallThickness, roof = DoorHeight + 1f;
             // Floor, two walls, a ceiling a hair under the lintel (no two faces in one plane), the end wall.
             // (The floor begins behind the round wall's inner face, so that the stripes of the well's lip run on under the door.)
-            Slab(ctx, board, -outside, outside, -FloorThickness, 0f, far, TunnelEnd);
+            Slab(ctx, set, board, -outside, outside, -FloorThickness, 0f, far, TunnelEnd);
             for (int side = -1; side <= 1; side += 2)
-                Slab(ctx, board, side > 0 ? DoorHalfWidth : -outside, side > 0 ? outside : -DoorHalfWidth, 0f, DoorHeight - 0.02f, mouth + 0.02f, TunnelEnd);
-            Slab(ctx, board, -outside, outside, DoorHeight - 0.02f, roof, far + 0.5f, TunnelEnd);
-            Slab(ctx, board, -outside, outside, -FloorThickness, roof, TunnelEnd, TunnelEnd + WallThickness);
+                Slab(ctx, set, board, side > 0 ? DoorHalfWidth : -outside, side > 0 ? outside : -DoorHalfWidth, 0f, DoorHeight - 0.02f, mouth + 0.02f, TunnelEnd);
+            Slab(ctx, set, board, -outside, outside, DoorHeight - 0.02f, roof, far + 0.5f, TunnelEnd);
+            Slab(ctx, set, board, -outside, outside, -FloorThickness, roof, TunnelEnd, TunnelEnd + WallThickness);
             // What it stands on, outside the silo.
-            Slab(ctx, board, -outside, outside, WellFloor, -FloorThickness, far + 0.8f, TunnelEnd + WallThickness);
+            Slab(ctx, set, board, -outside, outside, WellFloor, -FloorThickness, far + 0.8f, TunnelEnd + WallThickness);
         }
 
-        static void Slab(LevelContext ctx, Material material, float x0, float x1, float y0, float y1, float z0, float z1) =>
-            ctx.AddStatic(BasicToys.Slab(new Vector3(x1 - x0, y1 - y0, z1 - z0), material), new Vector3((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, (z0 + z1) * 0.5f));
+        static void Slab(LevelContext ctx, Level01Set set, Material material, float x0, float x1, float y0, float y1, float z0, float z1) =>
+            Piece(ctx, set, BasicToys.Slab(new Vector3(x1 - x0, y1 - y0, z1 - z0), material), new Vector3((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, (z0 + z1) * 0.5f), Quaternion.identity);
 
         // The floor of the well: a pad in hazard stripes. Falling onto it sends the player back to the
         // start, and a thimble that comes to rest on it back to the spool.
-        void BuildPad(LevelContext ctx)
+        void BuildPad(LevelContext ctx, Level01Set set)
         {
             pad = new GameObject("Spring Pad") { layer = Layers.Default };
             var box = pad.AddComponent<BoxCollider>();
@@ -435,11 +449,10 @@ namespace Toybox.Levels
 
             // The same stripes run round the lip of the well, just under the walkway: from the start the
             // far side of them is all that shows of the hole, and it says what the hole is.
-            var lip = new GameObject("Well Lip");
             float inside = SiloRadius - 0.04f;
-            Visual(lip, "Ink", MeshKit.Cached(MeshKit.Key("Level02|Lip", inside, stripe, 0f), () => Level02Shapes.StripedBand(inside, LipBottom, LipTop, stripe, false)), GadgetKit.Body);
-            Visual(lip, "Hazard", MeshKit.Cached(MeshKit.Key("Level02|Lip", inside, stripe, 1f), () => Level02Shapes.StripedBand(inside, LipBottom, LipTop, stripe, true)), Materials.Gadget(Palette.Hazard));
-            ctx.AddStatic(lip, new Vector3(0f, 0f, AxisZ));
+            var lipAt = new Vector3(0f, 0f, AxisZ);
+            set.Shape(GadgetKit.Body, MeshKit.Cached(MeshKit.Key("Level02|Lip", inside, stripe, 0f), () => Level02Shapes.StripedBand(inside, LipBottom, LipTop, stripe, false)), lipAt, Quaternion.identity);
+            set.Shape(Materials.Gadget(Palette.Hazard), MeshKit.Cached(MeshKit.Key("Level02|Lip", inside, stripe, 1f), () => Level02Shapes.StripedBand(inside, LipBottom, LipTop, stripe, true)), lipAt, Quaternion.identity);
 
             // What closes the hole once the thimble is seated: the floor under the grommet.
             plugFloor = new GameObject("Plug Floor") { layer = Layers.Default };
@@ -507,7 +520,7 @@ namespace Toybox.Levels
 
         // The bracket the gauge's lamp sits on (the gauge makes the lamp itself), and the lamp that takes
         // its place once the hole is plugged: green and steady. Lamp and bracket stop a held thimble.
-        void BuildLampMount(LevelContext ctx)
+        void BuildLampMount(LevelContext ctx, Level01Set set)
         {
             var mount = new GameObject("Gauge Mount") { layer = Layers.Default };
             float wall = AxisZ + SiloRadius, reach = wall - GaugeLamp.z;
@@ -517,6 +530,7 @@ namespace Toybox.Levels
             GadgetKit.Visual(mount.transform, "Arm", GadgetKit.BoxMesh(new Vector3(0.3f, 0.3f, reach)), GadgetKit.Body, new Vector3(0f, 0f, reach * 0.5f + 0.02f));
             GadgetKit.Visual(mount.transform, "Plate", GadgetKit.RoundedBoxMesh(new Vector3(1f, 1f, 0.12f), 0.04f), GadgetKit.Body, new Vector3(0f, 0f, reach - 0.03f));
             ctx.AddStatic(mount, GaugeLamp);
+            set.Absorb(mount);
 
             pluggedLamp = new GameObject("Plugged Lamp");
             Mesh sphere = MeshKit.Cached(MeshKit.Key("GadgetLamp", GaugeLampRadius), () => MeshKit.Sphere(GaugeLampRadius, 12, 8));
@@ -527,15 +541,15 @@ namespace Toybox.Levels
 
         // Things that make it a place on a workbench. All of it is behind the spawn or flat against a
         // wall, out of the way of a thimble held toward the silo.
-        void BuildDressing(LevelContext ctx)
+        void BuildDressing(LevelContext ctx, Level01Set set)
         {
             // A ruler along the left wall: something to pace the steps back against.
-            ctx.AddStatic(ToyFactory.Ruler(new Vector3(1.2f, 0.08f, 15f), grabbable: false), new Vector3(-6.1f, 0.04f, 6.5f));
+            Piece(ctx, set, ToyFactory.Ruler(new Vector3(1.2f, 0.08f, 15f), grabbable: false), new Vector3(-6.1f, 0.04f, 6.5f), Quaternion.identity);
             // Building blocks and a marker left in the corners behind the start.
-            ctx.AddStatic(ToyFactory.WoodenBlock(new Vector3(1.8f, 0.9f, 0.9f), grabbable: false), new Vector3(-5.6f, 0.45f, -9.2f), Quaternion.Euler(0f, 6f, 0f));
-            ctx.AddStatic(ToyFactory.WoodenBlock(new Vector3(0.9f, 0.9f, 0.9f), grabbable: false), new Vector3(-5.9f, 1.35f, -9.2f), Quaternion.Euler(0f, -14f, 0f));
-            ctx.AddStatic(ToyFactory.WoodenBlock(new Vector3(1.1f, 1.1f, 1.1f), grabbable: false), new Vector3(-3.9f, 0.55f, -8.9f), Quaternion.Euler(0f, 31f, 0f));
-            ctx.AddStatic(ToyFactory.Marker(0.4f, 3.4f), new Vector3(5.2f, 0.4f, -9.1f), Quaternion.Euler(0f, 97f, 0f));
+            Piece(ctx, set, ToyFactory.WoodenBlock(new Vector3(1.8f, 0.9f, 0.9f), grabbable: false), new Vector3(-5.6f, 0.45f, -9.2f), Quaternion.Euler(0f, 6f, 0f));
+            Piece(ctx, set, ToyFactory.WoodenBlock(new Vector3(0.9f, 0.9f, 0.9f), grabbable: false), new Vector3(-5.9f, 1.35f, -9.2f), Quaternion.Euler(0f, -14f, 0f));
+            Piece(ctx, set, ToyFactory.WoodenBlock(new Vector3(1.1f, 1.1f, 1.1f), grabbable: false), new Vector3(-3.9f, 0.55f, -8.9f), Quaternion.Euler(0f, 31f, 0f));
+            Piece(ctx, set, ToyFactory.Marker(0.4f, 3.4f), new Vector3(5.2f, 0.4f, -9.1f), Quaternion.Euler(0f, 97f, 0f));
         }
 
         // ---- What the gadgets do to the place ---------------------------------------------------------------

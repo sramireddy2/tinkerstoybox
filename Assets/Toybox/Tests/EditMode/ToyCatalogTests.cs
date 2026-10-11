@@ -89,6 +89,123 @@ namespace Toybox.Tests
             Debug.Log(table.ToString());
         }
 
+        // The owner's brief for Level 9: "a wooden plank". It was a flat slab of Lemon with four dark dots,
+        // and read as yellow plastic. It is painted wood now - grain through the paint, bare wood on the
+        // sawn ends - and nothing but its looks has changed: the levels are measured against its box.
+        [Test]
+        public void ThePlank_IsPaintedWood_GrainThroughThePaint_BareWoodOnItsEnds_AndItsBoxIsUntouched()
+        {
+            ToyDef def = ToyCatalog.Get(ToyId.Plank);
+            GameObject toy = Make(def);
+            Vector3 size = ToyFactory.PlankSize;
+            Assert.AreEqual(new Vector3(0.6f, 0.12f, 3f), size, "the plank Levels 9 and 15 are measured against");
+
+            // The box, and nothing else, is what the simulation knows of it.
+            Collider[] colliders = toy.GetComponentsInChildren<Collider>(true);
+            Assert.AreEqual(1, colliders.Length);
+            var box = (BoxCollider)colliders[0];
+            Assert.AreEqual(size, box.size);
+            Assert.AreEqual(Vector3.zero, box.center);
+            Assert.AreEqual(size * 0.5f, def.HalfExtents);
+            Assert.AreEqual(0.216f, def.Volume, 1e-4f);
+            Assert.AreEqual(0.065f, def.Mass, 0.001f);
+            Assert.AreEqual(0.06f, def.RestHeight, 1e-5f);
+            Assert.AreSame(ToyRecipe.PaintedWood, def.Recipe);
+            Assert.IsTrue(Palette.Same(Palette.Lemon, def.Color));
+
+            // Three draws: the painted body, the bare wood of the two ends, the nails.
+            var renderers = new Dictionary<string, MeshRenderer>();
+            foreach (MeshRenderer renderer in toy.GetComponentsInChildren<MeshRenderer>(true)) renderers[renderer.name] = renderer;
+            CollectionAssert.AreEquivalent(new[] { "Visual", "Ends", "Detail" }, renderers.Keys);
+            Assert.AreEqual(3, def.Draws);
+            Assert.AreSame(Materials.Toy(ToyRecipe.PaintedWood, Palette.Lemon), renderers["Visual"].sharedMaterial, "the candy colour is the coat of paint: still the thing to pick up");
+            Assert.AreSame(Materials.Toy(ToyRecipe.PlainProp, Palette.Birch), renderers["Ends"].sharedMaterial, "the ends are raw wood, the palette's Birch");
+            Assert.AreSame(Materials.Toy(ToyRecipe.PaintedWood, Palette.Ink), renderers["Detail"].sharedMaterial, "the nails are kept");
+
+            // The body: the whole board is there, and on its wide faces and its sides the grain shows through
+            // the paint - streaks a tone darker than the paint, a hair proud of the face, running along the length.
+            Mesh body = renderers["Visual"].GetComponent<MeshFilter>().sharedMesh;
+            var corners = new List<Vector3>();
+            var tints = new List<Color>();
+            body.GetVertices(corners);
+            body.GetColors(tints);
+            Assert.AreEqual(corners.Count, tints.Count, "the body carries vertex colours (chips and grain)");
+            Bounds bounds = body.bounds;
+            Assert.AreEqual(size.x + ToyFactory.PlankProud * 2f, bounds.size.x, 1e-3f);
+            Assert.AreEqual(size.y + ToyFactory.PlankProud * 2f, bounds.size.y, 1e-3f);
+            Assert.AreEqual(size.z, bounds.size.z, 1e-3f);
+            int board = 0, top = 0, bottom = 0, sides = 0;
+            float grainFrom = float.MaxValue, grainTo = float.MinValue;
+            var rows = new HashSet<int>();
+            for (int i = 0; i < corners.Count; i++)
+            {
+                Vector3 p = corners[i];
+                bool onTop = p.y > size.y * 0.5f + ToyFactory.PlankProud * 0.5f, below = p.y < -size.y * 0.5f - ToyFactory.PlankProud * 0.5f;
+                bool onSide = Mathf.Abs(p.x) > size.x * 0.5f + ToyFactory.PlankProud * 0.5f;
+                if (!onTop && !below && !onSide)
+                {
+                    board++;
+                    continue;
+                }
+                Assert.AreEqual(ToyFactory.PlankGrainTone, tints[i].r, 1e-3f, "grain is the paint, a tone darker");
+                Assert.AreEqual(tints[i].r, tints[i].g, 1e-4f);
+                Assert.AreEqual(tints[i].r, tints[i].b, 1e-4f, "a tone, not another hue");
+                if (onTop)
+                {
+                    top++;
+                    grainFrom = Mathf.Min(grainFrom, p.z);
+                    grainTo = Mathf.Max(grainTo, p.z);
+                    rows.Add(Mathf.RoundToInt(p.x / (size.x * 0.1f)));
+                    Assert.Less(Mathf.Abs(p.x), size.x * 0.5f - 0.02f, "the streaks stay on the face");
+                }
+                else if (below) bottom++;
+                else sides++;
+            }
+            Assert.Greater(board, 20, "the board itself");
+            Assert.Greater(top, 80, "streaks on the upper face");
+            Assert.AreEqual(top, bottom, "and on the lower one");
+            Assert.Greater(sides, 20, "and one along each side");
+            Assert.Less(grainFrom, -size.z * 0.44f, "the grain runs the length of the board");
+            Assert.Greater(grainTo, size.z * 0.44f);
+            Assert.GreaterOrEqual(rows.Count, 5, "several streaks side by side, not one stripe");
+
+            // The ends: a plate of bare wood on each sawn end, inside the edge's bevel, with growth rings a tone darker.
+            Mesh ends = renderers["Ends"].GetComponent<MeshFilter>().sharedMesh;
+            var endCorners = new List<Vector3>();
+            var endTints = new List<Color>();
+            ends.GetVertices(endCorners);
+            ends.GetColors(endTints);
+            int front = 0, back = 0, rings = 0;
+            for (int i = 0; i < endCorners.Count; i++)
+            {
+                Vector3 p = endCorners[i];
+                Assert.Greater(Mathf.Abs(p.z), size.z * 0.5f, "on the two ends, a hair proud of them");
+                Assert.Less(Mathf.Abs(p.z), size.z * 0.5f + ToyFactory.PlankProud * 2f);
+                Assert.Less(Mathf.Abs(p.x), size.x * 0.5f - 0.015f, "inside the bevel");
+                Assert.Less(Mathf.Abs(p.y), size.y * 0.5f - 0.015f);
+                if (p.z > 0f) front++;
+                else back++;
+                Color tint = i < endTints.Count ? endTints[i] : Color.white;
+                if (tint.r < 0.99f)
+                {
+                    rings++;
+                    Assert.AreEqual(ToyFactory.PlankRingTone, tint.r, 1e-3f);
+                }
+            }
+            Assert.AreEqual(front, back, "both ends alike");
+            Assert.Greater(rings, 40, "growth rings");
+            Assert.Greater(ends.bounds.size.x, size.x * 0.85f, "the whole end is wood");
+
+            // A board that is no toy (Level 15's shelf) is the same board in bare wood all over.
+            GameObject shelf = Keep(ToyFactory.Plank(new Vector3(4f, 0.2f, 1.2f), null, false));
+            Assert.AreEqual(1, shelf.GetComponentsInChildren<Collider>(true).Length);
+            Assert.AreEqual(new Vector3(4f, 0.2f, 1.2f), shelf.GetComponentInChildren<BoxCollider>().size);
+            foreach (MeshRenderer renderer in shelf.GetComponentsInChildren<MeshRenderer>(true))
+                Assert.IsFalse(Palette.IsCandy(Palette.Lemon) && renderer.sharedMaterial == Materials.Toy(ToyRecipe.PaintedWood, Palette.Lemon), "no candy on a set piece");
+            Bounds shelfBody = shelf.transform.Find("Visual").GetComponent<MeshFilter>().sharedMesh.bounds;
+            Assert.AreEqual(4f, shelfBody.size.x, 1e-3f, "its length is along X: so is its grain");
+        }
+
         // ---- The catalog ------------------------------------------------------------------------------------
 
         [Test]

@@ -129,12 +129,20 @@ namespace Toybox.Levels
         /// Said after a hop from a standstill against the back of the plank that rides ahead, when it came
         /// down beside the plank again. In the air nobody gains on a train that goes faster than they walk,
         /// so that hop comes down where it went up.
+        ///
+        /// It used to end "Take a run at it." (and the third hint said "take a running jump"). Measured in
+        /// the final review: with the sprint key any jump with a run-up goes over the 2.45-wide plank (0 of
+        /// 48), and "walk into it and jump" is, from behind, the very hop this line is said for. What works
+        /// at any speed and any timing is the plank's END: in front of it, facing the lighthouse, a jump
+        /// lands on it (walk 33 of 34, sprint 34 of 34). So the words point there, and say nothing of running.
         /// </summary>
-        public const string HopLine = "A hop from a standstill will not get you up while the train is moving. Take a run at it.";
+        public const string HopLine = "A hop at its side will not get you up while the train is moving. Jump onto its end, facing the lighthouse.";
         /// <summary>
         /// Said to somebody who jumped off the platform at the train and went over it. (Measured: a jump at
         /// a walk from the last 0.3 of the edge, and any jump at a run from within 2.5 of it, clears the
-        /// three-unit deck; a step off the edge lands on it.)
+        /// three-unit deck; a step off the edge lands on it.) Over it, or all but: a jump at a walk from a
+        /// quarter unit back comes down on the deck's far rim, the feet's middle already past it, and slides
+        /// off - that fall used to be told nothing (the final review: 6 of 9 falls at a walk).
         /// </summary>
         public const string LeapLine = "A jump from the platform carries you clean over the train. Step off the edge instead.";
 
@@ -155,9 +163,18 @@ namespace Toybox.Levels
         bool dropAimed, dropFromTrain;
         int dropTick;
         // The tick of a hop at the back of the riding plank (-1: none), and of a jump off the platform toward
-        // the track (-1: none) with whether a wagon was under it when it came down past the decks.
-        int hopTick, leapTick;
+        // the track (-1: none) with whether a wagon was under it when it came down past the decks, and the
+        // tick at which that jump touched down on the deck's far rim (-1: it did not).
+        int hopTick, leapTick, rimTick;
         bool leapOverTrain;
+
+        /// <summary>
+        /// A leap whose feet come down no farther onto the deck than this from its inner edge has not
+        /// landed: the capsule's middle is over the drop, or all but, and it slides off.
+        /// </summary>
+        public const float RimStrip = 0.15f;
+        /// <summary>Ticks a leap that touched the rim is watched for: by then it has slid off or stands.</summary>
+        const int RimTicks = 90;
 
         public Prop Plank => plank;
         public Train Train => train;
@@ -198,7 +215,10 @@ namespace Toybox.Levels
             "You can ride the train, but it never gets closer to the lighthouse. Something has to reach from the train to the doorstep, and travel with it.",
             "Hold the plank end-on against the lighthouse wall. From the platform edge it stretches all the way back to the track. It needs something under its near end when you let go.",
             // Five lines of the pause card's hint panel at full size (Phase2CampaignTests.EveryHint_FitsThePauseCardsPanel_AtFullSize).
-            "Pick the plank up from a step behind it. At the platform edge, press it to the foot of the lighthouse door and let go as the wagons pass. Step down onto one, take a running jump onto the plank, walk in.",
+            // (No "running jump": see HopLine. A plank at its full length leaves no deck in front of its end -
+            // that player steps down onto the plank itself - so the words do not promise a wagon there.
+            // "Its end", not "the plank's end": eight letters more are a sixth line on the pause card.)
+            "Pick the plank up from a step behind it. At the platform edge, press it to the foot of the lighthouse door and let go as the wagons pass. Step down by its end, face the lighthouse, jump on, walk in.",
         };
 
         public override string Environment => "high-shelf";
@@ -268,21 +288,29 @@ namespace Toybox.Levels
             dropInner = dropOuter = dropTop = 0f;
             dropAimed = dropFromTrain = false;
             dropTick = 0;
-            hopTick = leapTick = -1;
+            hopTick = leapTick = rimTick = -1;
             leapOverTrain = false;
 
             Dip dip = ctx.Dip;
-            BuildStation(ctx, dip);
-            BuildLighthouse(ctx, dip);
-            BuildTrestles(ctx);
-            BuildWalls(ctx, dip);
-            BuildPaint(ctx, dip);
-            BuildDressing(ctx);
+            // What is only drawn is merged per material (ART_BIBLE 12.1; the level drew 47 statics for 13
+            // materials): everything that stands there in one set, what is flat or glows - and casts no
+            // shadow - in another. The colliders stay where they are. The train is the gadget's, the dashed
+            // outline on the lighthouse is the level's own renderer (Outline).
+            var set = new Level01Set();
+            var paint = new Level01Set();
+            BuildStation(ctx, dip, set);
+            BuildLighthouse(ctx, dip, set, paint);
+            BuildTrestles(set);
+            BuildWalls(ctx, dip, set);
+            BuildPaint(ctx, dip, paint);
+            BuildDressing(ctx, set);
             SkyCap.Add(ctx, -WallX - WallThickness, WallX + WallThickness, StationBack - WallThickness, WallFar + WallThickness, WallTop);
 
             // The plank on its spool, pointing at the lighthouse. It stays put until it is picked up: nobody
             // knocks it off the spool by walking into it.
-            ctx.AddStatic(ToyFactory.ThreadSpool(SpoolRadius, SpoolHeight, grabbable: false), SpoolBase + Vector3.up * (SpoolHeight * 0.5f));
+            Piece(ctx, set, ToyFactory.ThreadSpool(SpoolRadius, SpoolHeight, grabbable: false), SpoolBase + Vector3.up * (SpoolHeight * 0.5f), Quaternion.identity);
+            set.Finish(ctx, "Set");
+            paint.Finish(ctx, "Paint", castShadows: false);
             ToyDef def = ToyCatalog.Get(ToyId.Plank);
             plank = ToyCatalog.Add(ctx, ToyId.Plank, SpoolBase + Vector3.up * (SpoolHeight + def.RestHeight * PlankStart + 0.002f),
                 Quaternion.Euler(0f, PlankYaw, 0f), PlankStart, null, o =>
@@ -384,6 +412,7 @@ namespace Toybox.Levels
                 if (e.Position.y > -0.3f && e.Position.z > StationEdge - 3f && e.Position.z < StationEdge + 0.5f && Mathf.Abs(e.Position.x) < StationHalfWidth)
                 {
                     leapTick = ctx.Ticks;
+                    rimTick = -1;
                     leapOverTrain = false;
                 }
                 // On the train, a hop at the plank from the wagon behind it, from a standstill: it cannot work
@@ -397,14 +426,22 @@ namespace Toybox.Levels
             };
             ctx.Game.Events.PlayerLanded += e =>
             {
-                leapTick = -1;
+                // A leap off the platform ends where it touches down - unless that is the far rim of a wagon's
+                // deck: from there the feet slide off, and WatchLeap watches on until they have (or stand).
+                Vector3 feet = ctx.Game.Player.Position;
+                if (leapTick >= 0 && e.Prop == null && feet.y < DeckY + 0.5f && feet.y > DeckY - 0.3f && RadiusOf(feet) < DeckInner + RimStrip)
+                {
+                    if (rimTick < 0) rimTick = ctx.Ticks;
+                    leapOverTrain = true;
+                }
+                else leapTick = rimTick = -1;
                 if (hopTick < 0) return;
                 bool late = ctx.Ticks - hopTick > 120;
                 hopTick = -1;
                 if (late || plank == null || plank.Removed || e.Prop == plank || !carrier.IsCarrying(plank)) return;
                 Say(ctx, HopLine, 6f);
             };
-            ctx.Game.Events.PlayerRespawned += e => hopTick = leapTick = -1;
+            ctx.Game.Events.PlayerRespawned += e => hopTick = leapTick = rimTick = -1;
             // Back on its spool, whatever brought it there: that try is over.
             ctx.Game.Events.PropRespawned += e =>
             {
@@ -485,15 +522,20 @@ namespace Toybox.Levels
         }
 
         // Somebody who jumped off the platform toward the track: once they are below the decks it is known
-        // whether they went over a train that was there.
+        // whether they went over a train that was there. A leap that touched down on the deck's far rim is
+        // watched a little longer: it is over when they stand farther onto the deck, or have stood on the
+        // rim for a second and a half - or when they have slid off it, which is said like any leap over the train.
         void WatchLeap(LevelContext ctx)
         {
             if (leapTick < 0) return;
             Player player = ctx.Game.Player;
             Vector3 feet = player.Position;
-            if (player.Grounded || ctx.Ticks - leapTick > 180)
+            bool over = rimTick >= 0
+                ? ctx.Ticks - rimTick > RimTicks || (player.Grounded && RadiusOf(feet) > DeckInner + RimStrip + 0.15f)
+                : player.Grounded || ctx.Ticks - leapTick > 180;
+            if (over)
             {
-                leapTick = -1;
+                leapTick = rimTick = -1;
                 return;
             }
             // Coming down past the decks' height: was there a train to land on?
@@ -503,7 +545,7 @@ namespace Toybox.Levels
                 leapOverTrain = WagonAt(bearing, 0f, CarArc * 0.5f + 1f) != 0 || Mathf.Abs(Mathf.DeltaAngle(train.EngineBearing, bearing)) < EngineArc * 0.5f;
             }
             if (feet.y > DeckY - 0.6f) return;
-            leapTick = -1;
+            leapTick = rimTick = -1;
             // Inside the track's circle with a train there: over it.
             if (leapOverTrain && RadiusOf(feet) < DeckInner + 0.15f) Say(ctx, LeapLine, 6f);
         }
@@ -564,7 +606,7 @@ namespace Toybox.Levels
 
         // The station: the top of a stack of five big books, x -9..9, z -10..3.3, from the shelf up to y = 0.
         // One box holds everybody up; the books are what is seen (none of them sticks out of the box).
-        void BuildStation(LevelContext ctx, Dip dip)
+        void BuildStation(LevelContext ctx, Dip dip, Level01Set set)
         {
             var root = new GameObject("Station") { layer = Layers.Default };
             Solid(root, "Stack", new Vector3(-StationHalfWidth, ShelfY, StationBack), new Vector3(StationHalfWidth, 0f, StationEdge));
@@ -573,14 +615,14 @@ namespace Toybox.Levels
             // The platform is the top book's cover: its own material, so that it can carry a pattern to pace on.
             Mesh platform = MeshKit.Cached("Level09/Platform", () =>
                 MeshKit.Box(new Vector3(StationHalfWidth * 2f, 0.24f, StationEdge - StationBack)));
-            GadgetKit.Visual(root.transform, "Platform", platform, Covers(dip, new PatternSpec(RoomPattern.Quilt, 2.5f, 0.06f, 0f, 0.05f)),
-                new Vector3(0f, -0.12f, (StationBack + StationEdge) * 0.5f));
+            set.Shape(Covers(dip, new PatternSpec(RoomPattern.Quilt, 2.5f, 0.06f, 0f, 0.05f)), platform,
+                new Vector3(0f, -0.12f, (StationBack + StationEdge) * 0.5f), Quaternion.identity);
 
             Mesh covers = null, pages = null;
             covers = MeshKit.Cached("Level09/Stack Covers", () => BuildStack(topBook, true));
             pages = MeshKit.Cached("Level09/Stack Pages", () => BuildStack(topBook, false));
-            GadgetKit.Visual(root.transform, "Covers", covers, Covers(dip));
-            GadgetKit.Visual(root.transform, "Pages", pages, Pages(dip));
+            set.Shape(Covers(dip), covers, Vector3.zero, Quaternion.identity);
+            set.Shape(Pages(dip), pages, Vector3.zero, Quaternion.identity);
             ctx.AddStatic(root, Vector3.zero);
         }
 
@@ -609,8 +651,9 @@ namespace Toybox.Levels
         // The lighthouse: a sheer round tower of radius 2 from the shelf to the sky cap (that is all the
         // simulation knows of it), banded like a lighthouse, with the doorstep ring round it one unit below
         // the platform and its lamp above the cap, where nothing ever gets.
-        void BuildLighthouse(LevelContext ctx, Dip dip)
+        void BuildLighthouse(LevelContext ctx, Dip dip, Level01Set set, Level01Set paint)
         {
+            var foot = new Vector3(Axis.x, 0f, Axis.z);
             var root = new GameObject("Lighthouse") { layer = Layers.Default };
             var hull = new GameObject("Tower") { layer = Layers.Default };
             hull.transform.SetParent(root.transform, false);
@@ -629,7 +672,7 @@ namespace Toybox.Levels
                 float y0 = cuts[band], y1 = cuts[band + 1];
                 Mesh wall = MeshKit.Cached(MeshKit.Key("Level09/Shaft", y0, y1), () =>
                     MeshKit.Lathe(new List<Vector2> { new Vector2(TowerRadius, y0), new Vector2(TowerRadius, y1) }, 48));
-                GadgetKit.Visual(root.transform, "Shaft", wall, band % 2 == 0 ? deep : light);
+                set.Shape(band % 2 == 0 ? deep : light, wall, foot, Quaternion.identity);
             }
 
             // The doorstep: an annulus from the wall out to 3.5, its top one unit below the platform.
@@ -643,13 +686,14 @@ namespace Toybox.Levels
             step.convex = true;
             step.sharedMesh = MeshKit.UnitCylinderHull;
             Mesh disc = MeshKit.Cached("Level09/Doorstep", () => MeshKit.Cylinder(RingRadius, RingThickness, 48));
-            GadgetKit.Visual(ring.transform, "Visual", disc, Covers(dip));
+            Vector3 ringAt = foot + new Vector3(0f, RingTop - RingThickness * 0.5f, 0f);
+            set.Shape(Covers(dip), disc, ringAt, Quaternion.identity);
             // What it hangs on: a collar under it (looks only; nothing gets down there).
             Mesh collar = MeshKit.Cached("Level09/Collar", () => MeshKit.Lathe(new List<Vector2>
             {
                 new Vector2(TowerRadius, -2.4f), new Vector2(RingRadius - 0.35f, -RingThickness * 0.5f),
             }, 48));
-            GadgetKit.Visual(ring.transform, "Collar", collar, deep);
+            set.Shape(deep, collar, ringAt, Quaternion.identity);
 
             // Above the sky cap: the gallery, the lamp and its roof. No colliders - no toy and no player
             // ever comes up here.
@@ -657,45 +701,41 @@ namespace Toybox.Levels
             {
                 new Vector2(TowerRadius, 0f), new Vector2(2.9f, 0.25f), new Vector2(2.9f, 0.6f), new Vector2(1.7f, 0.6f),
             }, 48));
-            GadgetKit.Visual(root.transform, "Gallery", gallery, deep, new Vector3(0f, WallTop, 0f));
+            set.Shape(deep, gallery, foot + new Vector3(0f, WallTop, 0f), Quaternion.identity);
             Mesh lamp = MeshKit.Cached("Level09/Lamp", () => MeshKit.Cylinder(1.5f, 2.6f, 32, 0.12f));
             Color glow = Palette.Lin(Palette.WarmWhite) * 2.2f;
-            MeshRenderer lampRenderer = GadgetKit.Visual(root.transform, "Lamp", lamp, Materials.Emissive(ToyRecipe.Lamp, Palette.WarmWhite, glow),
-                new Vector3(0f, WallTop + 0.6f + 1.3f, 0f));
-            lampRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            // (The lamp casts no shadow: it goes with the paint.)
+            paint.Shape(Materials.Emissive(ToyRecipe.Lamp, Palette.WarmWhite, glow), lamp, foot + new Vector3(0f, WallTop + 0.6f + 1.3f, 0f), Quaternion.identity);
             Mesh roof = MeshKit.Cached("Level09/Roof", () => MeshKit.Lathe(new List<Vector2>
             {
                 new Vector2(0f, 0f), new Vector2(2.4f, 0f), new Vector2(2.4f, 0.18f), new Vector2(0.2f, 1.9f), new Vector2(0f, 1.9f),
             }, 48));
-            GadgetKit.Visual(root.transform, "Roof", roof, deep, new Vector3(0f, WallTop + 3.2f, 0f));
+            set.Shape(deep, roof, foot + new Vector3(0f, WallTop + 3.2f, 0f), Quaternion.identity);
 
-            ctx.AddStatic(root, new Vector3(Axis.x, 0f, Axis.z));
+            ctx.AddStatic(root, foot);
         }
 
         // Rails and trestles are looks only (LEVELS): the train's own presenter lays the rails and the
         // sleepers; this is what they stand on, down to the shelf, and the little bracket on the station's
         // face that carries the signal post.
-        void BuildTrestles(LevelContext ctx)
+        void BuildTrestles(Level01Set set)
         {
             Material wood = Materials.Toy(ToyRecipe.PlainProp, Palette.Birch);
             // The underside of the sleepers: the wheels end 0.84 below the deck, rail 0.1, sleeper 0.08.
             float top = DeckY - (ToyFactory.TrainDeckThickness + 0.1f + 0.34f) - 0.1f - 0.08f - 0.01f;
             float gauge = ToyFactory.TrainWidth * 0.5f - 0.3f;
-            var trestles = new GameObject("Trestles");
             Mesh mesh = MeshKit.Cached(MeshKit.Key("Level09/Trestles", top), () => Level09Shapes.Trestles(TrackRadius, gauge, top, ShelfY, 30f, 15f));
-            GadgetKit.Visual(trestles.transform, "Visual", mesh, wood);
-            ctx.AddStatic(trestles, new Vector3(Axis.x, 0f, Axis.z));
+            set.Shape(wood, mesh, new Vector3(Axis.x, 0f, Axis.z), Quaternion.identity);
 
-            var bracket = new GameObject("Signal Bracket");
+            // The signal's bracket.
             Mesh ledge = MeshKit.Cached("Level09/Bracket", () => MeshKit.Box(new Vector3(0.8f, 0.14f, 0.6f)));
-            GadgetKit.Visual(bracket.transform, "Visual", ledge, wood);
-            ctx.AddStatic(bracket, new Vector3(0f, top - 0.06f, StationEdge + 0.3f));
+            set.Shape(wood, ledge, new Vector3(0f, top - 0.06f, StationEdge + 0.3f), Quaternion.identity);
         }
 
         // What closes the level: walls at x = +-20, z = -10 and z = 40, from the shelf to the sky cap. They
         // stop a held toy all the way up; what is drawn are rows of books standing on the shelf, low enough
         // on the sun's side (-X) that the light reaches the track.
-        void BuildWalls(LevelContext ctx, Dip dip)
+        void BuildWalls(LevelContext ctx, Dip dip, Level01Set set)
         {
             var root = new GameObject("Walls") { layer = Layers.Default };
             float x = WallX, t = WallThickness, back = StationBack, far = WallFar;
@@ -706,8 +746,8 @@ namespace Toybox.Levels
 
             Mesh covers = MeshKit.Cached("Level09/Wall Covers", () => BuildRows(true));
             Mesh pages = MeshKit.Cached("Level09/Wall Pages", () => BuildRows(false));
-            GadgetKit.Visual(root.transform, "Covers", covers, Covers(dip));
-            GadgetKit.Visual(root.transform, "Pages", pages, Pages(dip));
+            set.Shape(Covers(dip), covers, Vector3.zero, Quaternion.identity);
+            set.Shape(Pages(dip), pages, Vector3.zero, Quaternion.identity);
             ctx.AddStatic(root, Vector3.zero);
         }
 
@@ -732,8 +772,9 @@ namespace Toybox.Levels
         // the doorstep. (The builder's outline was above the door, where LEVELS aims; aimed there the held
         // plank is end-on at eye height and hides it.) Where to stand is in the room's own tones, so that
         // the toy's colour is kept for where the toy goes.
-        void BuildPaint(LevelContext ctx, Dip dip)
+        void BuildPaint(LevelContext ctx, Dip dip, Level01Set set)
         {
+            var foot = new Vector3(Axis.x, 0f, Axis.z);
             Color hero = ToyCatalog.Get(ToyId.Plank).ColorIn(dip);
             Material fill = Materials.Room(RoomRecipe.Solid(Palette.Mix(dip.Deep, hero, 0.3f)));
             Material line = Materials.Room(RoomRecipe.Solid(Palette.Mix(dip.Light, hero, 0.9f)));
@@ -743,7 +784,7 @@ namespace Toybox.Levels
             Vector3 end = ToyFactory.PlankSize * IntendedScale;
             float y0 = OutlineY - end.y * 0.5f, y1 = OutlineY + end.y * 0.5f, half = end.x * 0.5f;
             Mesh patch = MeshKit.Cached(MeshKit.Key("Level09/Outline Fill", y0, y1, half), () => Level09Shapes.WallPatch(TowerRadius + 0.02f, 0f, half * 2f, y0, y1));
-            Flat(paint.transform, "Outline Fill", patch, fill);
+            set.Shape(fill, patch, foot, Quaternion.identity);
             Mesh dashes = MeshKit.Cached(MeshKit.Key("Level09/Outline", y0, y1, half), () =>
             {
                 var sides = new List<MeshPart>();
@@ -766,14 +807,14 @@ namespace Toybox.Levels
             {
                 float bearing = side * 90f;
                 Mesh door = MeshKit.Cached(MeshKit.Key("Level09/Door", bearing), () => Level09Shapes.WallPatch(TowerRadius + 0.012f, bearing, 1.3f, RingTop, RingTop + 1.8f));
-                Flat(paint.transform, "Door", door, paper);
+                set.Shape(paper, door, foot, Quaternion.identity);
                 Mesh window = MeshKit.Cached(MeshKit.Key("Level09/Door Light", bearing), () => Level09Shapes.WallPatch(TowerRadius + 0.02f, bearing, 0.8f, RingTop + 0.82f, RingTop + 1.62f));
-                Flat(paint.transform, "Door Light", window, panes);
+                set.Shape(panes, window, foot, Quaternion.identity);
             }
-            ctx.AddStatic(paint, new Vector3(Axis.x, 0f, Axis.z));
+            // (What is left under this name is the outline alone: the level's own renderer.)
+            ctx.AddStatic(paint, foot);
 
             // The platform's edge: a dashed line, as on any station.
-            var edge = new GameObject("Platform Edge");
             Mesh edgeLine = MeshKit.Cached("Level09/Edge Line", () =>
             {
                 var parts = new List<MeshPart>();
@@ -784,14 +825,13 @@ namespace Toybox.Levels
                     parts.Add(new MeshPart(MeshKit.Grid(new Vector2(dash, 0.14f), 1, 1), new Vector3(start + dash * 0.5f + i * (dash + gap), 0f, 0f)));
                 return Level09Shapes.Merge("Level09 Edge Line", parts);
             });
-            Flat(edge.transform, "Paint", edgeLine, paper);
-            ctx.AddStatic(edge, new Vector3(0f, 0.012f, StationEdge - 0.45f));
+            set.Shape(paper, edgeLine, new Vector3(0f, 0.012f, StationEdge - 0.45f), Quaternion.identity);
 
             // Where to stand: a pad with a pair of shoe prints behind the plank (take it from here and it
             // looks the right size) and at the edge in front of the lighthouse.
             Material pad = Materials.Room(RoomRecipe.Solid(dip.Deep));
-            StandMark(ctx, "Stand Mark Spool", Spawn, PlankYaw, pad, paper);
-            StandMark(ctx, "Stand Mark Edge", new Vector3(EdgeSpot.x, 0f, StationEdge - 1.25f), 0f, pad, paper);
+            StandMark(set, Spawn, PlankYaw, pad, paper);
+            StandMark(set, new Vector3(EdgeSpot.x, 0f, StationEdge - 1.25f), 0f, pad, paper);
         }
 
         /// <summary>
@@ -808,13 +848,13 @@ namespace Toybox.Levels
             return renderer;
         }
 
-        // Looks only: a renderer for the pad and one for each shoe, toes a little apart.
-        static void StandMark(LevelContext ctx, string name, Vector3 at, float yaw, Material pad, Material print)
+        // Looks only: the pad and a shoe print for each foot, toes a little apart.
+        static void StandMark(Level01Set set, Vector3 at, float yaw, Material pad, Material print)
         {
-            var mark = new GameObject(name);
-            ctx.AddStatic(mark, at + Vector3.up * 0.012f, Quaternion.Euler(0f, yaw, 0f));
+            at += Vector3.up * 0.012f;
+            Quaternion turn = Quaternion.Euler(0f, yaw, 0f);
             Mesh disc = MeshKit.Cached(MeshKit.Key("Level09/Pad", PadRadius), () => MeshKit.Cylinder(PadRadius, 0.004f, 40));
-            GadgetKit.Visual(mark.transform, "Pad", disc, pad).shadowCastingMode = ShadowCastingMode.Off;
+            set.Shape(pad, disc, at, turn);
             Mesh sole = MeshKit.Cached(MeshKit.Key("Level09/Sole"), () =>
             {
                 // A sole in the XY plane, toe up: half a circle for the toe, a smaller half for the heel.
@@ -834,19 +874,26 @@ namespace Toybox.Levels
             for (int side = -1; side <= 1; side += 2)
             {
                 Quaternion flat = Quaternion.Euler(0f, side * 9f, 0f) * Quaternion.Euler(90f, 0f, 0f);
-                GadgetKit.Visual(mark.transform, "Shoe", sole, print, new Vector3(side * 0.24f, 0.006f, 0f), flat).shadowCastingMode = ShadowCastingMode.Off;
+                set.Shape(print, sole, at + turn * new Vector3(side * 0.24f, 0.006f, 0f), turn * flat);
             }
+        }
+
+        // A set piece: its colliders stand in the level, its looks join the set.
+        static void Piece(LevelContext ctx, Level01Set set, GameObject piece, Vector3 centre, Quaternion rotation)
+        {
+            ctx.AddStatic(piece, centre, rotation);
+            set.Absorb(piece);
         }
 
         // Things that make it a station: luggage left on the platform, well away from the way to the edge
         // and from anything a held plank passes over.
-        void BuildDressing(LevelContext ctx)
+        void BuildDressing(LevelContext ctx, Level01Set set)
         {
-            ctx.AddStatic(ToyFactory.WoodenBlock(new Vector3(1.7f, 1.1f, 1.1f), grabbable: false), new Vector3(-6.4f, 0.55f, -8.2f), Quaternion.Euler(0f, 8f, 0f));
-            ctx.AddStatic(ToyFactory.WoodenBlock(new Vector3(1.1f, 0.8f, 0.9f), grabbable: false), new Vector3(-6.5f, 1.5f, -8.25f), Quaternion.Euler(0f, -14f, 0f));
-            ctx.AddStatic(ToyFactory.WoodenBlock(new Vector3(1f, 1f, 1f), grabbable: false), new Vector3(-4.6f, 0.5f, -8.6f), Quaternion.Euler(0f, 31f, 0f));
-            ctx.AddStatic(ToyFactory.WoodenBlock(new Vector3(1.3f, 0.9f, 0.9f), grabbable: false), new Vector3(7.3f, 0.45f, -6.5f), Quaternion.Euler(0f, -20f, 0f));
-            ctx.AddStatic(ToyFactory.Marker(0.4f, 3.4f), new Vector3(6.2f, 0.4f, -8.9f), Quaternion.Euler(0f, 97f, 0f));
+            Piece(ctx, set, ToyFactory.WoodenBlock(new Vector3(1.7f, 1.1f, 1.1f), grabbable: false), new Vector3(-6.4f, 0.55f, -8.2f), Quaternion.Euler(0f, 8f, 0f));
+            Piece(ctx, set, ToyFactory.WoodenBlock(new Vector3(1.1f, 0.8f, 0.9f), grabbable: false), new Vector3(-6.5f, 1.5f, -8.25f), Quaternion.Euler(0f, -14f, 0f));
+            Piece(ctx, set, ToyFactory.WoodenBlock(new Vector3(1f, 1f, 1f), grabbable: false), new Vector3(-4.6f, 0.5f, -8.6f), Quaternion.Euler(0f, 31f, 0f));
+            Piece(ctx, set, ToyFactory.WoodenBlock(new Vector3(1.3f, 0.9f, 0.9f), grabbable: false), new Vector3(7.3f, 0.45f, -6.5f), Quaternion.Euler(0f, -20f, 0f));
+            Piece(ctx, set, ToyFactory.Marker(0.4f, 3.4f), new Vector3(6.2f, 0.4f, -8.9f), Quaternion.Euler(0f, 97f, 0f));
         }
 
         // ---- The intended solution -------------------------------------------------------------------------

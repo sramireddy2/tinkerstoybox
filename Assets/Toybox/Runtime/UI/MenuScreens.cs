@@ -25,12 +25,24 @@ namespace Toybox.UI
     /// The title (ART_BIBLE 10.5): "TINKER'S TOYBOX" in the display face at 120 with the sticker text
     /// style, the "O" of TOYBOX being the four-pane mark; a pulsing "Click to play" pill; the catalogue and
     /// the settings beside it. A click anywhere starts the game too (and unlocks audio in the browser).
+    ///
+    /// Along the bottom edge, one row of the HUD's key caps: the four keys of a first minute - move, jump,
+    /// pick up, and Esc, behind which the hints and the whole list are (the pause card). They are to be
+    /// read, not pressed: no focus, no click.
+    ///
+    /// The title stands over whatever level the player is at. Over a night room the logo is set in Paper:
+    /// Ink letters on plum are an outline and nothing else.
     /// </summary>
     public sealed class TitleMenu : MenuScreen
     {
         const float PulseHz = 1f, PulseDepth = 0.035f;
+        /// <summary>The keys the title names, left to right.</summary>
+        public static readonly ControlPills.Control[] KeyRow = { ControlPills.Control.Move, ControlPills.Control.Jump, ControlPills.Control.PickUp, ControlPills.Control.Help };
 
+        readonly List<Sticker> keys = new List<Sticker>();
+        TextMeshProUGUI firstLine;
         float time;
+        bool night;
 
         public Sticker Logo { get; }
         /// <summary>The four-pane mark standing in for the "O" of TOYBOX.</summary>
@@ -38,6 +50,10 @@ namespace Toybox.UI
         public UiButton Play { get; }
         public UiButton LevelsButton { get; }
         public UiButton SettingsButton { get; }
+        /// <summary>The key caps along the bottom edge.</summary>
+        public IReadOnlyList<Sticker> Keys => keys;
+        /// <summary>What the logo is set in: Ink, or Paper over a night room.</summary>
+        public Color LogoColor => firstLine.color;
 
         public TitleMenu(MenuPresenter menu) : base(menu, "Title")
         {
@@ -62,6 +78,22 @@ namespace Toybox.UI
             SettingsButton.Sticker.Rect.Place(UiKit.Bottom, UiKit.Centre, new Vector2(130f, 124f), new Vector2(230f, 58f));
             Stick(SettingsButton.Sticker);
 
+            // The key caps, centred as one row under the buttons.
+            const float keyGap = 16f, keyY = 46f;
+            float width = -keyGap;
+            foreach (ControlPills.Control control in KeyRow)
+            {
+                Sticker pill = Stick(ControlPills.Build(root, ControlPills.Cap(control), ControlPills.Action(control)));
+                keys.Add(pill);
+                width += pill.Size.x + keyGap;
+            }
+            float x = -width * 0.5f;
+            foreach (Sticker pill in keys)
+            {
+                pill.Rect.Place(UiKit.Bottom, UiKit.Left, new Vector2(x, keyY), pill.Size);
+                x += pill.Size.x + keyGap;
+            }
+
             Screen.AddRow(Play);
             Screen.AddRow(LevelsButton, SettingsButton);
         }
@@ -85,6 +117,7 @@ namespace Toybox.UI
 
             TextMeshProUGUI first = UiKit.Label(logo.Content, "Tinker's", "TINKER’S", UiFont.Display, UiTheme.LogoSize, UiTheme.Ink, sticker: true);
             first.rectTransform.Place(UiKit.Top, new Vector2(0f, 0f), new Vector2(size.x, 160f));
+            firstLine = first;
 
             TextMeshProUGUI second = UiKit.Label(logo.Content, "Toybox", "T<space=" + MarkGap + "em>YBOX", UiFont.Display, UiTheme.LogoSize, UiTheme.Ink, sticker: true);
             second.rectTransform.Place(UiKit.Top, new Vector2(0f, -150f), new Vector2(size.x, 160f));
@@ -130,10 +163,25 @@ namespace Toybox.UI
             time = 0f;
             Play.Sticker.Rect.localScale = Vector3.one;
             PlaceMark();
+            Tint(true);
+        }
+
+        // The logo over the room that is behind it: Ink by day, Paper by night (as the catalogue's cards do it).
+        void Tint(bool always)
+        {
+            bool dark = Menu.LevelDip.Night;
+            if (dark == night && !always) return;
+            night = dark;
+            Color ink = dark ? UiTheme.Paper : UiTheme.Ink;
+            firstLine.color = ink;
+            Wordmark.color = ink;
+            Mark.color = ink;
         }
 
         protected override void Tick(float dt)
         {
+            // The level behind the title can change while it is up (back from the ending).
+            Tint(false);
             if (Settings.ReduceMotion) return;
             time += dt;
             float pulse = 1f + PulseDepth * Mathf.Sin(time * PulseHz * Mathf.PI * 2f);
@@ -142,12 +190,37 @@ namespace Toybox.UI
     }
 
     /// <summary>
-    /// The pause card (ART_BIBLE 10.5): a hang-tab card listing Resume, Restart, Hints, Settings and Level
-    /// Select, over the frame the pause froze. Hints shows the level's hints one at a time beside the card.
+    /// The pause card (ART_BIBLE 10.5): a hang-tab card listing Resume, Restart, Hints, Settings and
+    /// Levels, over the frame the pause froze. Hints shows the level's hints one at a time to the right of
+    /// the card. To its left stands the guide: the level's number, title and blurb (the level card of the
+    /// HUD is only up for a few seconds) and the keys - the one place where the game lists them all. The
+    /// guide is something to read: it takes neither the focus nor a click.
     /// </summary>
     public sealed class PauseMenu : MenuScreen
     {
+        /// <summary>
+        /// The keys as the guide lists them: the key cap and what it does, in the levels' words (toys are
+        /// picked up and let go). The debug keys are not the player's and are not here.
+        /// </summary>
+        public static readonly string[][] Keys =
+        {
+            new[] { "W A S D / arrows", "move" },
+            new[] { "Mouse", "look" },
+            new[] { "Space", "jump" },
+            new[] { "Shift", "run" },
+            new[] { "Click / E", "pick up, let go" },
+            new[] { "Q / wheel", "turn" },
+            new[] { "F", "flip" },
+            new[] { "Hold R", "restart" },
+            new[] { "Esc", "pause" },
+        };
+
+        static readonly Vector2 GuideSize = new Vector2(430f, 530f);
+        const float GuidePad = 26f, KeysTop = -204f, KeyPitch = 34f, CapHeight = 28f, CapGap = 14f;
+
         int hintIndex = -1;
+        readonly List<RectTransform> keyCaps = new List<RectTransform>();
+        readonly List<TextMeshProUGUI> keyActions = new List<TextMeshProUGUI>();
 
         public Sticker Card { get; }
         public UiButton Resume { get; }
@@ -158,6 +231,14 @@ namespace Toybox.UI
         public Sticker HintPanel { get; }
         public TextMeshProUGUI HintTitle { get; }
         public TextMeshProUGUI HintText { get; }
+        /// <summary>The panel to the left of the card: which level this is, and the keys.</summary>
+        public Sticker Guide { get; }
+        /// <summary>"03  SHRINKING THE APPLE".</summary>
+        public TextMeshProUGUI LevelName { get; }
+        public TextMeshProUGUI LevelBlurb { get; }
+        /// <summary>The key caps of the guide, top to bottom, and what stands beside each.</summary>
+        public IReadOnlyList<RectTransform> KeyCaps => keyCaps;
+        public IReadOnlyList<TextMeshProUGUI> KeyActions => keyActions;
 
         public PauseMenu(MenuPresenter menu) : base(menu, "Pause")
         {
@@ -173,7 +254,8 @@ namespace Toybox.UI
             Restart = Entry("Restart", ButtonStyle.Paper, buttonSize, ref y, () => Menu.Flow?.Restart());
             Hints = Entry("Hints", ButtonStyle.Paper, buttonSize, ref y, NextHint);
             SettingsButton = Entry("Settings", ButtonStyle.Paper, buttonSize, ref y, Menu.OpenSettings);
-            LevelSelect = Entry("Level Select", ButtonStyle.Paper, buttonSize, ref y, () => Menu.Flow?.OpenLevelSelect());
+            // One name for the place on every screen: the title, the complete card and the ending say "Levels" too.
+            LevelSelect = Entry("Levels", ButtonStyle.Paper, buttonSize, ref y, () => Menu.Flow?.OpenLevelSelect());
 
             var hintSize = new Vector2(430f, 230f);
             HintPanel = Sticker.Create(root, "Hint", StickerShape.Panel, UiTheme.Paper, hintSize);
@@ -183,6 +265,41 @@ namespace Toybox.UI
             HintText = UiKit.Label(HintPanel.Content, "Text", "", UiFont.Body, UiTheme.BodySize, UiTheme.Ink, TextAlignmentOptions.TopLeft, wrap: true);
             HintText.rectTransform.Place(UiKit.TopLeft, new Vector2(26f, -66f), new Vector2(hintSize.x - 52f, hintSize.y - 88f));
             HintPanel.Tween.Hide(true);
+
+            // The guide mirrors the hint panel: as far to the left of the card as that is to the right.
+            Guide = Stick(Sticker.Create(root, "Guide", StickerShape.Panel, UiTheme.Paper, GuideSize));
+            Guide.Rect.Place(UiKit.Centre, UiKit.Right, new Vector2(-(size.x * 0.5f + 40f), 0f), GuideSize);
+            RectTransform guide = Guide.Content;
+            float inner = GuideSize.x - GuidePad * 2f;
+            LevelName = UiKit.Label(guide, "Level", "", UiFont.Display, UiTheme.ButtonSize, UiTheme.Ink, TextAlignmentOptions.BottomLeft, wrap: true);
+            LevelName.rectTransform.Place(UiKit.TopLeft, new Vector2(GuidePad, -22f), new Vector2(inner, 64f));
+            LevelBlurb = UiKit.Label(guide, "Blurb", "", UiFont.Body, UiTheme.BodySize, UiTheme.Ink, TextAlignmentOptions.TopLeft, wrap: true);
+            LevelBlurb.rectTransform.Place(UiKit.TopLeft, new Vector2(GuidePad, -94f), new Vector2(inner, 80f));
+            Image rule = UiKit.Image(guide, "Rule", UiShape.White, UiTheme.Faint);
+            rule.rectTransform.Place(UiKit.TopLeft, new Vector2(GuidePad, -186f), new Vector2(inner, 2f));
+            // The keys: each on an Ink chip (the HUD's key cap, on Paper), and beside the widest chip what they do.
+            float column = 0f;
+            for (int i = 0; i < Keys.Length; i++) column = Mathf.Max(column, KeyCap(guide, Keys[i][0], KeysTop - i * KeyPitch, inner * 0.6f));
+            column += CapGap;
+            for (int i = 0; i < Keys.Length; i++)
+            {
+                TextMeshProUGUI does = UiKit.Label(guide, "Does " + Keys[i][1], Keys[i][1], UiFont.Body, UiTheme.BodySize, UiTheme.Ink, TextAlignmentOptions.Left);
+                does.rectTransform.Place(UiKit.TopLeft, new Vector2(GuidePad + column, KeysTop - i * KeyPitch), new Vector2(inner - column, CapHeight));
+                keyActions.Add(does);
+            }
+        }
+
+        // One key cap of the guide; returns how wide it came out.
+        float KeyCap(RectTransform parent, string cap, float y, float widest)
+        {
+            Image chip = UiKit.Image(parent, "Key " + cap, UiShape.Pill, UiTheme.Ink);
+            chip.pixelsPerUnitMultiplier = UiAtlas.PillBorder * 2f / CapHeight;
+            TextMeshProUGUI label = UiKit.Label(chip.rectTransform, "Key", cap, UiFont.Body, UiTheme.SmallSize, UiTheme.Paper);
+            float width = Mathf.Min(widest, Mathf.Ceil(label.GetPreferredValues(cap).x) + 24f);
+            chip.rectTransform.Place(UiKit.TopLeft, new Vector2(GuidePad, y), new Vector2(width, CapHeight));
+            label.rectTransform.Fill(2f);
+            keyCaps.Add(chip.rectTransform);
+            return width;
         }
 
         UiButton Entry(string text, ButtonStyle style, Vector2 size, ref float y, Action clicked)
@@ -203,7 +320,11 @@ namespace Toybox.UI
         /// <summary>The hint that is showing (0-based), or -1.</summary>
         public int HintIndex => HintPanel.Tween.IsShown ? hintIndex : -1;
 
-        /// <summary>Shows the level's next hint; after the last comes the first again.</summary>
+        /// <summary>
+        /// Shows the level's next hint; after the last comes the first again. The first press after the
+        /// card has come back shows the hint that was up before once more: whoever read hint 1, went back
+        /// to try and pauses to read it again is not walked on through the solution.
+        /// </summary>
         public void NextHint()
         {
             LevelDefinition level = Menu.Game.Level;
@@ -216,7 +337,8 @@ namespace Toybox.UI
             }
             else
             {
-                hintIndex = (hintIndex + 1) % hints.Length;
+                bool again = !HintPanel.Tween.IsShown && hintIndex >= 0 && hintIndex < hints.Length;
+                if (!again) hintIndex = (hintIndex + 1) % hints.Length;
                 HintTitle.text = "HINT " + (hintIndex + 1) + " / " + hints.Length;
                 HintText.text = hints[hintIndex] ?? "";
             }
@@ -234,6 +356,11 @@ namespace Toybox.UI
         protected override void Opening()
         {
             HintPanel.Tween.Hide(true);
+            // The level card again, for as long as the player likes.
+            LevelDefinition level = Menu.Game.Level;
+            int number = Menu.Flow != null ? Menu.Flow.LevelId : level != null ? level.Id : 0;
+            LevelName.text = level != null ? Mathf.Max(0, number).ToString("00") + "  " + (level.Title ?? "").ToUpperInvariant() : "";
+            LevelBlurb.text = level != null ? level.Blurb ?? "" : "";
             if (UiCapture.Wants("hints")) NextHint();
         }
 
@@ -241,9 +368,13 @@ namespace Toybox.UI
     }
 
     /// <summary>
-    /// The settings card (ART_BIBLE 10.5): quality, lens blur strength, sensitivity, field of view, volume,
-    /// music, reduce motion, high-visibility toys. It only writes <see cref="Settings"/>; whoever applies a
-    /// setting listens there. Closing it saves.
+    /// The settings card (ART_BIBLE 10.5): quality, lens blur strength, sensitivity, invert look, field of
+    /// view, volume, music, effects, reduce motion, high-visibility toys. It only writes
+    /// <see cref="Settings"/>; whoever applies a setting listens there. Closing it saves.
+    ///
+    /// While it is up the level's music plays softly behind it (the game's music is silent in every other
+    /// menu), so that the two volume sliders that set it can be heard; the Effects slider is heard through
+    /// its own tick.
     /// </summary>
     public sealed class SettingsMenu : MenuScreen
     {
@@ -253,9 +384,11 @@ namespace Toybox.UI
         public UiChoice Quality { get; }
         public UiSlider LensBlur { get; }
         public UiSlider Sensitivity { get; }
+        public UiToggle InvertLook { get; }
         public UiSlider FieldOfView { get; }
         public UiSlider Volume { get; }
         public UiSlider Music { get; }
+        public UiSlider Effects { get; }
         public UiToggle ReduceMotion { get; }
         public UiToggle HighVisibility { get; }
         public UiButton Done { get; }
@@ -263,7 +396,7 @@ namespace Toybox.UI
         public SettingsMenu(MenuPresenter menu) : base(menu, "Settings")
         {
             RectTransform root = Screen.Root;
-            var size = new Vector2(720f, 716f);
+            var size = new Vector2(720f, 832f);
             Card = Stick(Sticker.Create(root, "Settings Card", StickerShape.Card, UiTheme.Paper, size));
             TextMeshProUGUI title = UiKit.Label(Card.Content, "Title", "SETTINGS", UiFont.Display, UiTheme.TitleSize, UiTheme.Ink);
             title.rectTransform.Place(UiKit.Top, new Vector2(0f, -46f), new Vector2(500f, 60f));
@@ -273,10 +406,12 @@ namespace Toybox.UI
             LensBlur = Row(UiSlider.Create(Card.Content, "Lens blur", 0f, 1f, 0.05f, Settings.LensBlur, Percent, v => Settings.LensBlur = v), ref y);
             Sensitivity = Row(UiSlider.Create(Card.Content, "Mouse speed", Settings.MinMouseSensitivity, Settings.MaxMouseSensitivity, 0.01f,
                 Settings.MouseSensitivity, v => "×" + (v / Settings.DefaultMouseSensitivity).ToString("0.0"), v => Settings.MouseSensitivity = v), ref y);
+            InvertLook = Row(UiToggle.Create(Card.Content, "Invert look", Settings.InvertLook, v => Settings.InvertLook = v), ref y);
             FieldOfView = Row(UiSlider.Create(Card.Content, "Field of view", Settings.MinFieldOfView, Settings.MaxFieldOfView, 1f,
                 Settings.FieldOfView, v => Mathf.RoundToInt(v) + "°", v => Settings.FieldOfView = v), ref y);
             Volume = Row(UiSlider.Create(Card.Content, "Volume", 0f, 1f, 0.05f, Settings.MasterVolume, Percent, v => Settings.MasterVolume = v), ref y);
             Music = Row(UiSlider.Create(Card.Content, "Music", 0f, 1f, 0.05f, Settings.MusicVolume, Percent, v => Settings.MusicVolume = v), ref y);
+            Effects = Row(UiSlider.Create(Card.Content, "Effects", 0f, 1f, 0.05f, Settings.SfxVolume, Percent, v => Settings.SfxVolume = v), ref y);
             ReduceMotion = Row(UiToggle.Create(Card.Content, "Reduce motion", Settings.ReduceMotion, v => Settings.ReduceMotion = v), ref y);
             HighVisibility = Row(UiToggle.Create(Card.Content, "High-visibility toys", Settings.HighVisibility, v => Settings.HighVisibility = v), ref y);
 
@@ -302,11 +437,25 @@ namespace Toybox.UI
             Quality.Set((int)Settings.Quality, false);
             LensBlur.Set(Settings.LensBlur, false);
             Sensitivity.Set(Settings.MouseSensitivity, false);
+            InvertLook.Set(Settings.InvertLook, false);
             FieldOfView.Set(Settings.FieldOfView, false);
             Volume.Set(Settings.MasterVolume, false);
             Music.Set(Settings.MusicVolume, false);
+            Effects.Set(Settings.SfxVolume, false);
             ReduceMotion.Set(Settings.ReduceMotion, false);
             HighVisibility.Set(Settings.HighVisibility, false);
+            Preview(true);
+        }
+
+        protected override void Closing() => Preview(false);
+
+        public override void Dispose() => Preview(false);
+
+        // The music behind the card, so that its sliders set something that can be heard.
+        static void Preview(bool on)
+        {
+            Toybox.Audio.AudioPresenter audio = Toybox.Audio.AudioPresenter.Active;
+            if (audio != null) audio.MusicPreview = on;
         }
     }
 
@@ -366,6 +515,9 @@ namespace Toybox.UI
             Stick(Back.Sticker);
             Screen.Cancelled = () => Menu.Flow?.CloseLevelSelect();
             Build();
+            // The cards are a grid: right at the end of a row goes on to the next row, and a locked card is
+            // passed over. (Back, below the grid, is reached by down.)
+            Screen.GridRows = Screen.RowCount - 1;
         }
 
         public Entry Find(int levelId)
@@ -554,8 +706,14 @@ namespace Toybox.UI
     ///
     /// The card then waits for the player - but not for ever: left alone for <see cref="AutoNextSeconds"/>
     /// it moves on by itself, as the game did before it had menus, with a bar on the Next pill running
-    /// down to say so. Anything the player does on the card (moving the focus, by key or by mouse) stops
-    /// that, and the card stays until a button is pressed.
+    /// down to say so. Anything the player does on the card (moving the focus, by key or by mouse, or
+    /// Esc) stops that, and the card stays until a button is pressed.
+    ///
+    /// Nothing on the card can be pressed before it can be seen: its buttons only take input once the
+    /// result card is up (600 ms) - the Space that was a jump a moment ago must not be "Next". Next works
+    /// once: a second press that was queued behind the first does not skip a level. And a card that comes
+    /// back from the catalogue (Levels, then Back) comes back as it was left: finished, without the flash,
+    /// the stamp's punch or the confetti a second time, and waiting for the player.
     /// </summary>
     public sealed class CompleteMenu : MenuScreen
     {
@@ -571,6 +729,7 @@ namespace Toybox.UI
         readonly RectTransform bar;
         float time, waited;
         bool stamped, informed, burst, held, advanced;
+        int nextClicks;
         Confetti confetti;
 
         /// <summary>True once the player has touched the card: it no longer moves on by itself.</summary>
@@ -630,6 +789,8 @@ namespace Toybox.UI
             // In focus order the primary comes first; on screen it sits at the right.
             Screen.AddRow(Again, LevelsButton, Next);
             Screen.First = Next;
+            // Esc: "wait" - the card stays until a button is pressed.
+            Screen.Cancelled = Hold;
 
             flash = UiKit.Image(root, "Flash", UiShape.White, UiTheme.Paper);
             flash.rectTransform.Fill();
@@ -637,14 +798,33 @@ namespace Toybox.UI
         }
 
         // The next level - or, after the campaign's last, the ending (the campaign does not wrap round).
+        // Only from the card itself, and only once: outside LevelComplete, Advance is the level keys' "next
+        // level", and a second Next queued behind the first would skip the level that one has just started.
         void GoOn()
         {
             advanced = true;
-            Menu.Flow?.Advance();
+            GameFlow flow = Menu.Flow;
+            if (flow != null && flow.State == FlowState.LevelComplete) flow.Advance();
+        }
+
+        // The player is here and choosing: the card no longer moves on by itself.
+        void Hold()
+        {
+            held = true;
+            bar.gameObject.SetActive(false);
+        }
+
+        void SetLive(bool live)
+        {
+            Next.Interactable = live;
+            Again.Interactable = live;
+            LevelsButton.Interactable = live;
         }
 
         protected override void Opening()
         {
+            // Back from the catalogue: the same completion, already celebrated.
+            bool back = Menu.CameFrom == Menu.Catalogue && Menu.CameFrom != null;
             time = 0f;
             waited = 0f;
             stamped = false;
@@ -652,11 +832,14 @@ namespace Toybox.UI
             burst = false;
             held = false;
             advanced = false;
+            nextClicks = Next.Clicks;
             bar.gameObject.SetActive(AutoNextSeconds > 0f);
             bar.sizeDelta = new Vector2(BarWidth, 3f);
             Stamp.Tween.Hide(true);
             Info.Tween.Hide(true);
             Stamp.Rect.localScale = Vector3.one;
+            // Nothing can be pressed before it can be seen (as on the ending).
+            SetLive(false);
 
             GameFlow flow = Menu.Flow;
             Game game = Menu.Game;
@@ -681,6 +864,17 @@ namespace Toybox.UI
             flash.rectTransform.SetAsLastSibling();
             // A capture shows the finished card.
             if (UiCapture.Wants("complete")) time = 3f;
+            if (!back) return;
+
+            time = 3f;
+            stamped = true;
+            informed = true;
+            burst = true;
+            flash.gameObject.SetActive(false);
+            Stamp.Tween.Show(true);
+            Info.Tween.Show(true);
+            SetLive(true);
+            Hold();
         }
 
         protected override void Closing()
@@ -695,6 +889,12 @@ namespace Toybox.UI
         protected override void Tick(float dt)
         {
             time += dt;
+            // Next was pressed: whatever the press still waits for (the key to come up), the countdown is over.
+            if (Next.Clicks != nextClicks)
+            {
+                nextClicks = Next.Clicks;
+                advanced = true;
+            }
             if (flash.gameObject.activeSelf)
             {
                 float alpha = 0.9f * (1f - time / FlashTime);
@@ -723,6 +923,7 @@ namespace Toybox.UI
             {
                 informed = true;
                 Info.Tween.Show();
+                SetLive(true);
                 Screen.Focus(Next);
                 return;
             }
@@ -730,8 +931,7 @@ namespace Toybox.UI
             // The focus left the Next pill: the player is here and choosing.
             if (Screen.Focused != Next || Menu.Flow == null)
             {
-                held = true;
-                bar.gameObject.SetActive(false);
+                Hold();
                 return;
             }
             waited += dt;

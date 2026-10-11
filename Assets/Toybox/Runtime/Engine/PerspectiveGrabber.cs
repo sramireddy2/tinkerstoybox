@@ -154,8 +154,10 @@ namespace Toybox.Engine
             }
             if (target == null) target = AssistTarget(eye, direction);
             if (target == null) return null;
-            // Lifting the thing you stand on would let you fly.
-            if (player.Grounded && player.GroundProp == target) return null;
+            // Lifting the thing you stand on would let you fly - and so would lifting the thing you have just
+            // jumped off: picked up in the air and let go again under oneself it is bigger (the eye is
+            // higher by then), or simply higher up. It is out of reach until the feet are on something else.
+            if (player.Underfoot == target) return null;
             return target;
         }
 
@@ -521,7 +523,11 @@ namespace Toybox.Engine
                 HoldDistance = free;
                 placedCenter = eye + direction * free;
                 placedRotation = rotation;
-                placedScale = ratio * free;
+                // Stopped by its own limit the prop is at far = MaxScale / ratio, and ratio * (MaxScale /
+                // ratio) is not MaxScale in 32 bits: a hair over it in one pick-up of ten (measured, the
+                // final review: 3.00000024 for a limit of 3). A gauge whose window ends at the limit then
+                // read "too big" for a toy the station takes. A held prop is never outside its limits.
+                placedScale = Mathf.Clamp(ratio * free, prop.MinScale, prop.MaxScale);
             }
 
             // With no room anywhere on the ray the prop stays at the last pose that was free. No sync is

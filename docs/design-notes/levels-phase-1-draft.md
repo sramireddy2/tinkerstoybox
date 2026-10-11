@@ -1,5 +1,9 @@
 # Phase 1 — The Basics (Levels 1–4): level design spec
 
+> **Historical draft.** A first level specification, hand-calculated before anything ran in the engine. It is
+> superseded by [LEVELS.md](../LEVELS.md), whose "As built" notes and appendices D, E and F hold what the game
+> does. See [README.md](README.md).
+
 **Engine note.** `docs/ARCHITECTURE.md` says the project moved to Unity 6 / PhysX on 2026-10-03, so this spec uses its conventions: left-handed, Y-up, yaw 0 looks down +Z, degrees, `PropOptions`, `LevelContext`, `Bot`. Units, player metrics and the mechanic are unchanged from the brief.
 
 **Status.** Every number below is hand-calculated; nothing has been run in the engine. Treat aim points and thresholds as starting values for the bot test to tune.
@@ -373,4 +377,4 @@ yield return bot.WalkTo(new Vector3(0, -2.5f, 36));
 | 3 | Near = small; the mechanic runs both ways | Reverse the habit | 1.5–2 min | Low |
 | 4 | Size = mass; placement has consequences | Size + position + physics | 2–4 min | Medium (fallback given) |
 
-**Files.** Read `C:/Users/shank/OneDrive/Desktop/tinkerstoybox/docs/ARCHITECTURE.md`; nothing was written to the repo.
+**Files.** Read `docs/ARCHITECTURE.md`; nothing was written to the repo.

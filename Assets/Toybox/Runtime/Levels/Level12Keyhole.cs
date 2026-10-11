@@ -896,10 +896,11 @@ namespace Toybox.Levels
                 Say(ctx, LockedLine, 6f);
             }
 
-            // A click at the toy under the player's own feet takes nothing.
-            if (game.LastInput.GrabPressed && !wasHolding && !grabber.IsHolding && player.Grounded && player.GroundProp != null &&
+            // A click at the toy under the player's own feet takes nothing - nor, in the air, at the one they
+            // have just jumped off (Player.Underfoot).
+            if (game.LastInput.GrabPressed && !wasHolding && !grabber.IsHolding && player.Underfoot != null &&
                 game.PhysicsScene.Raycast(player.Eye, player.Forward, out RaycastHit hit, PerspectiveGrabber.GrabRange, Layers.SolidMask, QueryTriggerInteraction.Ignore) &&
-                PropRef.Of(hit.collider) == player.GroundProp)
+                PropRef.Of(hit.collider) == player.Underfoot)
                 Say(ctx, StandingLine, 5f);
             wasHolding = grabber.IsHolding;
 

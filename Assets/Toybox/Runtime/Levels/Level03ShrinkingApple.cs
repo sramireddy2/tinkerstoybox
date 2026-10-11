@@ -133,8 +133,13 @@ namespace Toybox.Levels
             Material print = Materials.Room(new RoomRecipe { Name = dip.Name + " Print", Top = dip.Light, Side = dip.Light, Dado = dip.Light });
             Material tape = Materials.Room(new RoomRecipe { Name = dip.Name + " Tape", Top = dip.Mid, Side = dip.Mid, Dado = dip.Mid });
 
-            BuildBox(ctx, cardboard);
-            BuildShelf(ctx, boards, wallpaper);
+            // What is only drawn is merged per material (ART_BIBLE 12.1): the box, the shelf and its wall in
+            // one set; the printing, the tape and the button's lead - flat things that have no shadow of
+            // their own to show - in another that casts none. The colliders stay where the slabs stand.
+            var set = new Level01Set();
+            BuildBox(ctx, set, cardboard);
+            BuildShelf(ctx, set, boards, wallpaper);
+            set.Finish(ctx, "Box");
 
             // The apple: a boulder on the shelf, 11.4 across. It can never be bigger than it starts, and it
             // waits where it is until the first grab.
@@ -254,7 +259,9 @@ namespace Toybox.Levels
                 Action = LeashAction.Respawn,
             });
 
-            BuildDressing(ctx, print, tape);
+            var prints = new Level01Set();
+            BuildDressing(prints, print, tape);
+            prints.Finish(ctx, "Printing", castShadows: false);
 
             ctx.SetSpawn(SpawnPoint, 0f, SpawnPitch);
         }
@@ -332,44 +339,53 @@ namespace Toybox.Levels
 
         // ---- Geometry -----------------------------------------------------------------------------------
 
-        static void BuildBox(LevelContext ctx, Material cardboard)
+        static void BuildBox(LevelContext ctx, Level01Set set, Material cardboard)
         {
             const float t = WallThickness;
             float outerX = HalfX + t, outerZ = HalfZ + t;
 
             // The bottom of the box, and the sheet of cardboard outside the flap that the exit stands on.
-            ctx.AddStatic(BasicToys.Slab(new Vector3(outerX * 2f, FloorThickness, outerZ * 2f), cardboard), new Vector3(0f, -FloorThickness * 0.5f, 0f));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(9f - outerX, FloorThickness, 6f), cardboard), new Vector3((9f + outerX) * 0.5f, -FloorThickness * 0.5f, 0f));
+            Piece(ctx, set, BasicToys.Slab(new Vector3(outerX * 2f, FloorThickness, outerZ * 2f), cardboard), new Vector3(0f, -FloorThickness * 0.5f, 0f));
+            Piece(ctx, set, BasicToys.Slab(new Vector3(9f - outerX, FloorThickness, 6f), cardboard), new Vector3((9f + outerX) * 0.5f, -FloorThickness * 0.5f, 0f));
 
             // Walls: -X and the two Z walls whole, +X in three pieces round the door.
-            ctx.AddStatic(BasicToys.Slab(new Vector3(t, HighWall, outerZ * 2f), cardboard), new Vector3(-HalfX - t * 0.5f, HighWall * 0.5f, 0f));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(HalfX * 2f, HighWall, t), cardboard), new Vector3(0f, HighWall * 0.5f, -HalfZ - t * 0.5f));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(HalfX * 2f, LowWall, t), cardboard), new Vector3(0f, LowWall * 0.5f, HalfZ + t * 0.5f));
+            Piece(ctx, set, BasicToys.Slab(new Vector3(t, HighWall, outerZ * 2f), cardboard), new Vector3(-HalfX - t * 0.5f, HighWall * 0.5f, 0f));
+            Piece(ctx, set, BasicToys.Slab(new Vector3(HalfX * 2f, HighWall, t), cardboard), new Vector3(0f, HighWall * 0.5f, -HalfZ - t * 0.5f));
+            Piece(ctx, set, BasicToys.Slab(new Vector3(HalfX * 2f, LowWall, t), cardboard), new Vector3(0f, LowWall * 0.5f, HalfZ + t * 0.5f));
             float side = outerZ - DoorHalfWidth;
-            ctx.AddStatic(BasicToys.Slab(new Vector3(t, HighWall, side), cardboard), new Vector3(HalfX + t * 0.5f, HighWall * 0.5f, -DoorHalfWidth - side * 0.5f));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(t, HighWall, side), cardboard), new Vector3(HalfX + t * 0.5f, HighWall * 0.5f, DoorHalfWidth + side * 0.5f));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(t, HighWall - DoorHeight, DoorHalfWidth * 2f), cardboard), new Vector3(HalfX + t * 0.5f, (HighWall + DoorHeight) * 0.5f, 0f));
+            Piece(ctx, set, BasicToys.Slab(new Vector3(t, HighWall, side), cardboard), new Vector3(HalfX + t * 0.5f, HighWall * 0.5f, -DoorHalfWidth - side * 0.5f));
+            Piece(ctx, set, BasicToys.Slab(new Vector3(t, HighWall, side), cardboard), new Vector3(HalfX + t * 0.5f, HighWall * 0.5f, DoorHalfWidth + side * 0.5f));
+            Piece(ctx, set, BasicToys.Slab(new Vector3(t, HighWall - DoorHeight, DoorHalfWidth * 2f), cardboard), new Vector3(HalfX + t * 0.5f, (HighWall + DoorHeight) * 0.5f, 0f));
 
             // The box's top flaps, folded open: they splay outward from the three tall walls.
             const float flapLength = 2.2f, flapThickness = 0.1f, splay = 35f;
             float reach = flapLength * 0.5f * Mathf.Cos(splay * Mathf.Deg2Rad), rise = flapLength * 0.5f * Mathf.Sin(splay * Mathf.Deg2Rad);
-            ctx.AddStatic(BasicToys.Slab(new Vector3(flapLength, flapThickness, outerZ * 2f - 0.2f), cardboard),
+            Piece(ctx, set, BasicToys.Slab(new Vector3(flapLength, flapThickness, outerZ * 2f - 0.2f), cardboard),
                 new Vector3(-outerX - reach, HighWall + rise, 0f), Quaternion.Euler(0f, 0f, -splay));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(flapLength, flapThickness, outerZ * 2f - 0.2f), cardboard),
+            Piece(ctx, set, BasicToys.Slab(new Vector3(flapLength, flapThickness, outerZ * 2f - 0.2f), cardboard),
                 new Vector3(outerX + reach, HighWall + rise, 0f), Quaternion.Euler(0f, 0f, splay));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(outerX * 2f - 0.2f, flapThickness, flapLength), cardboard),
+            Piece(ctx, set, BasicToys.Slab(new Vector3(outerX * 2f - 0.2f, flapThickness, flapLength), cardboard),
                 new Vector3(0f, HighWall + rise, -outerZ - reach), Quaternion.Euler(splay, 0f, 0f));
         }
 
-        static void BuildShelf(LevelContext ctx, Material boards, Material wallpaper)
+        static void BuildShelf(LevelContext ctx, Level01Set set, Material boards, Material wallpaper)
         {
             // A slab of wall standing in the den, and the shelf on it: x -8..8, z 24..36, top at 18.
             const float wallHeight = 44f;
-            ctx.AddStatic(BasicToys.Slab(new Vector3(40f, wallHeight + FloorThickness, 1f), wallpaper), new Vector3(0f, (wallHeight - FloorThickness) * 0.5f, 36.5f));
-            ctx.AddStatic(BasicToys.Slab(new Vector3(16f, 1f, 12f), boards), new Vector3(0f, ShelfTop - 0.5f, 30f));
+            Piece(ctx, set, BasicToys.Slab(new Vector3(40f, wallHeight + FloorThickness, 1f), wallpaper), new Vector3(0f, (wallHeight - FloorThickness) * 0.5f, 36.5f));
+            Piece(ctx, set, BasicToys.Slab(new Vector3(16f, 1f, 12f), boards), new Vector3(0f, ShelfTop - 0.5f, 30f));
             // Two brackets under it: wedges hanging from the board, deepest at the wall.
             for (int sign = -1; sign <= 1; sign += 2)
-                ctx.AddStatic(BasicToys.Ramp(9f, 4f, 0.8f, boards), new Vector3(5.5f * sign, ShelfTop - 1f - 2f, 31.5f), Quaternion.Euler(0f, 0f, 180f));
+                Piece(ctx, set, BasicToys.Ramp(9f, 4f, 0.8f, boards), new Vector3(5.5f * sign, ShelfTop - 1f - 2f, 31.5f), Quaternion.Euler(0f, 0f, 180f));
+        }
+
+        // A piece of the set: its collider stands in the level, its looks join the set.
+        static void Piece(LevelContext ctx, Level01Set set, GameObject piece, Vector3 centre) => Piece(ctx, set, piece, centre, Quaternion.identity);
+
+        static void Piece(LevelContext ctx, Level01Set set, GameObject piece, Vector3 centre, Quaternion rotation)
+        {
+            ctx.AddStatic(piece, centre, rotation);
+            set.Absorb(piece);
         }
 
         Door BuildFlap(LevelContext ctx, Material cardboard)
@@ -426,10 +442,10 @@ namespace Toybox.Levels
         }
 
         // Things to look at that nothing lands on: printing, tape and the button's lead. No colliders, and
-        // nothing stands more than a few hundredths proud of the surface it is on.
-        static void BuildDressing(LevelContext ctx, Material print, Material tape)
+        // nothing stands more than a few hundredths proud of the surface it is on. (They were 26 renderers
+        // that each cast a shadow nobody could see; now they are a mesh per material that casts none.)
+        static void BuildDressing(Level01Set set, Material print, Material tape)
         {
-            Transform root = ctx.Root;
             const float proud = 0.012f;
 
             // "This way up", printed on the low wall: two arrows over a bar. They point at the apple.
@@ -439,43 +455,40 @@ namespace Toybox.Levels
                 new Vector2(0f, 1.6f), new Vector2(-0.4f, 1f), new Vector2(-0.12f, 1f),
             }, proud * 2f));
             float wallZ = HalfZ;
-            GadgetKit.Visual(root, "Arrow", arrow, print, new Vector3(-2.05f, 1.35f, wallZ));
-            GadgetKit.Visual(root, "Arrow", arrow, print, new Vector3(-1.05f, 1.35f, wallZ));
-            GadgetKit.Visual(root, "Arrow Bar", GadgetKit.BoxMesh(new Vector3(1.9f, 0.16f, proud * 2f)), print, new Vector3(-1.55f, 1.05f, wallZ));
+            set.Shape(print, arrow, new Vector3(-2.05f, 1.35f, wallZ), Quaternion.identity);
+            set.Shape(print, arrow, new Vector3(-1.05f, 1.35f, wallZ), Quaternion.identity);
+            set.Box(print, new Vector3(-1.55f, 1.05f, wallZ), new Vector3(1.9f, 0.16f, proud * 2f));
 
             // A shipping label on the same wall: a sheet with three printed lines.
-            GadgetKit.Visual(root, "Label", GadgetKit.BoxMesh(new Vector3(1.7f, 1.1f, proud * 2f)), print, new Vector3(1.55f, 2.1f, wallZ));
+            set.Box(print, new Vector3(1.55f, 2.1f, wallZ), new Vector3(1.7f, 1.1f, proud * 2f));
             for (int i = 0; i < 3; i++)
-                GadgetKit.Visual(root, "Label Line", GadgetKit.BoxMesh(new Vector3(i == 2 ? 0.8f : 1.3f, 0.1f, proud * 4f)), tape,
-                    new Vector3(i == 2 ? 1.3f : 1.55f, 2.4f - i * 0.28f, wallZ));
+                set.Box(tape, new Vector3(i == 2 ? 1.3f : 1.55f, 2.4f - i * 0.28f, wallZ), new Vector3(i == 2 ? 0.8f : 1.3f, 0.1f, proud * 4f));
 
             // A bar code on the long wall opposite the flap.
             float[] bars = { 0.1f, 0.05f, 0.14f, 0.05f, 0.08f, 0.16f, 0.05f, 0.1f, 0.05f, 0.14f, 0.08f };
             float barZ = -0.2f;
             for (int i = 0; i < bars.Length; i++)
             {
-                GadgetKit.Visual(root, "Bar Code", GadgetKit.BoxMesh(new Vector3(proud * 2f, 0.9f, bars[i])), print, new Vector3(-HalfX, 2.2f, barZ - bars[i] * 0.5f));
+                set.Box(print, new Vector3(-HalfX, 2.2f, barZ - bars[i] * 0.5f), new Vector3(proud * 2f, 0.9f, bars[i]));
                 barZ -= bars[i] + 0.07f;
             }
 
             // The taped seam of the box's bottom, and tape round the flap that was cut into the +X wall.
-            GadgetKit.Visual(root, "Floor Tape", GadgetKit.BoxMesh(new Vector3(0.7f, proud * 2f, HalfZ * 2f)), tape, Vector3.zero);
+            set.Box(tape, Vector3.zero, new Vector3(0.7f, proud * 2f, HalfZ * 2f));
             float frame = 0.14f;
             for (int sign = -1; sign <= 1; sign += 2)
-                GadgetKit.Visual(root, "Door Tape", GadgetKit.BoxMesh(new Vector3(proud * 2f, DoorHeight + frame, frame)), print,
-                    new Vector3(HalfX, (DoorHeight + frame) * 0.5f, sign * (DoorHalfWidth + frame * 0.5f)));
-            GadgetKit.Visual(root, "Door Tape", GadgetKit.BoxMesh(new Vector3(proud * 2f, frame, DoorHalfWidth * 2f)), print,
-                new Vector3(HalfX, DoorHeight + frame * 0.5f, 0f));
+                set.Box(print, new Vector3(HalfX, (DoorHeight + frame) * 0.5f, sign * (DoorHalfWidth + frame * 0.5f)), new Vector3(proud * 2f, DoorHeight + frame, frame));
+            set.Box(print, new Vector3(HalfX, DoorHeight + frame * 0.5f, 0f), new Vector3(proud * 2f, frame, DoorHalfWidth * 2f));
 
             // The button's lead: out of the cup toward the back of the box, along the floor to the wall beside
             // the flap, up the wall and into the flap's signal bar.
             Material lead = GadgetKit.Body;
             const float w = 0.07f, h = 0.05f, leadZ = -DoorHalfWidth - 0.32f;
             float cupEdge = CupZ - CupOuterRadius + 0.05f;
-            GadgetKit.Visual(root, "Lead", GadgetKit.BoxMesh(new Vector3(w, h, cupEdge - leadZ + w * 0.5f)), lead, new Vector3(CupX, h * 0.5f, (cupEdge + leadZ - w * 0.5f) * 0.5f));
-            GadgetKit.Visual(root, "Lead", GadgetKit.BoxMesh(new Vector3(HalfX - CupX + w * 0.5f, h, w)), lead, new Vector3((HalfX + CupX - w * 0.5f) * 0.5f, h * 0.5f, leadZ));
-            GadgetKit.Visual(root, "Lead", GadgetKit.BoxMesh(new Vector3(h, 1.9f, w)), lead, new Vector3(HalfX - h * 0.5f, 0.95f, leadZ));
-            GadgetKit.Visual(root, "Lead", GadgetKit.BoxMesh(new Vector3(h, w, -DoorHalfWidth - leadZ + w)), lead, new Vector3(HalfX - h * 0.5f, 1.9f, (leadZ - DoorHalfWidth) * 0.5f));
+            set.Box(lead, new Vector3(CupX, h * 0.5f, (cupEdge + leadZ - w * 0.5f) * 0.5f), new Vector3(w, h, cupEdge - leadZ + w * 0.5f));
+            set.Box(lead, new Vector3((HalfX + CupX - w * 0.5f) * 0.5f, h * 0.5f, leadZ), new Vector3(HalfX - CupX + w * 0.5f, h, w));
+            set.Box(lead, new Vector3(HalfX - h * 0.5f, 0.95f, leadZ), new Vector3(h, 1.9f, w));
+            set.Box(lead, new Vector3(HalfX - h * 0.5f, 1.9f, (leadZ - DoorHalfWidth) * 0.5f), new Vector3(h, w, -DoorHalfWidth - leadZ + w));
         }
 
         // ---- The solution -------------------------------------------------------------------------------

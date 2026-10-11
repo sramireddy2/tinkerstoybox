@@ -21,6 +21,14 @@ namespace Toybox.EditorTools
         public const string RendererPath = SetupUtil.SettingsDir + "/ToyboxRenderer.asset";
         public const string ToyLitPath = SetupUtil.MaterialsDir + "/ToyLit.mat";
         public const string PlainLitPath = SetupUtil.MaterialsDir + "/PlainLit.mat";
+        /// <summary>
+        /// The plain look's template for whatever glows (signal lamps, the stand-ins of the flat effects):
+        /// URP Lit with its _EMISSION keyword on. The keyword is a shader_feature - a variant no material
+        /// in the build uses is not compiled into the player - so switching it on at runtime on a clone of
+        /// PlainLit.mat lit nothing in the browser. This asset is what keeps the variant in the build.
+        /// </summary>
+        public const string PlainLitEmissivePath = SetupUtil.MaterialsDir + "/PlainLitEmissive.mat";
+        public const string EmissionKeyword = "_EMISSION";
         const string UrpLit = "Universal Render Pipeline/Lit";
 
         // Physics layers. Kept in sync with Toybox.Engine.Layers at runtime.
@@ -42,7 +50,8 @@ namespace Toybox.EditorTools
         {
             PlayerSettings.companyName = "Tinker's Toybox";
             PlayerSettings.productName = "Tinker's Toybox";
-            PlayerSettings.bundleVersion = "0.1.0";
+            // The release: the fifteen levels and the ending. The page passes it on as productVersion.
+            PlayerSettings.bundleVersion = "1.0.0";
             PlayerSettings.colorSpace = ColorSpace.Linear;
             PlayerSettings.runInBackground = true;
             PlayerSettings.SplashScreen.show = false;
@@ -93,8 +102,11 @@ namespace Toybox.EditorTools
         }
 
         /// <summary>
-        /// A pipeline to start from: one URP asset with one renderer, assigned to every quality level. The
-        /// pipeline area replaces the assignment with its tier assets in a later step.
+        /// A pipeline to start from: the shared renderer and - only in a project that has no pipeline
+        /// assigned yet - one URP asset, assigned to every quality level. The pipeline area replaces the
+        /// assignment with its tier assets in a later step and then deletes the starting asset
+        /// (PipelineSetup.ConfigureQualityLevels): from there on nothing refers to it, so a re-run of this
+        /// step must not put it back beside them.
         /// </summary>
         [SetupStep(50)]
         static void ConfigureRenderPipeline()
@@ -111,6 +123,9 @@ namespace Toybox.EditorTools
                 ResourceReloader.ReloadAllNullIn(rendererData, UniversalRenderPipelineAsset.packagePath);
                 EditorUtility.SetDirty(rendererData);
             }
+
+            // A project whose pipeline is assigned already (the tier assets, in the repository) needs no asset to start from.
+            if (AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(UrpAssetPath) == null && GraphicsSettings.defaultRenderPipeline != null) return;
 
             UniversalRenderPipelineAsset urp = SetupUtil.LoadOrCreate(UrpAssetPath, () => UniversalRenderPipelineAsset.Create(rendererData), out bool createdAsset);
             if (createdAsset)
@@ -163,6 +178,17 @@ namespace Toybox.EditorTools
             SetupUtil.LoadOrCreateMaterial(ToyLitPath, UrpLit, repoint: false);
             // The plain look (?plain=1) stays URP Lit for good.
             SetupUtil.LoadOrCreateMaterial(PlainLitPath, UrpLit);
+            // ... and its glowing things are clones of a second template that has the emission variant on
+            // (see PlainLitEmissivePath). "None" for the GI flags: with the default, "emissive is black",
+            // URP's material validation would switch the keyword off again.
+            Material emissive = SetupUtil.LoadOrCreateMaterial(PlainLitEmissivePath, UrpLit);
+            if (!emissive.IsKeywordEnabled(EmissionKeyword) || emissive.globalIlluminationFlags != MaterialGlobalIlluminationFlags.None)
+            {
+                emissive.EnableKeyword(EmissionKeyword);
+                emissive.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
+                EditorUtility.SetDirty(emissive);
+                AssetDatabase.SaveAssetIfDirty(emissive);
+            }
         }
 
         // The one scene: a Bootstrap object and nothing else. Written only if it is missing, so that running

@@ -656,9 +656,12 @@ namespace Toybox.Tests
             yield return bot.Wait(2f);
         }
 
-        // The one bypass the real simulation allows (the spec's "a bigger apple cannot be mounted" does not
-        // hold): jump off the apple, take it in the air, let go at the top of the jump - it comes down bigger
-        // under one's own feet. Six jumps make a 1.85 apple 4.6 tall, higher than the low wall.
+        // The one bypass the real simulation allowed (the spec's "a bigger apple cannot be mounted" did not
+        // hold): jump off the apple, take it in the air, let go at the top of the jump - it came down bigger
+        // under one's own feet. Six jumps made a 1.85 apple 4.6 tall, higher than the low wall. Since the
+        // final review the engine keeps the toy one has just jumped off out of reach (UnderfootTests): the
+        // apple stays as it is. Whoever gets over the wall some other way (a fixture's apple here) still
+        // ends back in the box.
         [Test]
         public void RidingAGrowingAppleOverTheWall_EndsBackInTheBox_NotAtTheExit()
         {
@@ -685,9 +688,23 @@ namespace Toybox.Tests
             RunSeconds(0.5f);
             Assert.AreSame(apple, player.GroundProp);
 
+            int pickUps = 0;
+            Game.Events.PropGrabbed += e => pickUps++;
             BotRunner.Run(Game, Surf(bot, apple), 40f);
-            Assert.Greater(apple.Scale, 4.2f, "the apple grew under the bot's feet");
-            Assert.Greater(player.Position.y, L.LowWall, "and the bot stands above the low wall");
+            Assert.AreEqual(0, pickUps, "the apple under the feet is not taken in a jump");
+            Assert.AreEqual(1.85f, apple.Scale, 1e-4f, "so it does not grow under the bot's feet");
+            Assert.AreSame(apple, player.GroundProp);
+            Assert.Less(player.Position.y, L.LowWall, "and nobody is above the low wall");
+
+            // Fixture: the apple the six jumps used to make, and the player on top of it.
+            player.Teleport(new Vector3(2.4f, 0f, -3f));
+            apple.SetScale(4.6f);
+            apple.SetPose(new Vector3(-0.6f, 2.3f, 1f), Quaternion.identity);
+            RunSeconds(0.5f);
+            player.Teleport(apple.Center + Vector3.up * (apple.Radius + 0.02f), 0f, -89f);
+            RunSeconds(0.5f);
+            Assert.AreSame(apple, player.GroundProp);
+            Assert.Greater(player.Position.y, L.LowWall, "the bot stands above the low wall");
 
             // Off the top and over the wall.
             float farthest = 0f;
@@ -714,8 +731,9 @@ namespace Toybox.Tests
                 yield return bot.Until(() => player.Grounded, 3f);
                 yield return bot.LookAt(apple);
                 yield return bot.Jump(false);
-                // In the air the apple is no longer what the bot stands on: a click takes it.
-                yield return bot.Until(() => bot.Game.Grabber.FindTarget() == apple, 1f);
+                // In the air the apple is no longer what the bot stands on - and still not to be had.
+                yield return bot.Until(() => !player.Grounded, 1f);
+                yield return bot.Wait(2f * Sim.Dt);
                 yield return bot.Click();
                 yield return bot.LookAt(player.Position + Vector3.down * 5f, 1f);
                 yield return bot.Until(() => player.Velocity.y <= 0.2f, 2f);
@@ -1107,6 +1125,55 @@ namespace Toybox.Tests
             Assert.AreEqual(11.4f, apple.Scale, 1e-4f);
             Assert.Less(Vector3.Distance(apple.Center, L.AppleOrigin), 1e-3f);
             TestHelpers.PlayLevel(Game, 60f);
+        }
+
+        // ---- The final review: the draws ----------------------------------------------------------------
+
+        // ART_BIBLE 12.1: level statics are merged per material, at most 12 draws. The level drew 44 statics
+        // for 7 materials; 22 prints 0.024 thick and the button's four leads were each a renderer that cast
+        // a shadow nobody could see - 26 of the level's 50 shadow casters, two cascades each on Low.
+        [Test]
+        public void WhatIsOnlyDrawn_IsMergedPerMaterial_AndThePrintingCastsNoShadow()
+        {
+            Load();
+            L level = Level;
+            int draws = 0, casters = 0;
+            var names = new List<string>();
+            var materials = new List<Material>();
+            foreach (MeshRenderer renderer in Game.LevelRoot.GetComponentsInChildren<MeshRenderer>())
+            {
+                // The apple and the flap (a door: it moves, and carries the lamp) are not statics.
+                if (renderer.transform.IsChildOf(level.Apple.Transform) || renderer.transform.IsChildOf(level.Flap.Mover.Transform)) continue;
+                draws += renderer.sharedMaterials.Length;
+                if (renderer.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.Off) casters++;
+                names.Add(renderer.transform.parent.name + "/" + renderer.sharedMaterial.name);
+            }
+            Debug.Log("[Level03] statics: " + draws + " draws, " + casters + " casters: " + string.Join(", ", names));
+            Assert.LessOrEqual(draws, 12, string.Join(", ", names));
+            Assert.LessOrEqual(casters, 8, string.Join(", ", names));
+
+            foreach (string name in new[] { "Box", "Printing" })
+            {
+                Transform set = Game.LevelRoot.Find(name);
+                Assert.IsNotNull(set, name);
+                Assert.AreEqual(0, set.GetComponentsInChildren<Collider>(true).Length, name + " is looks only");
+                MeshRenderer[] renderers = set.GetComponentsInChildren<MeshRenderer>(true);
+                Assert.That(renderers.Length, Is.InRange(1, 3), name + ": a renderer per material");
+                foreach (MeshRenderer renderer in renderers)
+                {
+                    Assert.AreEqual(name == "Box", renderer.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.Off, name + "/" + renderer.sharedMaterial.name);
+                    materials.Add(renderer.sharedMaterial);
+                }
+            }
+            CollectionAssert.AllItemsAreUnique(materials, "every material once: nothing is drawn piece by piece");
+
+            // The printing is where it was: the bar code on the -X wall, the label on the low wall, the tape on the floor.
+            Bounds prints = new Bounds(Vector3.zero, Vector3.zero);
+            foreach (MeshRenderer renderer in Game.LevelRoot.Find("Printing").GetComponentsInChildren<MeshRenderer>()) prints.Encapsulate(renderer.bounds);
+            Assert.AreEqual(-L.HalfX, prints.min.x, 0.03f, "the bar code lies on the -X wall");
+            Assert.AreEqual(L.HalfX, prints.max.x, 0.03f, "the tape round the flap on the +X wall");
+            Assert.AreEqual(L.HalfZ, prints.max.z, 0.05f, "arrows and label on the low wall");
+            Assert.Less(prints.max.y, L.HighWall, "nothing above the walls");
         }
     }
 }

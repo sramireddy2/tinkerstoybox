@@ -20,6 +20,7 @@ namespace Toybox.UI
         public EventSystem EventSystem { get; private set; }
         public InputSystemUIInputModule Module { get; private set; }
         public InputAction Submit { get; private set; }
+        public InputAction Navigate { get; private set; }
 
         /// <summary>The actions the module is given. Public so a test can check the bindings without an EventSystem.</summary>
         public static InputActionAsset CreateActions()
@@ -83,12 +84,20 @@ namespace Toybox.UI
             // A click beside every button must not take the keyboard's focus away.
             input.Module.deselectOnBackgroundClick = false;
             input.Submit = map.FindAction("Submit");
+            input.Navigate = map.FindAction("Navigate");
             input.holder.SetActive(true);
             return input;
         }
 
         /// <summary>True while a key that activates is still down (so what it started can wait for the release).</summary>
         public bool SubmitHeld => Submit != null && Submit.enabled && Submit.IsPressed();
+
+        /// <summary>
+        /// True while a key that moves the focus is down. They are the keys the player walks with: one that
+        /// has been down since before a menu opened must not walk the menu's focus (the module repeats a
+        /// held direction ten times a second, whenever the key went down).
+        /// </summary>
+        public bool NavigateHeld => Navigate != null && Navigate.enabled && Navigate.ReadValue<Vector2>().sqrMagnitude > 0.01f;
 
         public void Dispose()
         {

@@ -367,6 +367,11 @@ namespace Toybox.Platform
             LastCompletion = e;
             if (Levels.InCampaign(LevelId)) played[LevelId] = new Vector2(Mathf.Max(0f, e.Time), PickUps);
             LastCompletionWasBest = RecordProgress && Levels.InCampaign(LevelId) && Progress.RecordCompletion(LevelId, e.Time, PickUps);
+            // The card is the natural place to stop for the day, and a session that ends on it continues with
+            // the level after the one just finished - not with that one again, as if it had not been saved.
+            // (Not after the last: its bookmark stays until Finish, and the ending puts it back to the first.
+            // After() would wrap round to the first here.)
+            if (RecordProgress && Levels.InCampaign(LevelId) && LevelId != Levels.Last) Progress.LastPlayed = Levels.After(LevelId);
             Enter(FlowState.LevelComplete);
         }
 

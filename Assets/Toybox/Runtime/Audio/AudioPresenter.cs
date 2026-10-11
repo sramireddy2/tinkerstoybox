@@ -25,7 +25,8 @@ namespace Toybox.Audio
     /// - Nothing sounds before the player's first click or key press (<see cref="Unlocked"/>): a browser
     ///   only starts audio after a gesture, and whatever was started earlier would burst out at once.
     /// - The game's sounds pause with the game; menu sounds do not. The music fades out and comes back in
-    ///   at the start of its two-bar section.
+    ///   at the start of its two-bar section. The one menu it plays behind is the settings card, softly
+    ///   (<see cref="MusicPreview"/>): a volume slider that is moved in silence sets nothing.
     /// - Volumes come from <see cref="Settings"/>: the master volume is the AudioListener's, effects and
     ///   music scale their own voices.
     ///
@@ -66,6 +67,8 @@ namespace Toybox.Audio
         public const float JumpThreshold = 0.05f;
         /// <summary>Seconds the music takes to fade out when the game pauses or the level ends.</summary>
         public const float MusicFadeOut = 0.25f;
+        /// <summary>How loud the music is behind the settings card, of what it is in play.</summary>
+        public const float PreviewFade = 0.6f;
         public const int MaxLandsPerFrame = 4;
         /// <summary>Landings quieter than this are not played.</summary>
         public const float MinLandVolume = 0.03f;
@@ -87,7 +90,7 @@ namespace Toybox.Audio
 
         MusicScore score;
         MusicKey key = MusicKey.CMajor;
-        bool musicBegun, levelDone;
+        bool musicBegun, levelDone, preview, previewing;
         float musicFadeTarget = 1f;
 
         Prop focus;
@@ -111,6 +114,18 @@ namespace Toybox.Audio
         public MusicKey Key => key;
         /// <summary>The audio clock as of the last frame.</summary>
         public double Now => output != null ? output.Now : 0.0;
+        /// <summary>
+        /// The settings card is up: the level's music plays softly although the game is not being played,
+        /// so that the Music slider (and the master volume) can be heard while it is set. The settings
+        /// menu turns it on when it opens and off when it closes.
+        /// </summary>
+        public bool MusicPreview
+        {
+            get => preview;
+            set => preview = value;
+        }
+        /// <summary>True while the music is playing as that preview.</summary>
+        public bool Previewing => previewing;
 
         // ---- Lifecycle ----------------------------------------------------------------------------------------
 
@@ -171,13 +186,14 @@ namespace Toybox.Audio
                 FocusTick();
                 RunMusic(now);
             }
+            Preview(now, playing);
             HoldTone(dt, now, playing);
 
             // The music's fade: quick out, and gone once it is silent.
             if (output.MusicFade != musicFadeTarget)
             {
                 float step = dt / MusicFadeOut;
-                output.MusicFade = musicFadeTarget > output.MusicFade ? 1f : Mathf.Max(musicFadeTarget, output.MusicFade - step);
+                output.MusicFade = musicFadeTarget > output.MusicFade ? musicFadeTarget : Mathf.Max(musicFadeTarget, output.MusicFade - step);
                 if (output.MusicFade <= 0f) output.StopMusic();
             }
             output.Apply();
@@ -368,6 +384,30 @@ namespace Toybox.Audio
         }
 
         // ---- Music -------------------------------------------------------------------------------------------
+
+        // Behind the settings card the tune goes on (or begins), softer; when the card closes it stops as it
+        // does for any other menu. In play the music is the game's own business again.
+        void Preview(double now, bool playing)
+        {
+            bool wanted = preview && !playing && Unlocked && score != null && !levelDone;
+            if (wanted)
+            {
+                RunMusic(now);
+                if (music.Running)
+                {
+                    previewing = true;
+                    musicFadeTarget = PreviewFade;
+                    if (output.MusicFade > PreviewFade) output.MusicFade = PreviewFade;
+                }
+            }
+            else if (previewing)
+            {
+                previewing = false;
+                if (playing) return;
+                music.Stop();
+                musicFadeTarget = 0f;
+            }
+        }
 
         bool MusicReady => bank == null || (bank.KeyReady && bank.Ready(SoundId.Box8) && bank.Ready(SoundId.KitKick));
 

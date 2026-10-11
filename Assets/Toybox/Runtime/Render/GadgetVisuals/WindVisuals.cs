@@ -69,6 +69,9 @@ namespace Toybox.Render
         /// <summary>How visible the i-th stream is, 0 (calm) .. 1.</summary>
         public float ShownOf(int index) => streams[index].Shown;
         public Renderer RibbonRendererOf(int index) => streams[index].RibbonRenderer;
+        /// <summary>How often the i-th stream's ribbon mesh was laid out (triangles and UVs written), and how often only moved.</summary>
+        public int RibbonLayouts(int index) => streams[index].Ribbons.Applied;
+        public int RibbonMoves(int index) => streams[index].Ribbons.Moved;
         public Renderer VolumeRendererOf(int index) => streams[index].VolumeRenderer;
         /// <summary>Degrees per second the i-th fan's blades turn at.</summary>
         public float FanSpeedOf(int index) => fans[index].Speed;
@@ -206,7 +209,20 @@ namespace Toybox.Render
             // The same number of bends per streamer whatever the stream's length.
             float swayRate = SwayRate * Mathf.Min(1f, SwayReference / Mathf.Max(s.Length, 1e-3f));
 
-            s.Ribbons.Clear();
+            // The ribbons are the same quads every frame - two passes of Count streamers of Segments pieces -
+            // and only their corners and colours change: laid out once (triangles, UVs), then moved.
+            int quads = 2 * s.Count * Segments;
+            if (s.Ribbons.QuadCount != quads)
+            {
+                var across0 = new Vector2(0f, 0.5f);
+                var across1 = new Vector2(1f, 0.5f);
+                Vector3 o = Vector3.zero;
+                Color none = Color.clear;
+                s.Ribbons.Clear();
+                for (int i = 0; i < quads; i++) s.Ribbons.Quad(o, o, o, o, none, none, none, none, across0, across1, across1, across0);
+                s.Ribbons.Apply();
+            }
+            int quad = 0;
             for (int pass = 0; pass < 2; pass++)
             {
                 // The wide deep edges first, the Paper cores on top of them.
@@ -243,8 +259,9 @@ namespace Toybox.Render
                         color.a = opacity * taper * inside;
                         if (k > 0)
                         {
-                            s.Ribbons.Quad(previous - previousSide, previous + previousSide, p + side, p - side, previousColor, previousColor, color, color,
-                                new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(0f, 0.5f));
+                            s.Ribbons.Move(quad, previous - previousSide, previous + previousSide, p + side, p - side);
+                            s.Ribbons.Tint(quad, previousColor, previousColor, color, color);
+                            quad++;
                         }
                         previous = p;
                         previousSide = side;
@@ -252,7 +269,7 @@ namespace Toybox.Render
                     }
                 }
             }
-            s.Ribbons.Apply();
+            s.Ribbons.ApplyMoved(true);
         }
 
         void TurnFan(Fan fan, float dt)

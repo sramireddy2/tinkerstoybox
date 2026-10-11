@@ -37,6 +37,18 @@ namespace Toybox.Render
     ///
     /// Nothing is drawn while the door is settling or cooling down (it is not a portal then), nor for a
     /// settled door of the player's own size (it is just a door).
+    ///
+    /// The second camera's picture is cut to the visible part of the opening, so the piece of the texture
+    /// it needs changes with every step and turn of the player - and URP makes its camera targets by exact
+    /// size (and drops unused ones after a few frames): a new size every frame was a new colour and depth
+    /// target every frame (measured in Level 14: 42 sizes in 75 renders, 5 ms for a render that made its
+    /// targets against 1.5 ms for one that found them). So the piece that is rendered is rounded up to a
+    /// short ladder of sizes (<see cref="Steps"/>, <see cref="RenderPixels"/>): the frustum stays cut to
+    /// the opening, the picture is a little oversampled (never more than half again per axis), and the
+    /// pipeline finds its targets except when a step is crossed.
+    ///
+    /// The texture is the tier's and outlives a level, but not a level without doors: the first frame of
+    /// one gives it back (10 MB on Medium).
     /// </summary>
     [Presenter(240, ProvidesLook = true)]
     public sealed class PortalView : GadgetVisual
@@ -62,6 +74,20 @@ namespace Toybox.Render
         /// <summary>For tests and tools: false keeps every door on its card, whatever the tier.</summary>
         public static bool AllowCamera = true;
 
+        /// <summary>
+        /// The sizes a rendered piece of the texture can have along one axis, in pixels (and the texture's
+        /// own size, where that is the limit): each no more than half again the one before.
+        /// </summary>
+        public static readonly int[] Steps = { 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1280, 1536 };
+
+        /// <summary>The smallest step that holds <paramref name="pixels"/>, within a texture <paramref name="limit"/> pixels long.</summary>
+        public static int Step(int pixels, int limit)
+        {
+            for (int i = 0; i < Steps.Length; i++)
+                if (Steps[i] >= pixels) return Mathf.Min(Steps[i], limit);
+            return limit;
+        }
+
         sealed class Door
         {
             public PortalDoorway Portal;
@@ -84,6 +110,8 @@ namespace Toybox.Render
         Mesh viewMesh;
         MeshRenderer viewRenderer;
         bool cameraBroken, warmed;
+        // What the device can do does not change: asked once (a shader lookup and a format query), not every frame.
+        bool? deviceCan;
         Color glow, ink, rimLine;
 
         public int Count => doors.Count;
@@ -91,13 +119,17 @@ namespace Toybox.Render
         public Camera Camera => portalCamera;
         public RenderTexture Texture => texture;
         public Renderer ViewRenderer => viewRenderer;
-        /// <summary>Pixels of the texture the last view was rendered into.</summary>
+        /// <summary>Pixels the visible piece of the opening asked for when the last view was rendered (its share of the screen on this tier).</summary>
         public Vector2Int ViewPixels { get; private set; }
+        /// <summary>Pixels of the texture that view was rendered into: <see cref="ViewPixels"/> rounded up to a step.</summary>
+        public Vector2Int RenderPixels { get; private set; }
         /// <summary>Views rendered since the presenter was attached.</summary>
         public int Renders { get; private set; }
         /// <summary>True if this tier and this device get the second camera at all.</summary>
         public bool CameraAvailable =>
-            AllowCamera && !cameraBroken && Context != null && Context.HasGraphics && Tier != QualityTier.Low && Quality.HdrRenderable && Shader.Find(ViewShader) != null;
+            AllowCamera && !cameraBroken && Context != null && Context.HasGraphics && Tier != QualityTier.Low && DeviceCan;
+
+        bool DeviceCan => deviceCan ?? (deviceCan = Quality.HdrRenderable && Shader.Find(ViewShader) != null).Value;
 
         /// <summary>True while the door's opening shows the live view.</summary>
         public bool IsLive(PortalDoorway portal) => Find(portal)?.Live ?? false;
@@ -239,6 +271,17 @@ namespace Toybox.Render
 
         protected override void Draw(float dt, float alpha)
         {
+            if (doors.Count == 0)
+            {
+                // A level without a door: nothing to draw, and the picture's texture is given back (the next
+                // level with a door warms up again while it loads).
+                if (texture != null)
+                {
+                    DropTexture();
+                    warmed = false;
+                }
+                return;
+            }
             Camera main = Context.Camera;
             Vector3 eye = main != null ? main.transform.position : Game.Player.Eye;
             bool cameraAvailable = main != null && CameraAvailable;
@@ -401,6 +444,10 @@ namespace Toybox.Render
             int width = Mathf.Clamp(Mathf.CeilToInt(wide * fit), 32, texture.width);
             int height = Mathf.Clamp(Mathf.CeilToInt(tall * fit), 32, texture.height);
             ViewPixels = new Vector2Int(width, height);
+            // What is rendered is that, rounded up to a step: the same few target sizes over and over.
+            width = Step(width, texture.width);
+            height = Step(height, texture.height);
+            RenderPixels = new Vector2Int(width, height);
 
             // The other side's eye, looking squarely through the door; the window is the cut opening,
             // scaled about the threshold like the eye.

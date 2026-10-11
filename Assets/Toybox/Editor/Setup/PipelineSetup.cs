@@ -259,6 +259,9 @@ namespace Toybox.EditorTools
             // What a Quality level without an asset of its own would fall back to.
             if (GraphicsSettings.defaultRenderPipeline != assets[medium]) GraphicsSettings.defaultRenderPipeline = assets[medium];
             if (changed) AssetDatabase.SaveAssets();
+            // The asset the core started with (CoreSetup, step 50) is now replaced everywhere and nothing refers
+            // to it: it goes. The core only makes one while no pipeline is assigned, so it does not come back.
+            if (AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(CoreSetup.UrpAssetPath) != null) AssetDatabase.DeleteAsset(CoreSetup.UrpAssetPath);
         }
 
         // ---- 140: the volume profile the game instantiates (7.2, 7.5) ----------------------------------

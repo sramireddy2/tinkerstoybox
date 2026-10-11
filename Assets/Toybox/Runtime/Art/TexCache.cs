@@ -12,13 +12,19 @@ namespace Toybox.Art
     ///
     /// - 256 x 256 (the feather's is 256 x 64), linear, with mips, repeating, trilinear, anisotropy 4. On
     ///   the Low tier they are half that size with anisotropy 1 (the same picture, averaged down).
+    /// - A full-size texture brings its half-size twin with it (the same pixels halved: a fraction of a
+    ///   millisecond, 64 KB), and a tier change destroys nothing: when the governor steps a session down
+    ///   to Low - the moment it has found the machine too slow - no texture is generated, and no later
+    ///   change of tier generates one either. (It used to remake the whole set in that one frame, 50 to
+    ///   350 ms, and destroy the other size.)
     /// - Deterministic: every texture is drawn with a local xorshift seeded with the FNV-1a hash of its
     ///   name. Never UnityEngine.Random and never game.Rng - making a texture must not disturb the
     ///   simulation.
     /// - A headless run (no graphics device) makes nothing and hands out Texture2D.grayTexture.
     /// - <see cref="Pixels"/> is the picture itself as plain data, graphics device or not.
     ///
-    /// Budget: nine textures, under 3 MB, under 60 ms of generation in total.
+    /// Budget: nine textures and the half-size twins of seven of them, under 4 MB, under 60 ms of
+    /// generation in total.
     /// </summary>
     public static class TexCache
     {
@@ -76,7 +82,26 @@ namespace Toybox.Art
 
             Clock.Start();
             Color32[] pixels = Pixels(kind, out int width, out int height);
-            if (low) pixels = Halve(pixels, ref width, ref height);
+            Texture2D texture = null;
+            if (!low)
+            {
+                texture = Make(kind, false, pixels, width, height);
+                Cache[key] = texture;
+            }
+            // The half-size twin, from the pixels that are at hand anyway (the peel has none: it only exists on High).
+            int twin = Key(kind, true);
+            if ((low || (kind != DetailTexture.Neutral && kind != DetailTexture.Peel)) && !(Cache.TryGetValue(twin, out Texture2D small) && small != null))
+            {
+                pixels = Halve(pixels, ref width, ref height);
+                small = Make(kind, true, pixels, width, height);
+                Cache[twin] = small;
+            }
+            Clock.Stop();
+            return low ? Cache[key] : texture;
+        }
+
+        static Texture2D Make(DetailTexture kind, bool low, Color32[] pixels, int width, int height)
+        {
             var texture = new Texture2D(width, height, TextureFormat.RGBA32, true, true)
             {
                 name = "Detail " + kind + (low ? " (low)" : ""),
@@ -87,8 +112,6 @@ namespace Toybox.Art
             };
             texture.SetPixels32(pixels);
             texture.Apply(true, true);
-            Clock.Stop();
-            Cache[key] = texture;
             return texture;
         }
 
@@ -108,8 +131,9 @@ namespace Toybox.Art
         }
 
         /// <summary>
-        /// For the loading screen: makes one texture that does not exist yet at this tier and returns true,
-        /// or returns false when all of them exist. Call it once per frame until it says false.
+        /// For the loading screen: makes one kind that does not exist yet at this tier (the texture and,
+        /// with a full-size one, its half-size twin) and returns true, or returns false when all of them
+        /// exist. Call it once per frame until it says false.
         /// </summary>
         public static bool WarmNext(QualityTier tier)
         {
@@ -126,8 +150,10 @@ namespace Toybox.Art
         }
 
         /// <summary>
-        /// Destroys the textures of the other size once the tier has changed (and every material has been
-        /// given the texture of the new one), so that no more than nine are alive.
+        /// Destroys the textures a tier does not use (the other size, and the peel below High), for
+        /// whoever wants the memory back; call it only after every material has been given the texture of
+        /// that tier. A tier change does not call it: both sizes are kept, so that no change of tier has to
+        /// generate anything.
         /// </summary>
         public static void Trim(QualityTier tier)
         {

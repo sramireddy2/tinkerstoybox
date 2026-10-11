@@ -160,7 +160,8 @@ namespace Toybox.UI
     ///
     ///   tools\unity.ps1 exec -Method Toybox.EditorTools.Shots.Capture -UnityArgs '-toyboxLevel','0','-toyboxUi','pause'
     ///
-    /// Screens: hud (the default), toast (the HUD with two sample hints), title, pause, hints, settings, select, catalogue (the level select with
+    /// Screens: hud (the default), toast (the HUD with two sample hints), keys (the HUD with the key caps of an empty hand, which
+    /// are otherwise only there for a person playing), title, pause, hints, settings, select, catalogue (the level select with
     /// the fifteen levels of the campaign plan and some progress, whatever is registered), complete, ending (the end of
     /// the game with every registered campaign level collected).
     /// Outside Play Mode only.

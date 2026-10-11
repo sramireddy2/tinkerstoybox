@@ -99,6 +99,7 @@ namespace Toybox.Engine
         int airTicks;
         Vector3 checkpointPosition;
         float checkpointYaw, checkpointPitch;
+        Prop underfoot;
 
         public GameObject GameObject { get; }
         public Transform Transform { get; }
@@ -138,6 +139,14 @@ namespace Toybox.Engine
         public Vector3 GroundPoint { get; private set; }
         /// <summary>The prop under the feet, or null when airborne or on world geometry.</summary>
         public Prop GroundProp => Grounded ? PropRef.Of(GroundCollider) : null;
+        /// <summary>
+        /// The prop the feet are on - and, in the air, still the one they left the ground from. It stays that
+        /// until the feet are on something else (the world, a gadget, another prop) or the player is put
+        /// somewhere (a teleport, a respawn); null then. The perspective mechanic takes no prop that is
+        /// underfoot (PerspectiveGrabber.FindTarget): picked up in the air and let go again under oneself, it
+        /// would be a way up anywhere.
+        /// </summary>
+        public Prop Underfoot => underfoot != null && !underfoot.Removed ? underfoot : null;
         /// <summary>Velocity of the ground at the feet (a mover, a prop that carries the player); zero on the world and in the air.</summary>
         internal Vector3 GroundVelocity => groundVelocity;
         /// <summary>The simulation this body is part of (for the contact handling, which is handed the player only).</summary>
@@ -308,6 +317,8 @@ namespace Toybox.Engine
             jumpBuffer = 0f;
             coyote = 0f;
             airTicks = 0;
+            // Put somewhere by the level: whatever the feet were on before is behind them.
+            underfoot = null;
             FindFootContacts();
             ProbeGround(false, false);
         }
@@ -862,6 +873,7 @@ namespace Toybox.Engine
 
             Grounded = true;
             GroundCollider = ground.Collider;
+            underfoot = PropRef.Of(ground.Collider);
             GroundNormal = ground.Normal;
             GroundPoint = ground.Point;
             supportNormal = ground.Support;
@@ -884,6 +896,7 @@ namespace Toybox.Engine
             if (sum.sqrMagnitude < 1e-6f || sum.normalized.y < WalkableNormalY) return;
             Grounded = true;
             GroundCollider = steepColliders[0];
+            underfoot = PropRef.Of(GroundCollider);
             GroundNormal = Vector3.up;
             GroundPoint = Body.position;
             supportNormal = Vector3.up;

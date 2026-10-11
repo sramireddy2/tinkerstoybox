@@ -17,6 +17,9 @@ namespace Toybox.Platform
     /// Pointer lock: a click locks the mouse (that click does not grab). While it is not locked, moving
     /// the mouse does not turn the view; holding the right button does, for environments that refuse the
     /// lock. The keyboard works either way.
+    ///
+    /// R is a hold: the level starts over once R has been down for <see cref="RestartHoldSeconds"/>. It
+    /// sits between E (pick up) and F (flip), and a restart throws away everything placed so far.
     /// </summary>
     public sealed class HumanInput : IInputSource
     {
@@ -27,6 +30,10 @@ namespace Toybox.Platform
         const int MaxPendingYawSteps = 12;
         // The first delta after the lock engages can be a jump of hundreds of pixels in some browsers.
         const float MaxLookPixelsPerFrame = 2000f;
+        /// <summary>How long R has to be held down while playing before the level starts over.</summary>
+        public const float RestartHoldSeconds = 0.5f;
+        // The most one frame adds to the hold: a frame that took seconds (a hidden tab) is not a held key.
+        const float MaxHoldStep = 0.1f;
 
         readonly IInputDevices devices;
 
@@ -36,9 +43,14 @@ namespace Toybox.Platform
         bool jumpLatched, grabLatched, restartLatched, pitchLatched;
         int yawPending;
         bool wasLooking;
+        float restartHeldFor;
+        // R was down in the last frame; it has done its restart, or was down before the hold could begin
+        // (pressed in a menu): either way it has to come up before it counts again.
+        bool restartWasHeld, restartSpent;
 
         /// <summary>Degrees of view rotation per pixel of mouse movement: the player's setting.</summary>
         public float Sensitivity => Settings.MouseSensitivity;
+        /// <summary>Flips the vertical look for this input alone; the player's own choice is <see cref="Settings.InvertLook"/>.</summary>
         public bool InvertY;
         /// <summary>
         /// Whether a click on a free pointer captures it. On while the game is being played; the runner turns
@@ -59,11 +71,15 @@ namespace Toybox.Platform
         /// <summary>What the devices reported in the last Update (the debug keys are read from here).</summary>
         public DeviceFrame Frame => last;
 
+        /// <summary>How far the hold on R has come, 0 to 1 (0 while R is up, and after it has restarted the level).</summary>
+        public float RestartHold => restartSpent ? 0f : Mathf.Clamp01(restartHeldFor / RestartHoldSeconds);
+
         /// <summary>
         /// Polls the devices. Call once per rendered frame, before the simulation is stepped. Mouse look is
-        /// applied to <paramref name="player"/>; pass null to keep the view still (a bot is playing).
+        /// applied to <paramref name="player"/>; pass null to keep the view still (a bot is playing). The
+        /// real time since the last call is what the hold on R is measured in.
         /// </summary>
-        public void Update(Player player)
+        public void Update(Player player, float realDeltaTime = 0f)
         {
             DeviceFrame frame = devices.Poll();
             last = frame;
@@ -97,8 +113,24 @@ namespace Toybox.Platform
 
             jumpLatched |= frame.JumpPressed;
             grabLatched |= click || frame.GrabKeyPressed;
-            restartLatched |= frame.RestartPressed;
             pitchLatched |= frame.RotatePitchPressed;
+
+            // R: held, not tapped. The time counts from the frame after it went down.
+            if (!frame.RestartHeld)
+            {
+                restartHeldFor = 0f;
+                restartSpent = false;
+            }
+            else if (!restartSpent)
+            {
+                if (restartWasHeld && realDeltaTime > 0f) restartHeldFor += Mathf.Min(realDeltaTime, MaxHoldStep);
+                if (restartHeldFor >= RestartHoldSeconds)
+                {
+                    restartLatched = true;
+                    restartSpent = true;
+                }
+            }
+            restartWasHeld = frame.RestartHeld;
             yawPending = Mathf.Clamp(yawPending + frame.RotateYawSteps, -MaxPendingYawSteps, MaxPendingYawSteps);
 
             bool looking = locked || frame.LookButton;
@@ -106,7 +138,7 @@ namespace Toybox.Platform
             if (looking && wasLooking && player != null)
             {
                 Vector2 look = Vector2.ClampMagnitude(frame.Look, MaxLookPixelsPerFrame);
-                player.AddLook(look.x * Sensitivity, look.y * Sensitivity * (InvertY ? -1f : 1f));
+                player.AddLook(look.x * Sensitivity, look.y * Sensitivity * (InvertY != Settings.InvertLook ? -1f : 1f));
             }
             wasLooking = looking;
         }
@@ -151,6 +183,10 @@ namespace Toybox.Platform
             pitchLatched = false;
             yawPending = 0;
             wasLooking = false;
+            // An R that is down right now (it was pressed on the pause card) is not the start of a hold.
+            restartHeldFor = 0f;
+            restartSpent = true;
+            restartWasHeld = false;
         }
 
         /// <summary>Asks for the mouse (play resumes). A browser may refuse outside a click; a click then captures it.</summary>

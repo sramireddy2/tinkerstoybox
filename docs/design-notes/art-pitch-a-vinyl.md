@@ -1,6 +1,10 @@
 # DIP & DIE-CUT: visual identity pitch for Tinker's Toybox (Direction A, sharpened)
 
-Checked against `C:/Users/shank/OneDrive/Desktop/tinkerstoybox/docs/ARCHITECTURE.md` and the installed three 0.186.1. Three facts from that version shape the pitch:
+> **Historical draft.** One of three art directions pitched before the look was chosen. It was written for the
+> three.js / Rapier prototype, **before the move to Unity**: its API names, shadow techniques and GPU figures do
+> not apply to the game. The look that was built is [ART_BIBLE.md](../ART_BIBLE.md). See [README.md](README.md).
+
+Checked against `docs/ARCHITECTURE.md` and the installed three 0.186.1. Three facts from that version shape the pitch:
 - `PCFSoftShadowMap` is removed; `PCFShadowMap` is now a 5-tap Vogel disc with hardware PCF.
 - `three/addons/lights/SunLight.js` gives native 2-cascade shadows in `WebGLRenderer`, so `CSM.js` and its material patching are not needed.
 - `object.receiveShadow` is a uniform, so toggling it on grab does not recompile a program.

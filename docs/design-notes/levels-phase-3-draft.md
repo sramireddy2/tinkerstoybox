@@ -1,5 +1,9 @@
 # Phase 3 — Advanced Mechanics (Levels 10–15): level design spec
 
+> **Historical draft.** A first level specification, hand-calculated before anything ran in the engine. It is
+> superseded by [LEVELS.md](../LEVELS.md), whose "As built" notes and appendices D, E and F hold what the game
+> does. See [README.md](README.md).
+
 **Engine.** Unity 6 / PhysX, conventions from `docs/ARCHITECTURE.md`: left-handed, Y up, yaw 0 looks down +Z, degrees, `PropOptions`, `LevelContext`, `Bot`. Format follows `levels-phase-1-draft.md`.
 
 **Status.** Every number is hand-calculated against the engine source as it stood on 2026-10-03 (`PerspectiveGrabber.cs`, `Prop.cs`, `Player.cs`, `Trigger.cs`). Nothing has been run. Aim points, windows and timings are starting values for the bot tests to tune.

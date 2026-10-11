@@ -21,6 +21,11 @@ namespace Toybox.Platform
         public IPrefStore Store;
         /// <summary>The presenters to choose from; null for those of the game assembly.</summary>
         public System.Collections.Generic.IReadOnlyList<PresenterRegistry.Entry> Presenters;
+        /// <summary>
+        /// Whether the debug keys ([ ] and P) are live; null for what the launch says
+        /// (<see cref="GameRunner.DebugKeysFor"/>). Tests that step through levels with them turn them on.
+        /// </summary>
+        public bool? DebugKeys;
     }
 
     /// <summary>
@@ -47,11 +52,17 @@ namespace Toybox.Platform
         /// that refuses the lock reports it for a frame or two - and play goes on with the right-button look.
         /// </summary>
         public const float PointerHoldTime = 0.25f;
+        /// <summary>What a touch of R says while playing: the level only starts over when R is held.</summary>
+        public const string HoldRestartLine = "Hold R to start the level over.";
 
         Autopilot autopilot;
         bool begun, beginning;
         // How long the mouse has been captured, as of the end of the last frame (0: it was not).
         float pointerHeldFor;
+        // Keyboard or mouse did something in this frame: somebody is there.
+        bool signOfLife;
+        // The bot has played the loaded level, or part of it: its completion is nobody's progress.
+        bool botPlayed;
 
         public Game Game { get; private set; }
         public HumanInput Human { get; private set; }
@@ -74,6 +85,21 @@ namespace Toybox.Platform
         public string AutoplayError => autopilot != null && autopilot.Error != null ? autopilot.Error.Message : null;
         /// <summary>True between a level's completion and the load of its successor.</summary>
         public bool AdvancePending => Flow != null && Flow.AdvancePending;
+        /// <summary>
+        /// The debug keys are live: [ and ] step through the levels, P hands the level to the bot. Only where
+        /// the launch asked for them (<see cref="DebugKeysFor"/>); in the game as it is published they do nothing.
+        /// </summary>
+        public bool DebugKeys { get; private set; }
+        /// <summary>
+        /// The level-complete card moved on with nobody at the controls (its countdown ran out and neither
+        /// keyboard nor mouse stirred): the next level is loaded and stands still, its clock at zero, until
+        /// its player touches something. Time nobody played is not a level's time - the first completion's
+        /// time is the best, and is what the catalogue and the ending show.
+        /// </summary>
+        public bool AwaitingPlayer { get; private set; }
+
+        /// <summary>Does this launch turn the debug keys on: it asks for them (<c>?debug=1</c>), or for the bot (<c>?autoplay=1</c>, where P takes over)?</summary>
+        public static bool DebugKeysFor(LaunchOptions launch) => launch.Debug || launch.Autoplay;
 
         void Start()
         {
@@ -111,6 +137,7 @@ namespace Toybox.Platform
                 Presentation = Presentation.Create(Game, new PresentationOptions { Plain = launch.Plain, Flow = Flow, Presenters = options.Presenters });
 
             Autoplay = launch.Autoplay;
+            DebugKeys = options.DebugKeys ?? DebugKeysFor(launch);
             SyncFlow();
             beginning = true;
             if (launch.Autoplay || launch.NamesLevel || options.SkipTitle) Flow.StartLevel(Levels.Resolve(launch));
@@ -133,8 +160,9 @@ namespace Toybox.Platform
             bool menus = Presentation != null && Presentation.HudProvided;
             Human.CaptureOnClick = Flow.Playing || !menus;
             // While the bot plays, the mouse must not fight it for the view; while not playing, nothing turns it.
-            Human.Update(Autoplay || !Flow.Playing ? null : Game.Player);
+            Human.Update(Autoplay || !Flow.Playing ? null : Game.Player, realDeltaTime);
             DeviceFrame keys = Human.Frame;
+            signOfLife = SignOfLife(keys);
             if (keys.Focused) HandleKeys(keys, wasLocked, menus);
             // A pointer that was taken away while playing (the browser's Esc, a lost tab) pauses the game.
             else if (Flow.Playing && !Autoplay && wasLocked && !Human.PointerLocked) Flow.Pause();
@@ -142,7 +170,9 @@ namespace Toybox.Platform
             // Written so that a negative or NaN frame time counts as no time at all.
             float dt = realDeltaTime > 0f ? Mathf.Min(realDeltaTime, MaxFrameTime) : 0f;
             SyncFlow();
-            if (Flow.Playing) Game.Step(dt);
+            // A level that began with nobody there waits for the first key, click or move of the mouse.
+            if (AwaitingPlayer && (signOfLife || Autoplay || !Flow.Playing || Game.Input != Human)) AwaitingPlayer = false;
+            if (Flow.Playing && !AwaitingPlayer) Game.Step(dt);
             if (Game == null || Game.IsDisposed) return;
             Flow.Update(dt);
 
@@ -153,11 +183,21 @@ namespace Toybox.Platform
             else pointerHeldFor += realDeltaTime > 0f ? realDeltaTime : 0f;
         }
 
+        // Did keyboard or mouse do anything at all in this frame?
+        static bool SignOfLife(in DeviceFrame keys) =>
+            keys.Focused && (keys.MoveX != 0f || keys.MoveZ != 0f || keys.Jump || keys.Sprint || keys.JumpPressed || keys.ClickPressed ||
+                             keys.GrabKeyPressed || keys.RotatePitchPressed || keys.RestartPressed || keys.RestartHeld || keys.EscapePressed ||
+                             keys.PreviousLevelPressed || keys.NextLevelPressed || keys.AutoplayPressed || keys.RotateYawSteps != 0 ||
+                             keys.LookButton || keys.Look.sqrMagnitude > 0f);
+
         void HandleKeys(DeviceFrame keys, bool wasLocked, bool menus)
         {
-            if (keys.NextLevelPressed) NextLevel();
-            else if (keys.PreviousLevelPressed) PreviousLevel();
-            if (keys.AutoplayPressed) SetAutoplay(!Autoplay);
+            if (DebugKeys)
+            {
+                if (keys.NextLevelPressed) NextLevel();
+                else if (keys.PreviousLevelPressed) PreviousLevel();
+                if (keys.AutoplayPressed) SetAutoplay(!Autoplay);
+            }
             if (Autoplay) return;
 
             switch (Flow.State)
@@ -165,6 +205,9 @@ namespace Toybox.Platform
                 case FlowState.Playing:
                     // Esc, or a pointer that was taken away from outside.
                     if (keys.EscapePressed || (wasLocked && !Human.PointerLocked)) Flow.Pause();
+                    // A touch of R does nothing but say what R is: the restart is a hold (HumanInput).
+                    else if (keys.RestartPressed && Game.Input == Human && Game.Level != null)
+                        Game.Events.RaiseMessage(new MessageEvent { Text = HoldRestartLine, Seconds = 2.5f });
                     break;
                 case FlowState.Paused:
                     if (keys.RestartPressed) Flow.Restart();
@@ -244,19 +287,28 @@ namespace Toybox.Platform
             progress?.Store.Save();
         }
 
-        // What the flow needs to know about who is playing.
+        // What the flow needs to know about who is playing. A level the bot has had its hands on is not the
+        // player's to be credited with, whoever walks it into the exit (P, then P again near the end).
         void SyncFlow()
         {
-            Flow.RecordProgress = !Autoplay;
+            Flow.RecordProgress = !Autoplay && !botPlayed;
             Flow.ForceAutoAdvance = Autoplay;
         }
 
-        void OnLevelLoaded(LevelEvent e) => TakeControl();
+        void OnLevelLoaded(LevelEvent e)
+        {
+            // A level that is loaded afresh is whoever plays it now.
+            botPlayed = false;
+            TakeControl();
+        }
 
         void OnStateChanged(FlowChange change)
         {
             if (Human == null) return;
             bool menus = Presentation != null && Presentation.HudProvided;
+            // From the card into the next level without a key, a click or a move of the mouse: nobody is there.
+            if (change.To == FlowState.Playing && change.From == FlowState.LevelComplete) AwaitingPlayer = !Autoplay && !signOfLife;
+            else if (change.To != FlowState.Playing) AwaitingPlayer = false;
             if (change.To == FlowState.Playing)
             {
                 // Keys pressed in a menu are not presses in the game.
@@ -281,11 +333,14 @@ namespace Toybox.Platform
             {
                 autopilot = Autopilot.Start(Game);
                 Game.Input = autopilot;
+                botPlayed = true;
             }
             else
             {
                 Game.Input = Human;
             }
+            // Before the flow writes anything about the level that is starting.
+            if (Flow != null) SyncFlow();
         }
 
         void ReportAutoplay()

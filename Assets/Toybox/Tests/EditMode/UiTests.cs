@@ -340,6 +340,12 @@ namespace Toybox.Tests
             Assert.AreEqual("0:48.2", UiKit.Time(48.25f));
             Assert.AreEqual("1:05", UiKit.Time(65.9f, false));
             Assert.AreEqual("12:00", UiKit.Time(720.4f));
+            // An hour is an hour: the fifteen best runs added up can be one ("62:05" is not a time).
+            Assert.AreEqual("59:59", UiKit.Time(3599.9f));
+            Assert.AreEqual("1:00:00", UiKit.Time(3600f));
+            Assert.AreEqual("1:02:05", UiKit.Time(3725f));
+            Assert.AreEqual("1:42:21", UiKit.Time(6141.4f, false));
+            Assert.AreEqual("0:00.0", UiKit.Time(float.NaN));
         }
 
         [Test]
@@ -1015,12 +1021,29 @@ namespace Toybox.Tests
             Assert.Less(pills.Pill(ControlPills.Control.Drop).Rect.anchoredPosition.y, pills.Pill(ControlPills.Control.Turn).Rect.anchoredPosition.y);
             Assert.IsTrue(Palette.Same(Palette.Ink, pills.Pill(ControlPills.Control.Turn).FaceColor), "HUD pills are Ink");
 
+            // A use is a press or a gesture, not a tick. One scroll of the wheel is a burst of notches a few
+            // ticks apart (the devices pay one out every 0.05 s, and each reaches one tick): that is one use,
+            // and used to be three - a single idle scroll in Level 1 retired the pill for good.
+            for (int i = 0; i < 5; i++)
+            {
+                input.Once.RotateYaw = 1;
+                Step();
+                Step(2);
+            }
+            Assert.AreEqual(1, pills.UsedCount(ControlPills.Control.Turn), "one scroll of five notches");
             for (int i = 0; i < 3; i++)
             {
                 input.Once.RotateYaw = 1;
                 Step();
             }
-            Assert.AreEqual(3, pills.UsedCount(ControlPills.Control.Turn));
+            Assert.AreEqual(1, pills.UsedCount(ControlPills.Control.Turn), "and the notches that follow on belong to it");
+            for (int i = 0; i < 2; i++)
+            {
+                Step(TestHelpers.Ticks(ControlPills.TurnGap) + 1);
+                input.Once.RotateYaw = i == 0 ? 1 : -1;
+                Step();
+            }
+            Assert.AreEqual(3, pills.UsedCount(ControlPills.Control.Turn), "a press of Q after a pause is another");
             input.Once.RotatePitch = true;
             Step();
             Assert.AreEqual(1, pills.UsedCount(ControlPills.Control.Flip));
@@ -1769,7 +1792,11 @@ namespace Toybox.Tests
             Assert.AreEqual(StickerShape.Card, pause.Card.Shape, "a hang-tab card");
             var labels = new List<string>();
             for (int i = 0; i < pause.Screen.RowCount; i++) labels.Add(((UiButton)pause.Screen.Row(i)[0]).Label.text);
-            CollectionAssert.AreEqual(new[] { "Resume", "Restart", "Hints", "Settings", "Level Select" }, labels);
+            // ("Levels": the name the title, the complete card and the ending give the same place.)
+            CollectionAssert.AreEqual(new[] { "Resume", "Restart", "Hints", "Settings", "Levels" }, labels);
+            Assert.AreEqual(menu.Title.LevelsButton.Label.text, pause.LevelSelect.Label.text);
+            Assert.AreEqual(menu.Complete.LevelsButton.Label.text, pause.LevelSelect.Label.text);
+            Assert.AreEqual(menu.Ending.LevelsButton.Label.text, pause.LevelSelect.Label.text);
             Assert.AreSame(pause.Resume, menu.Active.Focused);
             Assert.IsTrue(Palette.Same(Palette.Cherry, pause.Resume.Sticker.FaceColor), "the one primary action");
             Assert.IsFalse(Palette.Same(Palette.Cherry, pause.Restart.Sticker.FaceColor));
@@ -1856,8 +1883,11 @@ namespace Toybox.Tests
             Assert.AreEqual(BackdropMode.Frozen, menu.Backdrop.Mode, "still over the frozen frame");
             SettingsMenu card = menu.SettingsCard;
 
-            // Quality, lens blur strength, sensitivity, field of view, volume, music, reduce motion, high-visibility toys.
-            Assert.AreEqual(9, card.Screen.RowCount, "eight settings and Done");
+            // Quality, lens blur strength, sensitivity, invert look, field of view, volume, music, effects, reduce motion, high-visibility toys.
+            Assert.AreEqual(11, card.Screen.RowCount, "ten settings and Done");
+            var names = new List<string>();
+            for (int i = 0; i < card.Screen.RowCount - 1; i++) names.Add(((UiRow)card.Screen.Row(i)[0]).Name.text);
+            CollectionAssert.AreEqual(new[] { "Quality", "Lens blur", "Mouse speed", "Invert look", "Field of view", "Volume", "Music", "Effects", "Reduce motion", "High-visibility toys" }, names);
             Assert.AreSame(card.Quality, menu.Active.Focused);
             Assert.AreEqual("Auto", card.Quality.Option);
             Assert.AreEqual("60%", card.LensBlur.ValueLabel.text);
@@ -1876,6 +1906,14 @@ namespace Toybox.Tests
             Assert.AreEqual(0.25f, Settings.MasterVolume, 1e-4f);
             card.Music.Set(0f);
             Assert.AreEqual(0f, Settings.MusicVolume);
+            // Every setting the code has is on the card: the effects' volume and the inverted look were not.
+            card.Effects.Set(0.4f);
+            Assert.AreEqual(0.4f, Settings.SfxVolume, 1e-4f);
+            Assert.AreEqual("40%", card.Effects.ValueLabel.text);
+            Assert.IsFalse(Settings.InvertLook, "off unless the player asks");
+            card.InvertLook.Activate();
+            Assert.IsTrue(Settings.InvertLook);
+            Assert.AreEqual(1, settingsStore.GetInt("toybox.settings.invertLook", 0), "and kept");
             card.ReduceMotion.Activate();
             Assert.IsTrue(Settings.ReduceMotion);
             card.HighVisibility.Activate();
@@ -1891,6 +1929,16 @@ namespace Toybox.Tests
             Press(menu.Pause.SettingsButton);
             Assert.AreEqual(60f, card.FieldOfView.Value);
             Assert.IsTrue(card.ReduceMotion.On);
+            Assert.IsTrue(card.InvertLook.On);
+            Assert.AreEqual(0.4f, card.Effects.Value, 1e-4f);
+            // The card with its eleven rows is inside the reference frame, Done and all.
+            Seconds(0.3f);
+            Rect cardRect = UiTestKit.Footprint(menu.Root, card.Card);
+            Assert.Less(cardRect.yMax, UiTheme.ReferenceHeight * 0.5f - 40f);
+            Assert.Greater(cardRect.yMin, -UiTheme.ReferenceHeight * 0.5f + 40f);
+            Rect done = UiTestKit.Footprint(menu.Root, card.Done.Sticker), lastRow = UiTestKit.OnCanvas(menu.Root, card.HighVisibility.Rect);
+            Assert.Greater(done.yMin, cardRect.yMin + 10f, "Done is on the card");
+            Assert.Less(done.yMax, lastRow.yMin, "below the last row");
             Assert.AreEqual("Low", card.Quality.Option);
             // Esc with the settings up is the card's Esc, not the runner's: the game stays paused, the card
             // closes (the EventSystem hands the key over as Cancel) and the settings are saved.
@@ -2211,6 +2259,9 @@ namespace Toybox.Tests
         void PlayAndComplete(float seconds, bool pickUp)
         {
             Game g = runner.Game;
+            // (The mouse stirs: somebody is there. A level the card moved on to with neither key nor mouse
+            // waits for its player - GameRunner.AwaitingPlayer - and the pill above is pressed by the test.)
+            devices.State.Look = new Vector2(1f, 0f);
             Seconds(seconds);
             if (pickUp)
             {
@@ -2540,7 +2591,8 @@ namespace Toybox.Tests
         [Test]
         public void TheLookPromptAndTheAutoplayPill_ShareTheTopOfTheFrame_AndAreNeverUpTogether()
         {
-            Begin("?level=1", refuseLock: true);
+            // (debug=1: P, the bot's key, is live only where the launch asks for it.)
+            Begin("?level=1&debug=1", refuseLock: true);
             Frames();
             Assert.AreEqual(FlowState.Playing, State);
             Assert.IsFalse(devices.PointerLocked, "the browser did not hand the mouse over");
@@ -2576,6 +2628,679 @@ namespace Toybox.Tests
             Seconds(HudPresenter.LookPromptDelay + 0.1f);
             Assert.IsTrue(hud.LookPrompt.Tween.IsShown);
             Assert.IsFalse(hud.AutoplayPill.gameObject.activeSelf);
+        }
+
+        // ---- The final review: the keys are named, and the menus forgive a held key ---------------------
+
+        // Nothing on screen named a key: not for moving, jumping, picking up, restarting, nor Esc, behind
+        // which the hints are. The pause card now has a guide beside it: the level card again (it is up for
+        // 3.5 s in the HUD and could not be read a second time) and every key of the game.
+        [Test]
+        public void ThePause_HasAGuideBesideIt_TheLevelAndEveryKey_ToRead_NotToPress()
+        {
+            Begin("?level=2");
+            Frames(10);
+            Esc();
+            PauseMenu pause = menu.Pause;
+            Assert.IsTrue(pause.Guide.Tween.IsShown, "it sticks on with the card");
+            Assert.AreEqual("02  TEST LEVEL 2", pause.LevelName.text);
+            Assert.AreEqual("Carry the block to the door.", pause.LevelBlurb.text);
+            Assert.AreEqual(hud.LevelCard.Blurb, pause.LevelBlurb.text, "what the level card said");
+
+            // Every key, each beside what it does, in the levels' words (toys are picked up and let go).
+            Assert.AreEqual(PauseMenu.Keys.Length, pause.KeyCaps.Count);
+            Assert.AreEqual(PauseMenu.Keys.Length, pause.KeyActions.Count);
+            var caps = new List<string>();
+            var does = new List<string>();
+            for (int i = 0; i < pause.KeyCaps.Count; i++)
+            {
+                TextMeshProUGUI cap = pause.KeyCaps[i].GetComponentInChildren<TextMeshProUGUI>(true);
+                caps.Add(cap.text);
+                does.Add(pause.KeyActions[i].text);
+                Assert.AreSame(UiFonts.Body, cap.font, "key caps: the body face");
+                Assert.AreEqual(UiTheme.SmallSize, cap.fontSizeMax, "at 16");
+                Assert.IsTrue(Palette.Same(Palette.Paper, cap.color), "Paper on an Ink chip");
+                Assert.IsTrue(Palette.Same(Palette.Ink, pause.KeyCaps[i].GetComponent<Image>().color));
+            }
+            CollectionAssert.AreEqual(new[] { "W A S D / arrows", "Mouse", "Space", "Shift", "Click / E", "Q / wheel", "F", "Hold R", "Esc" }, caps);
+            CollectionAssert.AreEqual(new[] { "move", "look", "jump", "run", "pick up, let go", "turn", "flip", "restart", "pause" }, does);
+            foreach (string word in does)
+                Assert.IsFalse(word.Contains("grab") || word.Contains("drop"), "the levels' words: " + word);
+            // The debug keys are not the player's.
+            foreach (string cap in caps)
+                Assert.IsFalse(cap == "P" || cap.Contains("[") || cap.Contains("]"), cap);
+
+            // To read, not to press: no control, nothing that takes a click, and the card's focus order as it was.
+            Assert.AreEqual(0, pause.Guide.GetComponentsInChildren<UiControl>(true).Length);
+            foreach (Graphic graphic in pause.Guide.GetComponentsInChildren<Graphic>(true))
+                Assert.IsFalse(graphic.raycastTarget, graphic.name);
+            Assert.AreEqual(5, pause.Screen.RowCount);
+            Assert.AreSame(pause.Resume, menu.Active.Focused);
+            foreach (UiControl next in new UiControl[] { pause.Restart, pause.Hints, pause.SettingsButton, pause.LevelSelect, pause.Resume })
+            {
+                Assert.IsTrue(menu.Move(MoveDirection.Down));
+                Assert.AreSame(next, menu.Active.Focused);
+            }
+            Assert.IsFalse(menu.Move(MoveDirection.Left), "nothing beside the card takes the focus");
+            Assert.AreSame(pause.Resume, menu.Active.Focused);
+
+            // It is the loaded level's: another level, another guide.
+            Press(pause.Resume);
+            runner.Flow.StartLevel(3);
+            Frames(5);
+            Esc();
+            Assert.AreEqual("03  TEST LEVEL 3", pause.LevelName.text);
+        }
+
+        // The Hints button only went forward. A player who read hint 1, went back to try and paused to read
+        // it again got hint 2 on the first press and - the last hint of a level being its whole recipe - the
+        // solution on the second.
+        [Test]
+        public void ThePause_BringsBackTheHintThatWasUp_BeforeItGoesOnToTheNext()
+        {
+            Begin("?level=1");
+            Frames(10);
+            Esc();
+            PauseMenu pause = menu.Pause;
+            Press(pause.Hints);
+            Assert.AreEqual("HINT 1 / 2", pause.HintTitle.text);
+
+            Press(pause.Resume);
+            Frames(5);
+            Esc();
+            Assert.AreEqual(-1, pause.HintIndex, "the card comes back with its hint put away");
+            Press(pause.Hints);
+            Assert.AreEqual("HINT 1 / 2", pause.HintTitle.text, "the first press shows the hint that was up");
+            Assert.AreEqual("The block is light.", pause.HintText.text);
+            Press(pause.Hints);
+            Assert.AreEqual("HINT 2 / 2", pause.HintTitle.text, "the second goes on");
+            Assert.AreEqual("The door is to the right.", pause.HintText.text);
+
+            // The same after a look at the catalogue.
+            Press(pause.LevelSelect);
+            Assert.AreEqual(FlowState.LevelSelect, State);
+            menu.Cancel();
+            Frames();
+            Assert.AreSame(pause, menu.Current);
+            Press(pause.Hints);
+            Assert.AreEqual("HINT 2 / 2", pause.HintTitle.text);
+            Press(pause.Hints);
+            Assert.AreEqual("HINT 1 / 2", pause.HintTitle.text, "after the last comes the first");
+
+            // A level that starts over starts its hints over.
+            Press(pause.Restart);
+            Frames(5);
+            Esc();
+            Press(pause.Hints);
+            Assert.AreEqual("HINT 1 / 2", pause.HintTitle.text);
+        }
+
+        // The title names the keys of a first minute (and Esc, behind which the rest is); and it stands over
+        // whatever level the player is at: over the night rooms of levels 14 and 15 its Ink logo was an
+        // outline and nothing else.
+        [Test]
+        public void TheTitle_NamesTheFirstKeys_AndIsSetInPaperOverANightRoom()
+        {
+            Begin("");
+            TitleMenu title = menu.Title;
+            Assert.AreEqual(4, title.Keys.Count);
+            var words = new List<string>();
+            foreach (Sticker pill in title.Keys)
+            {
+                Assert.IsTrue(pill.Tween.IsShown, "the key caps stick on with the title");
+                Assert.IsTrue(Palette.Same(Palette.Ink, pill.FaceColor), "the HUD's own key caps");
+                Assert.AreEqual(0, pill.GetComponentsInChildren<UiControl>(true).Length, "to read, not to press");
+                foreach (Graphic graphic in pill.GetComponentsInChildren<Graphic>(true)) Assert.IsFalse(graphic.raycastTarget, graphic.name);
+                foreach (TextMeshProUGUI label in pill.GetComponentsInChildren<TextMeshProUGUI>(true)) words.Add(label.text);
+            }
+            CollectionAssert.AreEqual(new[] { "W A S D", "move", "Space", "jump", "click", "pick up", "Esc", "pause and hints" }, words);
+            Assert.AreEqual(2, title.Screen.RowCount, "the focus order is as it was: Play; Levels, Settings");
+            Assert.AreSame(title.Play, menu.Active.Focused);
+
+            // One row along the bottom edge, centred, under the buttons, nothing on anything.
+            Seconds(0.3f);
+            UiRoot root = menu.Root;
+            // (The canvas is as tall as the screen makes it: 1080 at 16:9, more on a narrower one.)
+            float bottom = -HudFrame.Size(root.Rect).y * 0.5f;
+            float lowest = Mathf.Min(UiTestKit.Footprint(root, title.LevelsButton.Sticker).yMin, UiTestKit.Footprint(root, title.SettingsButton.Sticker).yMin);
+            var rects = new List<Rect>();
+            foreach (Sticker pill in title.Keys)
+            {
+                Rect rect = UiTestKit.Footprint(root, pill);
+                Assert.Less(rect.yMax, lowest, "under Levels and Settings");
+                Assert.Greater(rect.yMin, bottom + 8f, "on the screen");
+                Assert.Less(rect.yMax, bottom + 100f, "along the bottom edge");
+                if (rects.Count > 0)
+                {
+                    Assert.Greater(rect.xMin, rects[rects.Count - 1].xMax, "side by side");
+                    Assert.AreEqual(rects[0].yMin, rect.yMin, 0.5f, "in one row");
+                }
+                rects.Add(rect);
+            }
+            Assert.AreEqual(0f, (rects[0].xMin + rects[rects.Count - 1].xMax) * 0.5f, 8f, "centred");
+
+            // By day the logo is Ink.
+            Assert.IsFalse(menu.LevelDip.Night);
+            Assert.IsTrue(Palette.Same(Palette.Ink, title.LogoColor));
+            Assert.IsTrue(Palette.Same(Palette.Ink, title.Wordmark.color));
+            Assert.IsTrue(Palette.Same(Palette.Ink, title.Mark.color));
+            Shutdown();
+
+            // A player who stopped in level 14: the title stands over the night room.
+            NewStores();
+            new Progress(store).LastPlayed = 14;
+            Begin("", levels: 15);
+            Assert.AreEqual(FlowState.Title, State);
+            Assert.AreEqual(14, runner.LevelId);
+            Assert.IsTrue(menu.LevelDip.Night, "test setup: level 14 is a night room");
+            title = menu.Title;
+            Assert.IsTrue(Palette.Same(Palette.Paper, title.LogoColor), "Paper on plum");
+            Assert.IsTrue(Palette.Same(Palette.Paper, title.Wordmark.color));
+            Assert.IsTrue(Palette.Same(Palette.Paper, title.Mark.color));
+            // The level behind the title changes while it is up (as when it comes back from the ending): the logo follows.
+            runner.Flow.ShowTitle(1);
+            Frames(2);
+            Assert.AreSame(menu.Title, menu.Current);
+            Assert.IsTrue(Palette.Same(Palette.Ink, title.LogoColor));
+        }
+
+        // The HUD's only key caps were those of a held toy. An empty hand now has its own - move, jump, pick
+        // up (with the reticle on a toy) and Esc - each until the player has used the key, and never while a
+        // bot plays.
+        [Test]
+        public void TheHud_NamesTheKeysOfAnEmptyHand_UntilThePlayerHasUsedThem()
+        {
+            Begin("?level=1");
+            Game g = runner.Game;
+            UiLevel level = (UiLevel)g.Level;
+            ControlPills pills = hud.Controls;
+            g.Player.Yaw = 180f;
+            Frames(2);
+            Assert.IsNull(g.Grabber.Focus, "test setup: looking away from the block");
+            Assert.IsTrue(pills.Shown(ControlPills.Control.Move), "W A S D: move");
+            Assert.IsTrue(pills.Shown(ControlPills.Control.Jump), "Space: jump");
+            Assert.IsTrue(pills.Shown(ControlPills.Control.Help), "Esc: pause and hints");
+            Assert.IsFalse(pills.Shown(ControlPills.Control.PickUp), "nothing to pick up under the reticle");
+            Assert.IsFalse(pills.Shown(ControlPills.Control.Drop));
+            Assert.AreEqual("W A S D", ControlPills.Cap(ControlPills.Control.Move));
+            Assert.AreEqual("Space", ControlPills.Cap(ControlPills.Control.Jump));
+            Assert.AreEqual("pick up", ControlPills.Action(ControlPills.Control.PickUp));
+            Assert.AreEqual("pause and hints", ControlPills.Action(ControlPills.Control.Help));
+
+            TestHelpers.LookAt(g.Player, level.Block.Center);
+            Frames(2);
+            Assert.IsNotNull(g.Grabber.Focus, "test setup: the reticle is on the block");
+            Assert.IsTrue(pills.Shown(ControlPills.Control.PickUp), "click: pick up");
+
+            // Bottom right, stacked, Ink; nothing in the middle of the frame or on the readout's dock.
+            Seconds(0.3f);
+            Vector2 canvas = HudFrame.Size(hud.Root.Rect);
+            Rect aim = HudFrame.AimArea(canvas), dock = HudFrame.Footprint(ScaleReadout.FaceIn(ReadoutDock.Low, canvas));
+            var rects = new List<Rect>();
+            foreach (ControlPills.Control control in new[] { ControlPills.Control.Help, ControlPills.Control.Jump, ControlPills.Control.Move, ControlPills.Control.PickUp })
+            {
+                Sticker pill = pills.Pill(control);
+                Assert.AreEqual(new Vector2(1f, 0f), pill.Rect.anchorMin, control + ": anchored to the bottom right corner");
+                Assert.IsTrue(Palette.Same(Palette.Ink, pill.FaceColor));
+                Rect rect = UiTestKit.Footprint(hud.Root, pill);
+                Assert.IsFalse(HudFrame.Meet(rect, aim), control + " is in the aiming area");
+                Assert.IsFalse(HudFrame.Meet(rect, dock), control + " is on the readout's dock");
+                Assert.LessOrEqual(rect.xMax, canvas.x * 0.5f - 30f, control + " is on the screen");
+                if (rects.Count > 0) Assert.Greater(rect.yMin, rects[rects.Count - 1].yMax - 6f, control + " is above the one before it");
+                rects.Add(rect);
+            }
+
+            // A toy in the hand: its pills take the place, and give it back.
+            devices.State.GrabKeyPressed = true;
+            Frames(2);
+            Assert.IsNotNull(g.Grabber.Held);
+            Assert.AreEqual(1, pills.UsedCount(ControlPills.Control.PickUp));
+            Assert.IsFalse(pills.Shown(ControlPills.Control.Move));
+            Assert.IsFalse(pills.Shown(ControlPills.Control.PickUp));
+            Assert.IsTrue(pills.Shown(ControlPills.Control.Drop));
+            devices.State.GrabKeyPressed = true;
+            Frames(2);
+            Assert.IsNull(g.Grabber.Held);
+            Assert.IsTrue(pills.Shown(ControlPills.Control.Move));
+            Assert.IsFalse(pills.Shown(ControlPills.Control.Drop));
+
+            // Walking: a second of it is one use - not a tick of it - and after three the pill is gone.
+            devices.State.MoveZ = -1f;
+            Frames(5);
+            Assert.AreEqual(0, pills.UsedCount(ControlPills.Control.Move), "five ticks of walking are not five uses");
+            Seconds(ControlPills.MoveSeconds * 2f + 0.4f);
+            Assert.AreEqual(2, pills.UsedCount(ControlPills.Control.Move));
+            Assert.IsTrue(pills.Shown(ControlPills.Control.Move));
+            Seconds(ControlPills.MoveSeconds);
+            Assert.IsTrue(pills.Retired(ControlPills.Control.Move));
+            Assert.IsFalse(pills.Shown(ControlPills.Control.Move), "it peels off at once");
+            devices.State.MoveZ = 0f;
+            Assert.AreEqual(3, store.GetInt("toybox.hud.uses.move", 0), "kept: it stays away");
+
+            // Jumping: a press is one use however long Space is held.
+            for (int jump = 1; jump <= 3; jump++)
+            {
+                Assert.IsTrue(pills.Shown(ControlPills.Control.Jump));
+                devices.State.Jump = true;
+                devices.State.JumpPressed = true;
+                Frames(12);
+                devices.State.Jump = false;
+                Frames(50);
+                Assert.AreEqual(jump, pills.UsedCount(ControlPills.Control.Jump));
+            }
+            Assert.IsFalse(pills.Shown(ControlPills.Control.Jump));
+
+            // Esc: the first pause is all it takes - the card that opens has the hints and the keys.
+            Assert.IsTrue(pills.Shown(ControlPills.Control.Help));
+            Esc();
+            Assert.AreEqual(FlowState.Paused, State);
+            Frames(2);
+            Assert.IsTrue(pills.Retired(ControlPills.Control.Help));
+            Press(menu.Pause.Resume);
+            Frames(3);
+            Assert.IsFalse(pills.Shown(ControlPills.Control.Help));
+
+            // Another level does not bring back what the player knows.
+            runner.Flow.StartLevel(2);
+            g.Player.Yaw = 180f;
+            Frames(3);
+            foreach (ControlPills.Control control in Enum.GetValues(typeof(ControlPills.Control)))
+                Assert.IsFalse(pills.Shown(control), control + " is back");
+            Shutdown();
+
+            // While a bot plays the empty hand has no pills, and nothing the bot does counts.
+            NewStores();
+            Begin("?level=1&autoplay=1");
+            Frames(30);
+            pills = hud.Controls;
+            Assert.IsTrue(runner.Autoplay);
+            foreach (ControlPills.Control control in new[] { ControlPills.Control.Help, ControlPills.Control.Jump, ControlPills.Control.Move, ControlPills.Control.PickUp })
+            {
+                Assert.IsFalse(pills.Shown(control), control + " while the bot plays");
+                Assert.AreEqual(0, pills.UsedCount(control), control + ": the bot's input teaches nobody");
+            }
+        }
+
+        // The UI's actions bind W A S D as well as the arrows, and the EventSystem repeats a held direction
+        // ten times a second: a movement key still down when Esc was pressed walked the pause card's focus
+        // (round and round: Level Select, Settings, Hints, Restart...), and Space then pressed wherever it
+        // had stopped.
+        [Test]
+        public void AKeyThatIsDownWhenAMenuOpens_DoesNotWalkItsFocus()
+        {
+            Begin("?level=1");
+            Frames(10);
+            bool held = true;
+            menu.NavigationHeld = () => held;
+            Esc();
+            PauseMenu pause = menu.Pause;
+            Assert.AreSame(pause, menu.Current);
+            Assert.AreSame(pause.Resume, menu.Active.Focused);
+            for (int i = 0; i < 7; i++)
+            {
+                Assert.IsFalse(menu.Move(MoveDirection.Up), "a direction held since before the card opened is ignored");
+                Frames(6);
+            }
+            Assert.AreSame(pause.Resume, menu.Active.Focused, "the focus stays on Resume");
+
+            // Once the key has come up, the keys are the menu's.
+            held = false;
+            Frames();
+            Assert.IsTrue(menu.Move(MoveDirection.Down));
+            Assert.AreSame(pause.Restart, menu.Active.Focused);
+            // ... and a key pressed from then on moves the focus, held or not.
+            held = true;
+            Frames();
+            Assert.IsTrue(menu.Move(MoveDirection.Down));
+            Assert.AreSame(pause.Hints, menu.Active.Focused);
+
+            // Every menu: the complete card, reached with an arrow down (one row: Again, Levels, Next).
+            Press(pause.Resume);
+            Frames(3);
+            runner.Game.CompleteLevel();
+            Frames();
+            Seconds(CompleteMenu.InfoAt + 0.1f);
+            CompleteMenu complete = menu.Complete;
+            Assert.AreSame(complete.Next, menu.Active.Focused);
+            Assert.IsFalse(menu.Move(MoveDirection.Left));
+            Frames(3);
+            Assert.AreSame(complete.Next, menu.Active.Focused);
+            Assert.IsFalse(complete.Held, "and the card goes on counting down: nobody touched it");
+            held = false;
+            Frames();
+            Assert.IsTrue(menu.Move(MoveDirection.Left));
+            Assert.AreSame(complete.LevelsButton, menu.Active.Focused);
+        }
+
+        // The complete card took Enter, Space and the arrows from its first frame, 0.6 s before anything of
+        // it could be seen: a second tap of Space after the leap into the exit skipped the card. And Next ran
+        // as often as it was queued: twice was a level skipped, with the bookmark past it.
+        [Test]
+        public void LevelComplete_TakesNoInputBeforeItsCardIsUp_AndNextWorksOnce()
+        {
+            Begin("?level=1");
+            Frames(10);
+            runner.Game.CompleteLevel();
+            Frames(3);
+            CompleteMenu complete = menu.Complete;
+            Assert.IsFalse(complete.Info.Tween.IsShown, "test setup: nothing of the card is up yet");
+            Assert.IsFalse(complete.Next.Interactable);
+            Assert.IsFalse(complete.Again.Interactable);
+            Assert.IsFalse(complete.LevelsButton.Interactable);
+            menu.Submit();
+            complete.Next.Activate();
+            menu.Move(MoveDirection.Left);
+            menu.Submit();
+            complete.Again.Activate();
+            Assert.AreEqual(0, menu.PendingActions, "nothing can be pressed before it can be seen");
+            Frames(2);
+            Assert.AreEqual(FlowState.LevelComplete, State);
+            Assert.AreEqual(1, runner.LevelId);
+            Assert.Less(complete.Elapsed, CompleteMenu.InfoAt, "the level was not started over either");
+
+            Seconds(CompleteMenu.InfoAt);
+            Assert.IsTrue(complete.Info.Tween.IsShown);
+            Assert.IsTrue(complete.Next.Interactable && complete.Again.Interactable && complete.LevelsButton.Interactable, "the buttons are live with the card");
+            Assert.AreSame(complete.Next, menu.Active.Focused);
+            Assert.IsFalse(complete.Held, "none of that counted as a touch");
+
+            // Two presses queued behind each other: one level on, not two.
+            complete.Next.Activate();
+            complete.Next.Activate();
+            Assert.AreEqual(2, menu.PendingActions);
+            Frames();
+            Assert.AreEqual(FlowState.Playing, State);
+            Assert.AreEqual(2, runner.LevelId, "level 2, not level 3");
+            Frames(3);
+            Assert.AreEqual(2, runner.LevelId);
+            Assert.IsFalse(runner.Flow.Progress.IsCompleted(2));
+
+            // How two got queued in the game: Next pressed in the last moments of the countdown, the key
+            // still down when it ran out (an action waits for its key to come up). The press itself now ends
+            // the countdown.
+            runner.Game.CompleteLevel();
+            Frames();
+            Seconds(CompleteMenu.InfoAt + CompleteMenu.AutoNextSeconds - 0.2f);
+            Assert.AreEqual(FlowState.LevelComplete, State);
+            Assert.Greater(complete.AutoNextIn, 0f, "test setup: the countdown is still running");
+            menu.SubmitHeld = () => true;
+            complete.Next.Activate();
+            Seconds(0.4f);
+            Assert.AreEqual(FlowState.LevelComplete, State, "test setup: the press waits for its key");
+            Assert.AreEqual(1, menu.PendingActions, "the card did not press Next a second time");
+            Assert.AreEqual(0f, complete.AutoNextIn, "the countdown ended with the press");
+            menu.SubmitHeld = () => false;
+            Frames();
+            Assert.AreEqual(FlowState.Playing, State);
+            Assert.AreEqual(3, runner.LevelId);
+            Frames(3);
+            Assert.AreEqual(3, runner.LevelId);
+        }
+
+        // Esc on the complete card did nothing and the bar kept running; and Levels then Back started the
+        // whole celebration over - flash, stamp, confetti - with a fresh countdown the player had already
+        // stopped once.
+        [Test]
+        public void LevelComplete_EscStopsTheCountdown_AndBackFromTheCatalogueTheCardIsAsItWasLeft()
+        {
+            Begin("?level=1");
+            Frames(10);
+            runner.Game.CompleteLevel();
+            Frames();
+            CompleteMenu complete = menu.Complete;
+            Seconds(CompleteMenu.InfoAt + 1f);
+            Assert.Greater(complete.AutoNextIn, 3f);
+            Assert.IsFalse(complete.Held);
+
+            // Esc: "wait".
+            menu.Cancel();
+            Frames();
+            Assert.IsTrue(complete.Held);
+            Assert.AreEqual(0f, complete.AutoNextIn);
+            Assert.AreSame(complete.Next, menu.Active.Focused, "the focus is where it was");
+            Seconds(CompleteMenu.AutoNextSeconds + 1f);
+            Assert.AreEqual(FlowState.LevelComplete, State, "the card stays until a button is pressed");
+            Assert.AreEqual(1, runner.LevelId);
+
+            // Levels, then Back: the card as it was left.
+            Press(complete.LevelsButton);
+            Assert.AreEqual(FlowState.LevelSelect, State);
+            Seconds(0.5f);
+            menu.Cancel();
+            Frames();
+            Assert.AreEqual(FlowState.LevelComplete, State);
+            Assert.AreSame(complete, menu.Current);
+            Assert.AreEqual(0f, complete.FlashAlpha, "no second flash");
+            Assert.IsTrue(complete.Stamp.Tween.IsShown, "the stamp is on");
+            Assert.AreEqual(1f, complete.Stamp.Rect.localScale.x, 1e-4f, "without a second punch");
+            Assert.IsTrue(complete.Info.Tween.IsShown, "the result card is up at once");
+            Assert.IsTrue(complete.Next.Interactable);
+            Assert.IsNull(complete.Confetti, "no second burst");
+            Assert.IsTrue(complete.Held, "and it still waits");
+            Seconds(CompleteMenu.AutoNextSeconds + 2f);
+            Assert.AreEqual(FlowState.LevelComplete, State, "left alone, it stays");
+            Assert.AreEqual(1, runner.LevelId);
+            Assert.IsNull(complete.Confetti);
+
+            // A card that was not yet held when the catalogue was opened waits all the same: the player is there.
+            Press(complete.Next);
+            Assert.AreEqual(2, runner.LevelId);
+            Frames(3);
+            runner.Game.CompleteLevel();
+            Frames();
+            Assert.Greater(complete.FlashAlpha, 0.5f, "a new completion is celebrated");
+            Assert.IsFalse(complete.Info.Tween.IsShown);
+            Seconds(CompleteMenu.InfoAt + 0.1f);
+            Assert.IsFalse(complete.Held);
+            complete.LevelsButton.Activate();
+            Frames();
+            Assert.AreEqual(FlowState.LevelSelect, State);
+            menu.Cancel();
+            Frames();
+            Assert.AreEqual(FlowState.LevelComplete, State);
+            Assert.IsTrue(complete.Held);
+            Seconds(CompleteMenu.AutoNextSeconds + 1f);
+            Assert.AreEqual(FlowState.LevelComplete, State);
+            Assert.AreEqual(2, runner.LevelId);
+        }
+
+        // The ending ran its whole build-up again after Levels and Back: cards one by one, the stamp, the
+        // fanfare and the confetti.
+        [Test]
+        public void TheEnding_BackFromTheCatalogue_IsAsItWasLeft()
+        {
+            var earlier = new Progress(store);
+            for (int id = 1; id <= 3; id++) earlier.RecordCompletion(id, 10f * id, id);
+            Begin("?level=3");
+            PlayAndComplete(0.3f, false);
+            Press(menu.Complete.Next);
+            EndingMenu ending = menu.Ending;
+            Seconds(ending.InfoAt + EndingMenu.ConfettiLife + 1f);
+            Assert.IsTrue(ending.Stamp.Tween.IsShown);
+            Assert.IsFalse(ending.ConfettiFalling, "test setup: the confetti has settled");
+            StringAssert.StartsWith(EndingMenu.BestLabel, ending.StatsText, "the figures are the best runs added up, and say so");
+            Assert.IsFalse(ending.StatsText.Contains("Total time"));
+
+            Press(ending.LevelsButton);
+            Assert.AreEqual(FlowState.LevelSelect, State);
+            Seconds(0.4f);
+            menu.Cancel();
+            Frames();
+            Assert.AreEqual(FlowState.Ending, State);
+            Assert.AreSame(ending, menu.Current);
+            Assert.IsTrue(ending.Informed, "everything is up at once");
+            Assert.AreEqual(3, ending.CardsShown);
+            foreach (EndingMenu.Entry entry in ending.Entries)
+                Assert.AreEqual(TweenPhase.Shown, entry.Card.Tween.Phase, "level " + entry.Id + ": no second sticking on");
+            Assert.IsTrue(ending.Stamp.Tween.IsShown);
+            Assert.AreEqual(1f, ending.Stamp.Rect.localScale.x, 1e-4f, "no second punch");
+            Assert.IsTrue(ending.Info.Tween.IsShown);
+            Assert.IsTrue(ending.Again.Interactable && ending.LevelsButton.Interactable && ending.TitleButton.Interactable);
+            Assert.AreSame(ending.Again, menu.Active.Focused);
+            Assert.IsFalse(ending.ConfettiFalling, "no second confetti (and no second fanfare: they come together)");
+            Frames(10);
+            Assert.IsFalse(ending.ConfettiFalling);
+            Assert.AreEqual(1, runner.Flow.Progress.Endings);
+        }
+
+        /// <summary>A level whose own solution picks its block up once on the way to the door.</summary>
+        sealed class CarryLevel : LevelDefinition
+        {
+            readonly int number;
+            Prop block;
+
+            public CarryLevel(int number) => this.number = number;
+
+            public override string Title => "Carry Level " + number;
+            public override string Environment => EnvironmentPreset.KeyForLevel(number, true);
+
+            public override void Build(LevelContext ctx)
+            {
+                TestHelpers.Room(ctx, 20f, 12f);
+                block = ctx.AddProp(BasicToys.Block(1f), new Vector3(0f, 0.5f, 4f), new PropOptions { Name = "Block" });
+                ctx.AddExit(new Vector3(6f, 1f, 6f), new Vector3(2f, 2f, 2f));
+                ctx.SetSpawn(Vector3.zero, 0f);
+            }
+
+            public override IEnumerator Solve(Bot bot)
+            {
+                yield return bot.LookAt(block);
+                yield return bot.Grab(block);
+                yield return bot.Wait(0.2f);
+                yield return bot.Drop();
+                yield return bot.WalkTo(new Vector3(6f, 0f, 6f), 0.5f);
+                yield return bot.Until(() => bot.Game.LevelCompleted, 3f);
+            }
+        }
+
+        // While the bot played, its card said "0 pick-ups" whatever it had picked up, and its ending - which
+        // counted them - told the watcher to press P, which changed nothing that could be seen.
+        [Test]
+        public void WhileABotPlays_TheCardCountsItsPickUps_AndPAtItsEndingStartsTheGameForThePlayer()
+        {
+            host = new GameObject("UI Test Runner") { hideFlags = HideFlags.DontSave };
+            runner = host.AddComponent<GameRunner>();
+            devices = new FakeDevices();
+            runner.Begin(LaunchOptions.FromUrl("?level=2&autoplay=1"), new RunnerOptions
+            {
+                Devices = devices,
+                Levels = new LevelList(new[] { 1, 2 }, id => new CarryLevel(id)),
+                Store = store,
+                Presenters = UiTestKit.Own(),
+            });
+            menu = runner.Presentation.Get<MenuPresenter>();
+            hud = runner.Presentation.Get<HudPresenter>();
+
+            string stats = null;
+            for (int i = 0; i < TestHelpers.Ticks(40f) && State != FlowState.Ending; i++)
+            {
+                runner.Frame(Sim.Dt);
+                if (menu.Current == menu.Complete && menu.Complete.Info.Tween.IsShown) stats = menu.Complete.Stats;
+            }
+            Assert.AreEqual(FlowState.Ending, State, "test setup: the bot finished the campaign's last level");
+            Assert.IsNotNull(stats, "the card was up");
+            StringAssert.Contains("1 pick-up", stats, "the bot was seen picking the block up");
+            Assert.IsFalse(stats.Contains("pick-ups"), stats);
+
+            Frames();
+            EndingMenu ending = menu.Ending;
+            Seconds(ending.InfoAt + 0.3f);
+            Assert.AreEqual(EndingMenu.WatchedLine, ending.LineText);
+            StringAssert.StartsWith(EndingMenu.WatchedLabel, ending.StatsText);
+            StringAssert.Contains("1 pick-up", ending.StatsText, "the card and the ending agree");
+            StringAssert.Contains("Press P", ending.LineText);
+
+            // P: the bot lets go - and the screen does what its line says.
+            devices.State.AutoplayPressed = true;
+            Frames();
+            Assert.IsFalse(runner.Autoplay, "test setup: P took the game from the bot");
+            Frames(2);
+            Assert.AreEqual(FlowState.Playing, State, "the toys are in the player's hands");
+            Assert.AreEqual(1, runner.LevelId, "from the first level");
+            Assert.IsNull(menu.Current);
+            Assert.IsTrue(hud.Visible);
+            Assert.IsFalse(hud.AutoplayPill.Tween.IsShown);
+            Frames(5);
+            Assert.AreEqual(FlowState.Playing, State);
+            Assert.AreEqual(1, runner.LevelId);
+        }
+
+        // With levels 1 to 5 collected and 6 open, card 6 - the one new card - could only be reached from
+        // card 1: right stopped at the end of the first row, and down from any other column jumped over the
+        // half-open second row to Back.
+        [Test]
+        public void TheCatalogue_FromTheKeyboard_RightRunsOnIntoTheNextRow_AndDownFindsTheNearestOpenCard()
+        {
+            var progress = new Progress(store);
+            for (int id = 1; id <= 5; id++) progress.RecordCompletion(id, 30f);
+            progress.LastPlayed = 5;
+            Begin("", levels: 15);
+            Press(menu.Title.LevelsButton);
+            CatalogueMenu catalogue = menu.Catalogue;
+            UiScreen screen = catalogue.Screen;
+            Assert.IsTrue(catalogue.Find(6).Unlocked, "test setup: 6 is the next level to play");
+            Assert.IsFalse(catalogue.Find(7).Unlocked);
+            UiButton Card(int id) => catalogue.Find(id).Button;
+
+            // Right at the end of a row goes on to the next row; left comes back.
+            screen.Focus(Card(5));
+            Assert.IsTrue(menu.Move(MoveDirection.Right));
+            Assert.AreSame(Card(6), screen.Focused, "right from 5 is 6");
+            Assert.IsTrue(menu.Move(MoveDirection.Left));
+            Assert.AreSame(Card(5), screen.Focused, "left from 6 is 5");
+            // The grid's ends do not wrap, locked cards are passed over, and Back is not part of the grid.
+            screen.Focus(Card(6));
+            Assert.IsFalse(menu.Move(MoveDirection.Right), "7 to 15 are locked");
+            Assert.AreSame(Card(6), screen.Focused);
+            screen.Focus(Card(1));
+            Assert.IsFalse(menu.Move(MoveDirection.Left));
+            Assert.AreSame(Card(1), screen.Focused);
+
+            // Down from any column lands on the open card of the next row.
+            foreach (int from in new[] { 1, 2, 3, 5 })
+            {
+                screen.Focus(Card(from));
+                Assert.IsTrue(menu.Move(MoveDirection.Down));
+                Assert.AreSame(Card(6), screen.Focused, "down from " + from);
+            }
+            // Below 6 everything is locked: Back; and up from Back comes back to it.
+            Assert.IsTrue(menu.Move(MoveDirection.Down));
+            Assert.AreSame(catalogue.Back, screen.Focused);
+            Assert.IsFalse(menu.Move(MoveDirection.Right), "Back stands alone");
+            Assert.IsTrue(menu.Move(MoveDirection.Up));
+            Assert.AreSame(Card(6), screen.Focused);
+            Assert.IsTrue(menu.Move(MoveDirection.Up));
+            Assert.AreSame(Card(1), screen.Focused, "the same column where it is open");
+        }
+
+        // The pause made two textures the size of the canvas: 66 MB each on a 4K canvas, against a
+        // render-target budget of 75 MB for the whole of Medium. (Their depth buffers stay: URP's render
+        // graph does not render a camera into a texture without one.)
+        [Test]
+        public void TheMenusTextures_AreNoBiggerThanWhatTheCameraRenders()
+        {
+            // The pause's still has the pixels the camera really renders: the canvas times the render scale.
+            Assert.AreEqual(new Vector2Int(1920, 1080), MenuBackdrop.StillSize(1920, 1080, 1f));
+            Assert.AreEqual(new Vector2Int(1920, 1080), MenuBackdrop.StillSize(3840, 2160, 0.5f), "a 4K canvas on Medium: the tier's pixel budget");
+            Assert.AreEqual(new Vector2Int(1536, 864), MenuBackdrop.StillSize(1920, 1080, 0.8f), "1080p on Low");
+            Assert.AreEqual(new Vector2Int(1920, 1080), MenuBackdrop.StillSize(1920, 1080, 7f), "never more than the canvas");
+            Assert.AreEqual(new Vector2Int(16, 16), MenuBackdrop.StillSize(4, 4, 1f));
+            // The blurred frame behind the card: half of that each way.
+            Assert.AreEqual(new Vector2Int(960, 540), MenuBackdrop.BlurredSize(1920, 1080));
+            Assert.AreEqual(new Vector2Int(16, 16), MenuBackdrop.BlurredSize(20, 20));
+
+            // The still of this pause: the canvas at render scale 1 (nothing here lowers it), with a depth buffer.
+            Begin("?level=1");
+            Frames(10);
+            Esc();
+            RenderTexture frame = menu.Backdrop.Target;
+            if (runner.Presentation.Context.HasGraphics)
+            {
+                Assert.IsNotNull(frame);
+                Assert.AreEqual(MenuBackdrop.StillSize(Camera.pixelWidth, Camera.pixelHeight, 1f), new Vector2Int(frame.width, frame.height));
+                Assert.AreNotEqual(UnityEngine.Experimental.Rendering.GraphicsFormat.None, frame.depthStencilFormat);
+            }
+            Assert.IsNull(menu.Backdrop.Blurred, "no blurred frame where there is no lens blur to wait for");
         }
 
         [Test]
@@ -2803,6 +3528,82 @@ namespace Toybox.Tests
                 }
             Object.DestroyImmediate(image);
             return ink;
+        }
+
+        // The pause screen is three stickers side by side - the guide, the card, the hint - and has to hold
+        // them at 16:9 and on the taller canvas of a 4:3 screen alike, with every word of the guide on it,
+        // whatever level is loaded.
+        [Test]
+        public void ThePauseScreen_KeepsGuideCardAndHintApart_AndOnTheScreen_WithEveryWordOfTheGuideOnIt()
+        {
+            LevelList campaign = LevelList.FromRegistry();
+            foreach (float aspect in new[] { 16f / 9f, 4f / 3f })
+            {
+                string shape = "a screen " + aspect.ToString("0.###") + " wide for 1 high";
+                Present("hints", aspect);
+                for (int i = 0; i < 30; i++) presentation.Frame(1f / 60f, 1f);
+                MenuPresenter menu = presentation.Get<MenuPresenter>();
+                PauseMenu pause = menu.Pause;
+                Assert.AreSame(pause, menu.Current);
+                Assert.IsTrue(pause.Guide.Tween.IsShown && pause.HintPanel.Tween.IsShown, "test setup: guide and hint are up");
+                UiRoot root = menu.Root;
+                Vector2 canvas = HudFrame.Size(root.Rect);
+                Assert.AreEqual(1920f, canvas.x, 0.5f, shape + ": the canvas is the reference frame wide");
+
+                Rect guide = UiTestKit.Footprint(root, pause.Guide), card = UiTestKit.Footprint(root, pause.Card), hint = UiTestKit.Footprint(root, pause.HintPanel);
+                Assert.Less(guide.xMax, card.xMin - 16f, shape + ": the guide is clear of the card");
+                Assert.Greater(hint.xMin, card.xMax + 16f, shape + ": the hint is clear of the card");
+                Assert.AreEqual(hint.xMin - card.xMax, card.xMin - guide.xMax, 10f, shape + ": the guide mirrors the hint panel");
+                foreach (Rect part in new[] { guide, card, hint })
+                {
+                    Assert.Greater(part.xMin, -canvas.x * 0.5f + 40f, shape + ": on the screen (left)");
+                    Assert.Less(part.xMax, canvas.x * 0.5f - 40f, shape + ": on the screen (right)");
+                    Assert.Greater(part.yMin, -canvas.y * 0.5f + 40f, shape + ": on the screen (bottom)");
+                    Assert.Less(part.yMax, canvas.y * 0.5f - 40f, shape + ": on the screen (top)");
+                }
+
+                // Every word of the guide lies on its face, in its own rect, and no line on the next.
+                Rect face = UiTestKit.OnCanvas(root, pause.Guide.Face.rectTransform);
+                void Fits(TextMeshProUGUI label, string what)
+                {
+                    label.ForceMeshUpdate();
+                    Rect rect = UiTestKit.OnCanvas(root, label.rectTransform);
+                    Assert.IsTrue(rect.xMin >= face.xMin - 0.5f && rect.xMax <= face.xMax + 0.5f && rect.yMin >= face.yMin - 0.5f && rect.yMax <= face.yMax + 0.5f, shape + ": " + what + " is not on the guide");
+                    Assert.Greater(label.textInfo.characterCount, 0, shape + ": " + what + " was laid out");
+                    Assert.LessOrEqual(label.textBounds.size.x, label.rectTransform.rect.width + 1f, shape + ": " + what + " is too wide");
+                    Assert.LessOrEqual(label.textBounds.size.y, label.rectTransform.rect.height + 1f, shape + ": " + what + " is too tall");
+                    Assert.IsFalse(label.isTextOverflowing, shape + ": " + what + " is cut off");
+                }
+                Fits(pause.LevelName, "the level's name");
+                Fits(pause.LevelBlurb, "the blurb");
+                float column = float.MinValue;
+                for (int i = 0; i < pause.KeyCaps.Count; i++)
+                {
+                    Fits(pause.KeyCaps[i].GetComponentInChildren<TextMeshProUGUI>(true), "key " + i);
+                    Fits(pause.KeyActions[i], "what key " + i + " does");
+                    Assert.AreEqual(UiTheme.BodySize, pause.KeyActions[i].fontSize, 0.05f, "what a key does is set at the body size, not shrunk");
+                    Rect cap = UiTestKit.OnCanvas(root, pause.KeyCaps[i]), does = UiTestKit.OnCanvas(root, pause.KeyActions[i].rectTransform);
+                    Assert.Less(cap.xMax, does.xMin, shape + ": key " + i + " lies on what it does");
+                    if (i > 0) Assert.Less(cap.yMax, UiTestKit.OnCanvas(root, pause.KeyCaps[i - 1]).yMin, shape + ": key " + i + " lies on the one above");
+                    if (i == 0) column = does.xMin;
+                    Assert.AreEqual(column, does.xMin, 0.5f, "what the keys do stands in one column");
+                }
+                Assert.Less(UiTestKit.OnCanvas(root, pause.KeyCaps[0]).yMax, UiTestKit.OnCanvas(root, pause.LevelBlurb.rectTransform).yMin, shape + ": the keys start below the blurb");
+
+                // The campaign's own titles and blurbs: none is cut off, and no blurb is set smaller to fit.
+                foreach (int id in campaign.Campaign)
+                {
+                    LevelDefinition level = campaign.Create(id);
+                    pause.LevelName.text = id.ToString("00") + "  " + (level.Title ?? "").ToUpperInvariant();
+                    pause.LevelBlurb.text = level.Blurb ?? "";
+                    Fits(pause.LevelName, "the name of level " + id);
+                    Fits(pause.LevelBlurb, "the blurb of level " + id);
+                    Assert.LessOrEqual(pause.LevelName.textInfo.lineCount, 2, "level " + id + ": the name takes more than two lines");
+                    Assert.LessOrEqual(pause.LevelBlurb.textInfo.lineCount, 3, "level " + id + ": the blurb takes more than three lines");
+                    Assert.AreEqual(UiTheme.BodySize, pause.LevelBlurb.fontSize, 0.05f, "level " + id + ": the blurb is set smaller to fit: \"" + level.Blurb + "\"");
+                }
+                End();
+            }
         }
 
         [Test]

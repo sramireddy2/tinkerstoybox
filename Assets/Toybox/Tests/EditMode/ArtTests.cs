@@ -42,6 +42,13 @@ namespace Toybox.Tests
             Assert.AreEqual(2.6f, Palette.Go.Gain);
             Assert.AreEqual(3f, Palette.Hazard.Gain);
             Assert.IsTrue(Palette.Hazard.Striped);
+            Assert.AreEqual("#FF2BD6", Palette.ToHex(Palette.Hazard.Color), "kill surfaces: magenta");
+            // Laser red (the owner's brief for Level 11: red laser pointers): a signal of its own.
+            Assert.AreEqual("#FF1414", Palette.ToHex(Palette.Laser.Color));
+            Assert.AreEqual(3f, Palette.Laser.Gain);
+            Assert.IsFalse(Palette.Laser.Striped);
+            Assert.IsFalse(Palette.IsCandy(Palette.Laser.Color));
+            CollectionAssert.Contains(Palette.Signals, Palette.Laser);
             Assert.AreEqual("#FFFFFF", Palette.ToHex(Palette.Exit.Color));
             Assert.AreEqual(1.2f, Palette.Amber.GainAt(0f), 1e-4f, "a pulse starts at its low");
             Assert.AreEqual(2.2f, Palette.Amber.GainAt(0.5f), 1e-4f, "and peaks half a period later");

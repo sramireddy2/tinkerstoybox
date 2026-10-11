@@ -1,0 +1,84 @@
+Level 1 The Cheese Wedge
+  0.02  pick up Cheese Wedge at 0.400 from 1.10
+  1.63  let go  Cheese Wedge at 9.455 at 25.92
+  12.63  completed
+Level 2 The Thimble Chasm
+  0.05  pick up Thimble at 0.800 from 1.51
+  1.92  let go  Thimble at 11.625 at 21.88
+  9.28  completed
+Level 3 Shrinking the Apple
+  0.67  pick up Apple at 11.400 from 38.44
+  1.72  let go  Apple at 0.451 at 1.52
+  3.77  completed
+Level 4 Domino Effect
+  0.03  pick up Domino at 0.500 from 1.11
+  1.10  let go  Domino at 4.128 at 9.17
+  11.93  completed
+Level 5 The Fan and the Feather
+  0.07  pick up Feather at 1.000 from 1.37
+  1.20  let go  Feather at 9.329 at 12.79
+  17.35  completed
+Level 6 Bouncing Eraser
+  0.02  pick up Eraser at 0.800 from 1.15
+  2.83  let go  Eraser at 9.369 at 13.50
+  12.12  completed
+Level 7 The Teeter-Totter
+  0.02  pick up Pebble at 0.600 from 1.75
+  1.15  let go  Pebble at 4.628 at 13.47
+  3.68  completed
+Level 8 Funnel Physics
+  0.10  pick up Peewee at 0.250 from 1.64
+  3.80  let go  Peewee at 0.651 at 4.27
+  7.52  pick up Aggie at 0.900 from 3.73
+  9.42  let go  Aggie at 1.221 at 5.06
+  13.45  pick up Shooter at 5.000 from 23.13
+  14.23  let go  Shooter at 2.413 at 11.16
+  20.50  completed
+Level 9 The Moving Train
+  0.02  pick up Plank at 0.650 from 1.46
+  7.70  let go  Plank at 4.086 at 9.17
+  11.75  completed
+Level 10 Matryoshka Boxes
+  0.05  pick up Gift Box at 1.200 from 2.77
+  2.77  let go  Gift Box at 1.912 at 4.41
+  5.50  pick up Yellow Gift Box at 0.900 from 2.78
+  8.15  let go  Yellow Gift Box at 0.971 at 3.00
+  10.70  pick up Blue Gift Box at 0.600 from 2.85
+  13.03  let go  Blue Gift Box at 1.081 at 5.13
+  17.53  completed
+Level 11 Blocking Lasers
+  0.02  pick up Playing Card at 0.500 from 1.32
+  0.53  let go  Playing Card at 5.947 at 15.75
+  6.10  completed
+Level 12 The Keyhole
+  0.02  pick up Key at 8.000 from 15.06
+  1.18  let go  Key at 0.582 at 1.10
+  3.18  pick up Thread Spool at 1.000 from 1.61
+  4.18  let go  Thread Spool at 9.162 at 14.72
+  6.68  pick up Key at 0.582 from 1.12
+  11.78  let go  Key at 0.341 at 0.66
+  13.97  completed
+Level 13 Escaping the Fishbowl
+  0.27  pick up Sponge at 2.000 from 1.67
+  1.03  let go  Sponge at 9.593 at 8.00
+  9.78  pick up Sponge at 9.593 from 7.80
+  9.95  let go  Sponge at 1.862 at 1.51
+  14.32  completed
+Level 14 The Infinite Hallway
+  0.02  pick up Doorway at 1.000 from 6.01
+  2.12  let go  Doorway at 0.281 at 1.69
+  3.10  pick up Doorway at 0.281 from 0.41
+  6.02  let go  Doorway at 3.200 at 4.66
+  8.67  pick up Doorway at 3.200 from 9.25
+  9.13  let go  Doorway at 1.319 at 3.81
+  9.95  completed
+Level 15 The Rube Goldberg Machine
+  0.02  pick up Domino Set at 0.600 from 1.70
+  1.80  let go  Domino Set at 3.103 at 8.79
+  7.20  pick up Bouncy Ball at 0.600 from 1.51
+  8.83  let go  Bouncy Ball at 3.000 at 7.55
+  16.32  pick up Catapult Ruler at 1.000 from 3.51
+  16.70  let go  Catapult Ruler at 1.012 at 3.56
+  18.77  pick up Desk Fan at 5.000 from 24.22
+  19.05  let go  Desk Fan at 0.924 at 4.48
+  40.75  completed

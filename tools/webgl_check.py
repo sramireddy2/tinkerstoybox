@@ -9,9 +9,14 @@ Serve the build first, for example:
     python -m http.server 5180 --directory %USERPROFILE%\\.cache\\tinkerstoybox\\Build\\WebGL
 
 Examples:
-    python tools/webgl_check.py --levels 1 2 3 4 5 6 7 8 9
-    python tools/webgl_check.py --query "" --name title --seconds 10
+    python tools/webgl_check.py --all --play --phone          (the release check: every level, by hand, on a phone)
+    python tools/webgl_check.py --levels 5 11 --seconds 30
+    python tools/webgl_check.py --query "?title" --name title --seconds 10
     python tools/webgl_check.py --levels 1 --base https://sramireddy2.github.io/tinkerstoybox/
+
+It does not judge whether the bot finished a level: look at the last pictures of each level (the next
+level's card, or THE END after level 15). Level 15's machine takes 41 game seconds, hence --seconds 48.
+In PowerShell an empty argument is dropped, so name the title page with --query "?title", not "".
 
 Needs: pip install playwright  (no browser download: it uses the Edge or Chrome already installed).
 """
@@ -274,17 +279,20 @@ def main():
     parser.add_argument("--levels", type=int, nargs="*", default=[])
     parser.add_argument("--query", default=None, help="a query string to load instead of a level, e.g. '' for the title")
     parser.add_argument("--name", default="page")
-    parser.add_argument("--seconds", type=float, default=40)
+    parser.add_argument("--all", action="store_true", help="every level of the campaign, 1 to 15")
+    parser.add_argument("--seconds", type=float, default=48)
     parser.add_argument("--every", type=float, default=6)
     parser.add_argument("--base", default="http://localhost:5180/")
     parser.add_argument("--size", default="1280x720")
     parser.add_argument("--headed", action="store_true", help="show the browser window")
+    parser.add_argument("--phone", action="store_true", help="also open the page as a touch-only phone would: it must say the game needs a computer")
     parser.add_argument("--play", action="store_true", help="also play the first level by hand: click, mouse capture, look, walk, pick up, pause")
     args = parser.parse_args()
 
     os.makedirs(OUT, exist_ok=True)
     width, height = (int(v) for v in args.size.split("x"))
-    jobs = [(f"level{n:02d}", f"?level={n}&autoplay=1") for n in args.levels]
+    levels = list(range(1, 16)) if args.all else args.levels
+    jobs = [(f"level{n:02d}", f"?level={n}&autoplay=1") for n in levels]
     if args.query is not None:
         jobs.append((args.name, args.query))
 
@@ -335,6 +343,31 @@ def main():
                 print("  PROBLEM: " + problem, flush=True)
             failed += 1 if problems else 0
             jobs.append(("play", ""))
+            try:
+                context.close()
+            except Exception:
+                pass
+        if args.phone:
+            context = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True,
+                                          device_scale_factor=2,
+                                          user_agent="Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36")
+            page = context.new_page()
+            page.goto(args.base, wait_until="load")
+            page.wait_for_timeout(3000)
+            path = os.path.join(OUT, "phone.png")
+            page.screenshot(path=path, timeout=8000)
+            said = page.evaluate("""() => {
+              const coarse = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+              const button = document.getElementById('anyway');
+              const shown = !!button && !button.hidden && button.offsetParent !== null;
+              return { coarse, shown, text: document.body.innerText.slice(0, 300) };
+            }""")
+            print(f"phone: touch-only device = {said['coarse']}; 'Load anyway' offered = {said['shown']}; picture phone.png", flush=True)
+            print("  the page says: " + " / ".join(line.strip() for line in said["text"].splitlines() if line.strip())[:260], flush=True)
+            if said["coarse"] and not said["shown"]:
+                print("  PROBLEM: a touch-only device is not told that the game needs a keyboard and a mouse", flush=True)
+                failed += 1
+            jobs.append(("phone", ""))
             try:
                 context.close()
             except Exception:

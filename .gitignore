@@ -37,14 +37,8 @@ crashlytics-build.properties
 /.idea/
 /.utmp/
 
-# --- tooling output ---
+# --- tooling output: the builders' local logs, probe tables and pictures (what a reader needs is in docs/) ---
 /tools/out/
-
-# --- legacy web prototype ---
-node_modules/
-dist/
-.vite/
-coverage/
 
 # --- misc ---
 *.log

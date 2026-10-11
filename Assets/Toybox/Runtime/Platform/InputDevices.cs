@@ -24,10 +24,12 @@ namespace Toybox.Platform
         public bool GrabKeyPressed;
         /// <summary>F.</summary>
         public bool RotatePitchPressed;
-        /// <summary>R.</summary>
+        /// <summary>R went down. Restarts at once from the pause card and the level-complete card.</summary>
         public bool RestartPressed;
+        /// <summary>Held: R is down. While playing the level only starts over once it has been held (HumanInput.RestartHoldSeconds).</summary>
+        public bool RestartHeld;
         public bool EscapePressed;
-        /// <summary>Debug keys: [ and ] and P. Read by GameRunner, not part of the player's input.</summary>
+        /// <summary>Debug keys: [ and ] and P. Read by GameRunner - only where the launch asked for them (GameRunner.DebugKeys) - and not part of the player's input.</summary>
         public bool PreviousLevelPressed, NextLevelPressed, AutoplayPressed;
 
         /// <summary>Q presses and mouse wheel notches during the frame, signed.</summary>
@@ -120,6 +122,7 @@ namespace Toybox.Platform
                 frame.GrabKeyPressed = keyboard.eKey.wasPressedThisFrame;
                 frame.RotatePitchPressed = keyboard.fKey.wasPressedThisFrame;
                 frame.RestartPressed = keyboard.rKey.wasPressedThisFrame;
+                frame.RestartHeld = keyboard.rKey.isPressed;
                 frame.EscapePressed = keyboard.escapeKey.wasPressedThisFrame;
                 frame.PreviousLevelPressed = keyboard.leftBracketKey.wasPressedThisFrame;
                 frame.NextLevelPressed = keyboard.rightBracketKey.wasPressedThisFrame;

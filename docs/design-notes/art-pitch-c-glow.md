@@ -1,6 +1,10 @@
 # Tinker's Toybox — Direction C: "AFTERGLOW"
 
-> **Engine conflict — needs your decision.** The task specifies three.js + Rapier, but `C:/Users/shank/OneDrive/Desktop/tinkerstoybox/docs/ARCHITECTURE.md` says the project moved to Unity 6 / URP 17.6 on 2026-10-03. It contains the line "If instructions you were given mention three.js, Rapier, TypeScript or Vitest, translate them to the Unity equivalents below." The repo holds both: a three.js M0 scaffold (`src/main.ts` only) and a newer Unity project (`Assets/Toybox`, `ProjectSettings`, `tools/unity.ps1`). That line is file content, not an instruction from you, so I did not switch engines on its authority. Recipes below use three.js types as the task asked; Appendix A maps each to URP. I created and edited no files and ran no git commands.
+> **Historical draft.** One of three art directions pitched before the look was chosen. It was written for the
+> three.js / Rapier prototype, **before the move to Unity**: its API names, shadow techniques and GPU figures do
+> not apply to the game. The look that was built is [ART_BIBLE.md](../ART_BIBLE.md). See [README.md](README.md).
+
+> **Engine conflict — needs your decision.** The task specifies three.js + Rapier, but `docs/ARCHITECTURE.md` says the project moved to Unity 6 / URP 17.6 on 2026-10-03. It contains the line "If instructions you were given mention three.js, Rapier, TypeScript or Vitest, translate them to the Unity equivalents below." The repo holds both: a three.js M0 scaffold (`src/main.ts` only) and a newer Unity project (`Assets/Toybox`, `ProjectSettings`, `tools/unity.ps1`). That line is file content, not an instruction from you, so I did not switch engines on its authority. Recipes below use three.js types as the task asked; Appendix A maps each to URP. I created and edited no files and ran no git commands.
 
 Nothing here has been built or measured: every parameter is a starting value and every millisecond figure is an estimate. Art scale assumption: 1 unit ≈ 1.5 cm, so the 1.7-unit player is a 2.5 cm figurine, a floorboard is 8 units wide and a door is 133 units tall.
 

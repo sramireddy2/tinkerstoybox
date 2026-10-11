@@ -302,13 +302,92 @@ namespace Toybox.Toys
         /// <summary>The Level 9 plank: 0.6 x 0.12 x 3.0, long axis Z. Box collider.</summary>
         public static GameObject Plank(Color? color = null, bool grabbable = true) => Plank(PlankSize, color, grabbable);
 
-        /// <summary>A painted board with a nail in each corner; the long axis is the longer of X and Z.</summary>
+        /// <summary>How far the plank's grain and its end grain stand proud of its faces (a hair: they are paint and saw cut, not parts).</summary>
+        public const float PlankProud = 0.0015f;
+        /// <summary>What the grain does to the paint it shows through, and the growth rings to the bare wood of the ends (a tint).</summary>
+        public const float PlankGrainTone = 0.74f, PlankRingTone = 0.6f;
+
+        // The grain of a board's wide faces, one streak a row: where across the width it runs, from where to
+        // where along the length (all as shares, -0.5 .. 0.5), how wide it is (a share of the width) and the
+        // phase of its wander. They keep clear of the four nails.
+        static readonly float[,] PlankGrain =
+        {
+            { -0.41f, -0.47f, 0.30f, 0.030f, 0.0f },
+            { -0.16f, -0.38f, 0.47f, 0.038f, 1.7f },
+            { -0.02f, -0.47f, 0.12f, 0.026f, 3.1f },
+            { 0.12f, -0.10f, 0.47f, 0.034f, 4.4f },
+            { 0.41f, -0.30f, 0.44f, 0.028f, 5.6f },
+        };
+
+        /// <summary>
+        /// A painted wooden board: its grain shows through the paint along its length, the two sawn ends
+        /// are bare wood with their growth rings, the edges are chipped, and there is a nail in each
+        /// corner. The long axis is the longer of X and Z. (The owner's brief for Level 9 says "a wooden
+        /// plank"; a flat slab of candy colour with four dark dots read as yellow plastic.) All of it is
+        /// looks: the collider is the box, and size and mass are the box's.
+        /// </summary>
         public static GameObject Plank(Vector3 size, Color? color = null, bool grabbable = true)
         {
             ToyLook look = ToyLook.Of(ToyRecipe.PaintedWood, Palette.Lemon, color, grabbable);
             var kit = new ToyKit("Plank", MeshKit.Key("Plank", size.x, size.y, size.z) + look.Hex);
             kit.Box(size);
-            kit.Visual("Visual", look.Main, () => new[] { ToyKit.At(Board(size, look.Color, "plank"), Vector3.zero) });
+            bool lengthwiseZ = size.z >= size.x;
+            float run = lengthwiseZ ? size.z : size.x, wide = lengthwiseZ ? size.x : size.z, thick = size.y;
+            Vector3 along = lengthwiseZ ? Vector3.forward : Vector3.right, side = lengthwiseZ ? Vector3.right : Vector3.back;
+            kit.Visual("Visual", look.Main, () =>
+            {
+                var parts = new List<MeshPart> { ToyKit.At(Board(size, look.Color, "plank", 0.55f), Vector3.zero) };
+                var tone = new Color(PlankGrainTone, PlankGrainTone, PlankGrainTone, 1f);
+                // The two wide faces (the lower one is the upper one turned over: its streaks lie mirrored)...
+                for (int face = -1; face <= 1; face += 2)
+                {
+                    Vector3 normal = Vector3.up * face;
+                    Quaternion onFace = Quaternion.LookRotation(along, normal);
+                    for (int i = 0; i < PlankGrain.GetLength(0); i++)
+                    {
+                        float across = PlankGrain[i, 0] * wide, from = PlankGrain[i, 1], to = PlankGrain[i, 2], phase = PlankGrain[i, 4];
+                        Mesh streak = ToyGeo.Sliver((to - from) * run, PlankGrain[i, 3] * wide, 10, t => across + wide * 0.012f * Mathf.Sin(t * 8.2f + phase));
+                        parts.Add(new MeshPart(streak, Matrix4x4.TRS(normal * (thick * 0.5f + PlankProud) + along * ((from + to) * 0.5f * run), onFace, Vector3.one), tone));
+                    }
+                }
+                // ... and one streak along each narrow side.
+                for (int face = -1; face <= 1; face += 2)
+                {
+                    Vector3 normal = side * face;
+                    Quaternion onFace = Quaternion.LookRotation(along, normal);
+                    float from = face < 0 ? -0.44f : -0.33f, to = face < 0 ? 0.36f : 0.46f;
+                    Mesh streak = ToyGeo.Sliver((to - from) * run, thick * 0.2f, 10, t => thick * (0.1f * face + 0.03f * Mathf.Sin(t * 7.1f + face)));
+                    parts.Add(new MeshPart(streak, Matrix4x4.TRS(normal * (wide * 0.5f + PlankProud) + along * ((from + to) * 0.5f * run), onFace, Vector3.one), tone));
+                }
+                return parts;
+            });
+            // The sawn ends: bare wood (Birch, the palette's raw wood - never a candy colour), with growth rings.
+            float inset = Least(size) * 0.17f, endWide = wide - inset * 2f, endTall = thick - inset * 2f;
+            if (endWide > 0.01f && endTall > 0.01f)
+            {
+                kit.Visual("Ends", Materials.Toy(ToyRecipe.PlainProp, Palette.Birch), () =>
+                {
+                    var parts = new List<MeshPart>();
+                    var ring = new Color(PlankRingTone, PlankRingTone, PlankRingTone, 1f);
+                    for (int end = -1; end <= 1; end += 2)
+                    {
+                        Vector3 normal = along * end;
+                        // The plate's own axes: x across the board, z up through its thickness, y out of the end.
+                        Quaternion onEnd = Quaternion.LookRotation(Vector3.up, normal);
+                        Vector3 at = normal * (run * 0.5f + PlankProud);
+                        parts.Add(new MeshPart(ToyGeo.Plate(endWide, endTall), Matrix4x4.TRS(at, onEnd, Vector3.one)));
+                        // Three rings of a tree much bigger than the board: shallow arcs from side to side.
+                        Quaternion acrossEnd = onEnd * Quaternion.Euler(0f, 90f, 0f);
+                        for (int r = 0; r < 3; r++)
+                        {
+                            float level = endTall * (r == 0 ? -0.27f : r == 1 ? 0.04f : 0.3f), sag = endTall * (r == 0 ? 0.14f : r == 1 ? 0.17f : 0.1f);
+                            Mesh arc = ToyGeo.Sliver(endWide * (0.9f - r * 0.08f), endTall * 0.085f, 10, t => level + sag * (1f - (2f * t - 1f) * (2f * t - 1f)));
+                            parts.Add(new MeshPart(arc, Matrix4x4.TRS(at + normal * (PlankProud * 0.5f), acrossEnd, Vector3.one), ring));
+                        }
+                    }
+                    return parts;
+                });
+            }
             kit.Visual("Detail", look.Detail(Palette.Ink), () =>
             {
                 var parts = new List<MeshPart>();
@@ -327,10 +406,10 @@ namespace Toybox.Toys
             return LongToy(kit, look, size);
         }
 
-        static Mesh Board(Vector3 size, Color paint, string seed)
+        static Mesh Board(Vector3 size, Color paint, string seed, float chips = 0.3f)
         {
             Mesh mesh = MeshKit.RoundedBox(size, Least(size) * 0.12f);
-            ToyGeo.Chip(mesh, paint, ToyGeo.Seed(seed));
+            ToyGeo.Chip(mesh, paint, ToyGeo.Seed(seed), amount: chips);
             return mesh;
         }
 

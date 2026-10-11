@@ -1,6 +1,10 @@
 # Tinker's Toybox: Art Direction B, "LOOSE REGISTER"
 
-Contract read: `C:/Users/shank/OneDrive/Desktop/tinkerstoybox/docs/ARCHITECTURE.md`. API claims below were checked against the installed three r186 source. Nothing was prototyped, so every GPU figure in section 10 is an estimate.
+> **Historical draft.** One of three art directions pitched before the look was chosen. It was written for the
+> three.js / Rapier prototype, **before the move to Unity**: its API names, shadow techniques and GPU figures do
+> not apply to the game. The look that was built is [ART_BIBLE.md](../ART_BIBLE.md). See [README.md](README.md).
+
+Contract read: `docs/ARCHITECTURE.md`. API claims below were checked against the installed three r186 source. Nothing was prototyped, so every GPU figure in section 10 is an estimate.
 
 ## 1. Identity
 

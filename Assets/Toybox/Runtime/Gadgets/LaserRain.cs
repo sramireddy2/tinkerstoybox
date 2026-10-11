@@ -136,7 +136,9 @@ namespace Toybox.Gadgets
                 Game.Events.RaiseLaserAllClear(Event(options.Center));
             }
             allClear = clear;
-            if (beamsDirty) UpdateBeams();
+            // (Not while a presenter draws the beams itself and has switched these off: 530 beams' corners
+            // written for nobody. They are brought up to date in the first tick after they are switched on again.)
+            if (beamsDirty && (beamRenderer == null || beamRenderer.enabled)) UpdateBeams();
 
             Exposed = PlayerExposed();
             exposedTicks = Exposed ? exposedTicks + 1 : 0;
@@ -237,7 +239,8 @@ namespace Toybox.Gadgets
             Transform t = root.transform;
             t.SetParent(Ctx.Root, false);
             t.SetPositionAndRotation(options.Center, Quaternion.LookRotation(direction, up));
-            // The plate behind the lenses, and every lens in one mesh: Ink body, one hazard signal.
+            // The plate behind the lenses, and every lens in one mesh: Ink body, one signal - laser red (the
+            // owner's brief: red laser pointers).
             var plate = new Vector3(options.Size.x + 0.4f, options.Size.y + 0.4f, 0.1f);
             GadgetKit.Visual(t, "Plate", GadgetKit.BoxMesh(plate), GadgetKit.Body, new Vector3(0f, 0f, -0.06f));
             var parts = new List<MeshPart>();
@@ -246,7 +249,7 @@ namespace Toybox.Gadgets
             Quaternion inverse = Quaternion.Inverse(t.rotation);
             for (int i = 0; i < origins.Length; i++)
                 parts.Add(new MeshPart(lens, inverse * (origins[i] - options.Center), facing));
-            GadgetKit.Visual(t, "Lenses", MeshKit.Merge("LaserLenses", parts), Materials.Gadget(Palette.Hazard));
+            GadgetKit.Visual(t, "Lenses", MeshKit.Merge("LaserLenses", parts), Materials.Gadget(Palette.Laser));
         }
 
         // Two crossed strips per beam, in world space; only the far ends move.
@@ -283,11 +286,11 @@ namespace Toybox.Gadgets
             mesh.SetTriangles(triangles, 0);
             mesh.RecalculateBounds();
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            // ART_BIBLE 4.4: additive, Hazard x 3, soft across the beam.
+            // ART_BIBLE 4.4: additive, Laser x 3, soft across the beam.
             beamRenderer = go.AddComponent<MeshRenderer>();
             beamRenderer.sharedMaterial = Materials.Flat(new FlatRecipe
             {
-                Name = "Laser Beam", Color = Palette.Hazard.Emission, Blend = FlatBlend.Additive, Soft = 0.5f,
+                Name = "Laser Beam", Color = Palette.Laser.Emission, Blend = FlatBlend.Additive, Soft = 0.5f,
             });
             return mesh;
         }

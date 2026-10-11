@@ -189,12 +189,13 @@ namespace Toybox.Tests
             Assert.Greater(roofed, 0);
             Assert.Less(roofed, rain.BeamCount);
             Assert.AreEqual(roofed, lasers.ShadedCount(0), "the ground under every roofed beam is shaded, and no other");
-            Assert.AreEqual(rain.BeamCount * 8, lasers.DotMeshOf(0).vertexCount, "a dot and its wash per beam");
+            Assert.AreEqual(rain.BeamCount * 8, lasers.DotMeshOf(0).vertexCount, "a spark and its wash per beam");
             Assert.AreEqual(roofed * 24, lasers.ShadeMeshOf(0).vertexCount, "a hexagon per roofed beam");
 
-            // The beams: two crossed strips each, from the emitter to where the simulation says they end;
-            // the gadget's own plain ones are switched off meanwhile.
-            Assert.AreEqual(rain.BeamCount * 8, lasers.BeamMeshOf(0).vertexCount);
+            // The beams: two crossed strips each (with their hearts, and the dot's disc: five quads), from
+            // the emitter to where the simulation says they end; the gadget's own plain ones are switched
+            // off meanwhile.
+            Assert.AreEqual(rain.BeamCount * LaserVisuals.BeamQuads * 4, lasers.BeamMeshOf(0).vertexCount);
             AssertEffect(lasers.BeamRendererOf(0), "the beams");
             Assert.IsNotNull(rain.BeamRenderer);
             Assert.IsFalse(rain.BeamRenderer.enabled, "one set of beams, not two");
@@ -282,6 +283,136 @@ namespace Toybox.Tests
             Assert.AreEqual(0, RootOf<LaserVisuals>().childCount, "nothing of the level is left");
         }
 
+        // The owner's brief for Level 11: "Red laser pointers act as security beams." They were drawn in the
+        // art bible's Hazard magenta. Laser red is a colour of its own (the kill surfaces keep the magenta),
+        // from the lens to the dot, with the near-white heart a laser pointer's beam has.
+        [Test]
+        public void Lasers_AreLaserRed_WithANearWhiteHeart_FromLensToDot()
+        {
+            Color red = Palette.Laser.Color;
+            Assert.Greater(red.r, 0.95f);
+            Assert.Less(red.g, 0.15f);
+            Assert.Less(red.b, 0.15f, "no blue in it: Hazard is magenta");
+            Assert.IsFalse(Palette.Same(red, Palette.Hazard.Color));
+            Assert.Greater(Palette.Hazard.Color.b, 0.7f, "the kill surfaces keep their magenta");
+            Assert.IsFalse(Palette.IsCandy(red), "nothing that can be picked up has this colour");
+            Assert.Greater(Palette.Cherry.b - red.b, 0.2f, "and it is not Cherry, which leans to pink");
+            Assert.AreEqual(0f, Palette.Laser.PulseHz, "steady");
+            Assert.IsFalse(Palette.Laser.Striped);
+            Color light = LaserVisuals.Light, core = LaserVisuals.Core;
+            AssertColor(Palette.Laser.Emission, light, "the beams' light is the signal's");
+            Assert.Greater(light.r, 1.5f, "HDR: the red is what blooms");
+            Assert.Less(Mathf.Max(light.g, light.b), 0.05f, "saturated");
+            Assert.Greater(Mathf.Min(core.g, core.b), 0.65f, "the heart is near white");
+            Assert.GreaterOrEqual(core.r, light.r - 1e-4f);
+
+            LaserRain rain = null;
+            Build(ctx =>
+            {
+                TestHelpers.Floor(ctx, 40f);
+                rain = new LaserRain(ctx, new LaserRainOptions { Center = new Vector3(0f, 5f, 8f), Size = new Vector2(5f, 4f), Range = 5f, OnZapped = () => { } });
+                ctx.SetSpawn(new Vector3(0f, 0f, -4f), 0f);
+            });
+            LaserVisuals lasers = Present<LaserVisuals>();
+            Frames(4);
+
+            // Per beam: two crossed red strips, the heart of each (narrower, the whole length), the dot's red disc.
+            var colours = new List<Color>();
+            var corners = new List<Vector3>();
+            lasers.BeamMeshOf(0).GetColors(colours);
+            lasers.BeamMeshOf(0).GetVertices(corners);
+            Assert.AreEqual(rain.BeamCount * LaserVisuals.BeamQuads * 4, corners.Count);
+            for (int i = 0; i < rain.BeamCount; i += 7)
+            {
+                int first = i * LaserVisuals.BeamQuads * 4;
+                AssertColor(light, colours[first], "beam " + i + ": a red strip");
+                Assert.AreEqual(LaserVisuals.BeamAlpha, colours[first].a, 1e-3f);
+                AssertColor(light, colours[first + 4], "beam " + i + ": the strip across it");
+                AssertColor(core, colours[first + 8], "beam " + i + ": its heart");
+                AssertColor(core, colours[first + 12], "beam " + i + ": the heart of the strip across it");
+                AssertColor(light, colours[first + 16], "beam " + i + ": the dot's disc is the beam's red");
+                float strip = (corners[first + 1] - corners[first]).magnitude, heart = (corners[first + 9] - corners[first + 8]).magnitude;
+                Assert.Greater(strip, 0.01f);
+                Assert.AreEqual(strip * LaserVisuals.CoreShare, heart, 1e-4f, "the heart is the thin middle of the strip");
+                Assert.AreEqual(corners[first].y, corners[first + 8].y, 1e-4f, "from the lens");
+                Assert.AreEqual(corners[first + 2].y, corners[first + 10].y, 1e-4f, "to the end of the beam");
+            }
+            // Blended, not added: red on a pale floor too, and fifty rows of them are no white-out.
+            Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha, lasers.BeamRendererOf(0).sharedMaterial.GetFloat("_DstBlend"), "the beams and the dots' discs are blended");
+
+            // Where a beam lands: the wash in its red (Medium), a near-white spark in the dot.
+            var marks = new List<Color>();
+            lasers.DotMeshOf(0).GetColors(marks);
+            AssertColor(new Color(light.r * LaserVisuals.WashGain, light.g * LaserVisuals.WashGain, light.b * LaserVisuals.WashGain), marks[0], "the wash");
+            AssertColor(core, marks[4], "the spark");
+
+            // The emitter's lenses, and the beams the gadget draws itself where this presenter is not (the plain look).
+            Renderer lenses = null;
+            foreach (Renderer renderer in game.Root.GetComponentsInChildren<Renderer>(true))
+                if (renderer.name == "Lenses") lenses = renderer;
+            Assert.IsNotNull(lenses, "test setup: the emitter has its lenses");
+            Assert.AreSame(Materials.Gadget(Palette.Laser), lenses.sharedMaterial, "the lenses are laser red");
+            Assert.AreNotSame(Materials.Gadget(Palette.Hazard), lenses.sharedMaterial);
+            Vector4 plain = rain.BeamRenderer.sharedMaterial.GetVector("_Color");
+            AssertColor(light, new Color(plain.x, plain.y, plain.z), "the gadget's own beams");
+        }
+
+        // When one beam's length changed, all four meshes were cleared and written again for every beam -
+        // triangles and UVs included - with a ray for every roofed one (Level 11: 530 beams, 40 frames of
+        // the solve over a millisecond, the worst 10). Now the beams' and the dots' meshes are laid out once
+        // and only the beams that changed are moved, and only they look for their roof.
+        [Test]
+        public void Lasers_MoveOnlyTheBeamsThatChanged()
+        {
+            LaserRain rain = null;
+            Build(ctx =>
+            {
+                TestHelpers.Floor(ctx, 40f);
+                TestHelpers.Box(ctx, new Vector3(-1.5f, 2.5f, 8f), new Vector3(3f, 0.3f, 6f));
+                rain = new LaserRain(ctx, new LaserRainOptions { Center = new Vector3(0f, 5f, 8f), Size = new Vector2(5f, 4f), Range = 5f, OnZapped = () => { } });
+                ctx.SetSpawn(new Vector3(0f, 0f, -4f), 0f);
+            });
+            LaserVisuals lasers = Present<LaserVisuals>();
+            Frames(8);
+            int roofed = lasers.ShadedCount(0);
+            Assert.Greater(roofed, 10);
+            Assert.AreEqual(1, lasers.Layouts, "the beams are laid out once");
+            int looks = lasers.RoofLooks;
+            Assert.AreEqual(roofed, looks, "test setup: every roofed beam looked for its roof once");
+            int[] triangles = lasers.BeamMeshOf(0).triangles;
+
+            // A small lid under a few beams of the open side.
+            Prop lid = game.Context.AddProp(BasicToys.Block(new Vector3(0.7f, 0.3f, 0.7f)), new Vector3(1.6f, 2.5f, 8f), new PropOptions { Name = "Lid", Body = PropBody.Fixed });
+            Frames(8);
+            int more = lasers.ShadedCount(0) - roofed;
+            Assert.Greater(more, 0, "test setup: the lid stops some beams");
+            Assert.Less(more, 12, "test setup: a few");
+            Assert.AreEqual(1, lasers.Layouts, "the mesh keeps its shape");
+            CollectionAssert.AreEqual(triangles, lasers.BeamMeshOf(0).triangles);
+            Assert.AreEqual(looks + more, lasers.RoofLooks, "only the beams the lid stopped looked for a roof");
+            Assert.AreEqual(roofed + more, lasers.GlowCount(0), "and each of them has its pinpoint under it");
+            Assert.AreEqual((roofed + more) * 24, lasers.ShadeMeshOf(0).vertexCount, "the shade follows");
+            // The picture is the simulation's: every beam's strips end where the beam does.
+            var corners = new List<Vector3>();
+            lasers.BeamMeshOf(0).GetVertices(corners);
+            for (int i = 0; i < rain.BeamCount; i++)
+                Assert.AreEqual(rain.BeamOrigin(i).y - rain.BeamLength(i), corners[i * LaserVisuals.BeamQuads * 4 + 2].y, 1e-3f, "beam " + i);
+
+            // The lid goes: those beams reach the floor again, and a beam on the floor has no roof to look for.
+            game.Context.RemoveProp(lid);
+            Frames(8);
+            Assert.AreEqual(roofed, lasers.ShadedCount(0));
+            Assert.AreEqual(roofed, lasers.GlowCount(0));
+            Assert.AreEqual(1, lasers.Layouts);
+            Assert.AreEqual(looks + more, lasers.RoofLooks);
+            lasers.BeamMeshOf(0).GetVertices(corners);
+            for (int i = 0; i < rain.BeamCount; i++)
+                Assert.AreEqual(rain.BeamOrigin(i).y - rain.BeamLength(i), corners[i * LaserVisuals.BeamQuads * 4 + 2].y, 1e-3f, "beam " + i);
+
+            // The gadget's own beams, switched off while these are drawn, are not written for nobody.
+            Assert.IsFalse(rain.BeamRenderer.enabled);
+        }
+
         [Test]
         public void WithoutThePresenter_TheGadgetsOwnBeamsAreBack()
         {
@@ -330,6 +461,18 @@ namespace Toybox.Tests
             Mesh ribbons = MeshOf(visuals.RibbonRendererOf(0));
             // Two passes (edge and core) of five quads per streamer.
             Assert.AreEqual(visuals.StreamerCount(0) * 2 * 5 * 4, ribbons.vertexCount);
+            // The same quads every frame: laid out once (triangles, UVs), then only their corners and colours
+            // are written (the whole mesh used to be cleared and written again every frame).
+            Assert.AreEqual(1, visuals.RibbonLayouts(0));
+            Assert.GreaterOrEqual(visuals.RibbonMoves(0), 25);
+            int[] layout = ribbons.triangles;
+            Vector2[] across = ribbons.uv;
+            Vector3[] was = ribbons.vertices;
+            Frames(3);
+            Assert.AreEqual(1, visuals.RibbonLayouts(0), "the mesh keeps its shape while the streamers move");
+            CollectionAssert.AreEqual(layout, ribbons.triangles);
+            CollectionAssert.AreEqual(across, ribbons.uv);
+            CollectionAssert.AreNotEqual(was, ribbons.vertices, "and they do move");
             Bounds bounds = ribbons.bounds;
             Assert.GreaterOrEqual(bounds.min.z, 4.5f - 0.01f, "streamers stay inside the stream");
             Assert.LessOrEqual(bounds.max.z, 14.5f + 0.01f);
@@ -949,15 +1092,109 @@ namespace Toybox.Tests
             Frames(2);
             Assert.IsTrue(view.IsLive(portal));
 
-            // The camera and its texture outlive levels and go with the presenter.
+            // The camera outlives levels and goes with the presenter. Its texture (10 MB on Medium) is given
+            // back by the first frame of a level that has no door.
             Unload();
             Assert.AreEqual(0, view.Count);
             Assert.IsFalse(picture.enabled);
             RenderTexture texture = view.Texture;
+            Assert.IsTrue(texture != null);
+            Frames();
+            Assert.IsTrue(texture == null, "a level without a door gives the texture back");
+            Assert.IsNull(view.Texture);
+            Assert.IsTrue(second != null, "the camera stays");
+            // A level with a door again: the picture is back.
+            PortalDoorway again = null;
+            game.LoadLevel(new AdHocLevel(ctx =>
+            {
+                TestHelpers.Room(ctx, 20f, 12f);
+                Prop prop = ToyCatalog.Add(ctx, ToyId.Doorway, new Vector3(0f, 0f, 6f), 0.5f);
+                again = new PortalDoorway(ctx, new PortalDoorwayOptions { Prop = prop });
+                ctx.SetSpawn(Vector3.zero, 0f);
+            }));
+            Seconds(0.5f);
+            Assert.IsTrue(view.IsLive(again));
+            texture = view.Texture;
+            Assert.IsTrue(texture != null);
+            Assert.AreSame(texture, view.Camera.targetTexture);
             presentation.Dispose();
             presentation = null;
             Assert.IsTrue(second == null, "the camera is destroyed");
             Assert.IsTrue(texture == null, "the texture is destroyed");
+        }
+
+        // The second camera's picture is cut to the visible part of the opening, so the piece of the texture
+        // it used changed size with every step and turn - and URP makes its camera targets by exact size:
+        // in Level 14, 42 sizes in 75 renders and a new colour and depth target for most of them. The piece
+        // is now rounded up to a short ladder of sizes.
+        [Test]
+        public void APortalsPicture_IsRenderedAtAFewSizes_NotANewOneEveryFrame()
+        {
+            for (int i = 1; i < PortalView.Steps.Length; i++)
+            {
+                Assert.Greater(PortalView.Steps[i], PortalView.Steps[i - 1]);
+                Assert.LessOrEqual(PortalView.Steps[i], PortalView.Steps[i - 1] * 1.5f + 0.01f, "each step is at most half again the one before");
+            }
+            Assert.AreEqual(64, PortalView.Step(33, 1280));
+            Assert.AreEqual(64, PortalView.Step(64, 1280));
+            Assert.AreEqual(96, PortalView.Step(65, 1280));
+            Assert.AreEqual(1024, PortalView.Step(1000, 1280));
+            Assert.AreEqual(1280, PortalView.Step(1100, 1280));
+            Assert.AreEqual(720, PortalView.Step(600, 720), "never more than the texture has");
+            Assert.AreEqual(1080, PortalView.Step(1080, 1080));
+            Assert.AreEqual(1920, PortalView.Step(1600, 1920), "past the last step: the texture's own size");
+            // On High's 1920 x 1080 texture too, no step is more than half again what was asked for.
+            foreach (Vector2Int texture in new[] { PortalView.TextureSize(QualityTier.Medium), PortalView.TextureSize(QualityTier.High) })
+                for (int pixels = 32; pixels <= texture.x; pixels += 7)
+                {
+                    int step = PortalView.Step(pixels, texture.x);
+                    Assert.IsTrue(step >= pixels && step <= Mathf.Max(64, Mathf.CeilToInt(pixels * 1.5f)), pixels + " of " + texture.x + " is rendered at " + step);
+                }
+
+            Assume.That(SystemInfo.graphicsDeviceType != GraphicsDeviceType.Null, "rendering needs a graphics device (-nographics run)");
+            Assume.That(Quality.HdrRenderable, "the picture is an HDR texture");
+            PortalDoorway portal = Hall(0.5f, out _);
+            PortalView view = Present<PortalView>(QualityTier.Medium);
+            Seconds(0.5f);
+            Assert.IsTrue(view.IsLive(portal), "test setup: the door has the camera");
+
+            // The player walks up to the door, swaying and looking about: sixty views.
+            var asked = new HashSet<Vector2Int>();
+            var rendered = new HashSet<Vector2Int>();
+            for (int i = 0; i < 60; i++)
+            {
+                game.Player.Teleport(new Vector3(Mathf.Sin(i * 0.7f) * 0.6f, 0f, Mathf.Lerp(0f, 5f, i / 59f)), Mathf.Sin(i * 0.37f) * 12f, -8f);
+                Frames();
+                if (!view.IsLive(portal)) continue;
+                Vector2Int want = view.ViewPixels, got = view.RenderPixels;
+                Texture texture = view.Texture;
+                asked.Add(want);
+                rendered.Add(got);
+                string at = "view " + i + ": asked " + want + ", rendered " + got;
+                Assert.IsTrue(got.x >= want.x && got.y >= want.y, at + " - never fewer pixels than asked for");
+                Assert.IsTrue(got.x <= Mathf.Max(64, Mathf.CeilToInt(want.x * 1.5f)) && got.y <= Mathf.Max(64, Mathf.CeilToInt(want.y * 1.5f)), at + " - never more than half again");
+                Assert.IsTrue(got.x <= texture.width && got.y <= texture.height, at);
+                Assert.IsTrue(Array.IndexOf(PortalView.Steps, got.x) >= 0 || got.x == texture.width, at + " - the width is a step");
+                Assert.IsTrue(Array.IndexOf(PortalView.Steps, got.y) >= 0 || got.y == texture.height, at + " - the height is a step");
+                // The camera renders exactly that piece, and the picture in the opening is exactly that piece:
+                // from half a texel inside one edge to half a texel inside the other.
+                Rect rect = view.Camera.rect;
+                Assert.AreEqual(got.x, rect.width * texture.width, 0.01f, at);
+                Assert.AreEqual(got.y, rect.height * texture.height, 0.01f, at);
+                Vector2 low = new Vector2(float.MaxValue, float.MaxValue), high = new Vector2(float.MinValue, float.MinValue);
+                foreach (Vector2 uv in MeshOf(view.ViewRenderer).uv)
+                {
+                    low = Vector2.Min(low, uv);
+                    high = Vector2.Max(high, uv);
+                }
+                Assert.AreEqual(0.5f / texture.width, low.x, 1e-5f, at);
+                Assert.AreEqual(0.5f / texture.height, low.y, 1e-5f, at);
+                Assert.AreEqual((got.x - 0.5f) / texture.width, high.x, 1e-5f, at + " - no texel outside the rendered piece is shown");
+                Assert.AreEqual((got.y - 0.5f) / texture.height, high.y, 1e-5f, at);
+            }
+            Assert.Greater(asked.Count, 25, "test setup: nearly every view asked for a size of its own");
+            Assert.LessOrEqual(rendered.Count, 12, "and they were rendered at a handful of sizes");
+            Assert.Less(rendered.Count * 3, asked.Count);
         }
 
         // Mean brightness of the used part of the portal's texture.
@@ -1653,6 +1890,50 @@ namespace Toybox.Tests
                         Debug.Log("[Toybox] gallery shot: " + renamed);
                     }
                 }
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------------
+    // Pictures of the gallery's laser bay, for looking at (not a test)
+    // ----------------------------------------------------------------------------------------------
+
+    public static class LaserStills
+    {
+        /// <summary>
+        /// The gadget gallery (level 98) seen from in front of its laser bay - the gallery's own tour never
+        /// goes there - at all three quality tiers, from outside and from under the card:
+        ///
+        ///   tools/unity.ps1 exec -Method Toybox.Tests.LaserStills.Gallery -UnityArgs '-toyboxOut','tools/out/shots/final/render-ui-audio/gallery-lasers'
+        ///
+        /// -toyboxSize and -toyboxOut as for Shots.Capture. Files: tier/level98-t00.png (outside), -t01.png (under the card).
+        /// </summary>
+        public static void Gallery()
+        {
+            int width = 1280, height = 720;
+            Toybox.EditorTools.Shots.ParseSize(Toybox.EditorTools.ToyboxArgs.Get("-toyboxSize", "1280x720"), ref width, ref height);
+            string directory = Toybox.EditorTools.ToyboxArgs.Get("-toyboxOut", "tools/out/shots/final/render-ui-audio/gallery-lasers");
+            foreach (QualityTier tier in new[] { QualityTier.Low, QualityTier.Medium, QualityTier.High })
+            {
+                var level = new Toybox.Levels.Level98GadgetGallery();
+                System.Collections.IEnumerator Script(Bot bot)
+                {
+                    Vector3 bay = Toybox.Levels.Level98GadgetGallery.LaserBay;
+                    bot.Game.Player.Teleport(bay + new Vector3(2.5f, 0f, -9f), -12f, 8f);
+                    yield return bot.Wait(0.6f);
+                    bot.Game.Player.Teleport(bay + new Vector3(0f, 0f, -1.5f), 0f, 35f);
+                    yield return bot.Wait(30f);
+                }
+                Toybox.EditorTools.Shots.Run(new Toybox.EditorTools.ShotRequest
+                {
+                    Level = 98,
+                    Definition = new Replayed(level, Script),
+                    Times = new[] { 0.3f, 1f },
+                    Width = width,
+                    Height = height,
+                    Quality = tier,
+                    OutputDirectory = directory + "/" + tier.ToString().ToLowerInvariant(),
+                });
             }
         }
     }

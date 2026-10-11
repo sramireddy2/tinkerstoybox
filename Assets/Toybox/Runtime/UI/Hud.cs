@@ -9,9 +9,9 @@ namespace Toybox.UI
 {
     /// <summary>
     /// The game's HUD (ART_BIBLE 10.5): one overlay canvas without a raycaster, holding the reticle, the
-    /// scale readout (9.6), the hint toasts, the level card and the held-control pills. It is there while
-    /// the flow is Playing and hidden behind every menu. Everything it shows comes from game events and
-    /// from the grabber's focus candidate; it changes nothing in the game.
+    /// scale readout (9.6), the hint toasts, the level card and the control pills. It is there while
+    /// the flow is Playing and hidden behind every menu. Everything it shows comes from game events, from
+    /// the grabber's focus candidate and from the input of the last tick; it changes nothing in the game.
     /// </summary>
     [Presenter(510, ProvidesHud = true)]
     public sealed class HudPresenter : IPresenter
@@ -23,7 +23,7 @@ namespace Toybox.UI
         Game game;
         PresentationContext context;
         string capture;
-        bool pendingCard;
+        bool pendingCard, pauseSeen;
         float pointerFreeFor;
 
         public UiRoot Root { get; private set; }
@@ -95,6 +95,12 @@ namespace Toybox.UI
             FlowState state = UiCapture.StateFor(context, capture);
             bool playing = state == FlowState.Playing && game.Level != null;
             Root.Visible = playing;
+            // A person at the keys: not a bot, and not a tool without a game flow (a capture may ask: "keys").
+            bool person = (context.Flow != null && !context.Autoplay) || capture == "keys";
+            // The player found the pause card, where the hints and the keys are: "Esc" need not be said again.
+            bool paused = person && state == FlowState.Paused;
+            if (paused && !pauseSeen) Controls.Paused();
+            pauseSeen = paused;
             if (playing)
             {
                 if (pendingCard)
@@ -104,7 +110,9 @@ namespace Toybox.UI
                     LevelCard.Show(game.Level, context.Flow != null ? context.Flow.LevelId : game.Level.Id);
                 }
                 bool holding = game.Grabber.IsHolding;
-                Reticle.Frame(dt, !holding, !holding && game.Grabber.Focus != null);
+                bool focused = !holding && game.Grabber.Focus != null;
+                Reticle.Frame(dt, !holding, focused);
+                Controls.Frame(dt, person, focused, game.TickCount, game.LastInput);
                 // The readout keeps out of the held toy's way; once the toy is let go it stays where it is.
                 if (holding)
                 {
@@ -180,7 +188,7 @@ namespace Toybox.UI
         void OnPropGrabbed(PropHoldEvent e)
         {
             Readout.Grab(e);
-            Controls.Grab(e.Prop);
+            Controls.Grab(e.Prop, !context.Autoplay);
         }
 
         void OnPropHeld(PropHoldEvent e)
@@ -917,14 +925,28 @@ namespace Toybox.UI
     }
 
     /// <summary>
-    /// The held-control pills: key caps at the bottom right while a toy is held - "Q / wheel: turn",
-    /// "F: flip", "click: let go". Each stops appearing once its control has been used three times (kept in
-    /// the player's store, so they stay away). (The art bible wrote "click: drop". Every line and hint of
-    /// the levels says "let go" - one verb for one act - and the pill is on screen beside them.)
+    /// The control pills: key caps at the bottom right, each there until the player has shown they know the
+    /// key, and then never again (the counts are kept in the player's store).
+    ///
+    ///   while a toy is held     "Q / wheel: turn", "F: flip", "click: let go"         three uses each
+    ///   while nothing is held   "click: pick up" (with the reticle on a toy)          three pick-ups
+    ///                           "W A S D: move"                                       three seconds of walking
+    ///                           "Space: jump"                                         three jumps
+    ///                           "Esc: pause and hints"                                the first pause
+    ///
+    /// A use is a press or a gesture, never a tick: one scroll of the wheel is a burst of notches a few
+    /// ticks apart and counts once (<see cref="TurnGap"/>). The second group is the player's alone: it is
+    /// not shown while a bot plays, nor by a tool that has no game flow. (The art bible wrote
+    /// "click: drop". Every line and hint of the levels says "let go" and "pick up" - one verb for one
+    /// act - and the pills are on screen beside them.)
     /// </summary>
     public sealed class ControlPills
     {
         public const int Uses = 3;
+        /// <summary>A second of walking is one use of the move keys.</summary>
+        public const float MoveSeconds = 1f;
+        /// <summary>Turn input this soon after the last belongs to the same press or scroll.</summary>
+        public const float TurnGap = 0.35f;
         const string Prefix = "toybox.hud.uses.";
         const float Height = 40f, Margin = 48f, Gap = 14f;
 
@@ -933,16 +955,27 @@ namespace Toybox.UI
             Turn,
             Flip,
             Drop,
+            PickUp,
+            Move,
+            Jump,
+            Help,
         }
 
-        static readonly string[] Keys = { "turn", "flip", "drop" };
-        static readonly string[] Caps = { "Q / wheel", "F", "click" };
-        static readonly string[] Actions = { "turn", "flip", "let go" };
+        const int Controls = 7;
+        static readonly string[] Keys = { "turn", "flip", "drop", "pickup", "move", "jump", "help" };
+        static readonly string[] Caps = { "Q / wheel", "F", "click", "click", "W A S D", "Space", "Esc" };
+        static readonly string[] Actions = { "turn", "flip", "let go", "pick up", "move", "jump", "pause and hints" };
+        static readonly int[] Limits = { Uses, Uses, Uses, Uses, Uses, Uses, 1 };
+        // From the bottom right corner upward. The pill that comes and goes with the reticle is the top one,
+        // so nothing below it is pushed about.
+        static readonly Control[] Stack = { Control.Drop, Control.Flip, Control.Turn, Control.Help, Control.Jump, Control.Move, Control.PickUp };
 
         readonly IPrefStore store;
-        readonly Sticker[] pills = new Sticker[3];
-        readonly int[] used = new int[3];
-        bool holding, canFlip;
+        readonly Sticker[] pills = new Sticker[Controls];
+        readonly int[] used = new int[Controls];
+        bool holding, canFlip, person, onAToy, jumping;
+        int lastTick = int.MinValue, sinceTurn = int.MaxValue;
+        float walked;
 
         public ControlPills(RectTransform parent, IPrefStore prefStore)
         {
@@ -955,12 +988,22 @@ namespace Toybox.UI
             }
         }
 
-        static Sticker Build(RectTransform parent, string cap, string action)
+        /// <summary>What a control's pill says: its key cap, and what the key does.</summary>
+        public static string Cap(Control control) => Caps[(int)control];
+        public static string Action(Control control) => Actions[(int)control];
+        /// <summary>How many uses retire a control's pill.</summary>
+        public static int Limit(Control control) => Limits[(int)control];
+
+        /// <summary>A key-cap pill: an Ink pill with the key on a small Paper chip and what it does beside it.</summary>
+        public static Sticker Build(RectTransform parent, string cap, string action)
         {
             Sticker pill = Sticker.Create(parent, "Control " + action, StickerShape.Pill, UiTheme.Ink, new Vector2(200f, Height));
             TextMeshProUGUI capLabel = UiKit.Label(pill.Content, "Key", cap, UiFont.Body, UiTheme.SmallSize, UiTheme.Ink);
             capLabel.enableAutoSizing = false;
             capLabel.fontSize = UiTheme.SmallSize;
+            // Small dark letters on a light chip come out thin and grey (the picture is blended in linear
+            // light); the key is the one word of the pill that has to be read, so it is set bold.
+            capLabel.fontStyle = FontStyles.Bold;
             float capWidth = Mathf.Ceil(capLabel.GetPreferredValues(cap).x) + 20f;
             TextMeshProUGUI actionLabel = UiKit.Label(pill.Content, "Action", action, UiFont.Body, UiTheme.SmallSize, UiTheme.Paper, TextAlignmentOptions.Left);
             actionLabel.enableAutoSizing = false;
@@ -981,11 +1024,16 @@ namespace Toybox.UI
         public Sticker Pill(Control control) => pills[(int)control];
         public bool Shown(Control control) => pills[(int)control].Tween.IsShown;
         public int UsedCount(Control control) => used[(int)control];
+        /// <summary>True once a control has been used often enough: its pill does not come back.</summary>
+        public bool Retired(Control control) => used[(int)control] >= Limits[(int)control];
 
-        public void Grab(Prop prop)
+        /// <summary>A toy was picked up - by the player, or by a bot (which teaches nobody anything).</summary>
+        public void Grab(Prop prop, bool byThePlayer = false)
         {
             holding = true;
             canFlip = prop != null && prop.AllowPitch;
+            sinceTurn = int.MaxValue;
+            if (byThePlayer) Count(Control.PickUp);
             Sync();
         }
 
@@ -993,7 +1041,13 @@ namespace Toybox.UI
         public void Used(InputFrame input)
         {
             if (!holding) return;
-            if (input.RotateYaw != 0) Count(Control.Turn);
+            // One press of Q, or one scroll of the wheel (a notch every few ticks), is one use.
+            if (sinceTurn < int.MaxValue) sinceTurn++;
+            if (input.RotateYaw != 0)
+            {
+                if (sinceTurn == int.MaxValue || sinceTurn * Sim.Dt >= TurnGap) Count(Control.Turn);
+                sinceTurn = 0;
+            }
             if (input.RotatePitch && canFlip) Count(Control.Flip);
         }
 
@@ -1005,30 +1059,93 @@ namespace Toybox.UI
             Sync();
         }
 
+        /// <summary>
+        /// Once per frame of play. <paramref name="byThePlayer"/>: a person is at the keys (not a bot, not a
+        /// tool) - only then do the pills for walking, jumping, picking up and pausing show, and only then
+        /// does the input count. <paramref name="focused"/>: the reticle is on a toy that can be picked up.
+        /// <paramref name="tick"/> and <paramref name="input"/>: the game's tick count and the input of its
+        /// last tick, read, never changed.
+        /// </summary>
+        public void Frame(float dt, bool byThePlayer, bool focused, int tick, in InputFrame input)
+        {
+            bool ticked = tick != lastTick;
+            lastTick = tick;
+            bool changed = byThePlayer != person || focused != onAToy;
+            person = byThePlayer;
+            onAToy = focused;
+            if (ticked)
+            {
+                if (person)
+                {
+                    if (input.MoveX != 0f || input.MoveZ != 0f)
+                    {
+                        walked += dt;
+                        if (walked >= MoveSeconds)
+                        {
+                            walked -= MoveSeconds;
+                            changed |= Count(Control.Move);
+                        }
+                    }
+                    if (input.Jump && !jumping) changed |= Count(Control.Jump);
+                }
+                jumping = input.Jump;
+            }
+            if (changed) Sync();
+        }
+
+        /// <summary>The player paused the game: they have found the card with the hints and the keys.</summary>
+        public void Paused()
+        {
+            if (Count(Control.Help)) Sync();
+        }
+
         /// <summary>A level came or went: nothing is held any more.</summary>
         public void Reset()
         {
             holding = false;
+            jumping = false;
+            walked = 0f;
+            sinceTurn = int.MaxValue;
+            // The pills of the empty hand come back with the next frame of play.
+            person = false;
+            onAToy = false;
             foreach (Sticker pill in pills) pill.Tween.Hide(true);
         }
 
-        void Count(Control control)
+        // Returns true if that was the use that retires the pill.
+        bool Count(Control control)
         {
             int i = (int)control;
-            if (used[i] >= Uses) return;
+            if (used[i] >= Limits[i]) return false;
             used[i]++;
             store.SetInt(Prefix + Keys[i], used[i]);
-            if (used[i] >= Uses) store.Save();
+            if (used[i] < Limits[i]) return false;
+            store.Save();
+            return true;
         }
 
-        // The pills that are still wanted, stacked upward from the bottom right corner.
+        bool Wanted(Control control)
+        {
+            int i = (int)control;
+            if (used[i] >= Limits[i]) return false;
+            switch (control)
+            {
+                case Control.Turn:
+                case Control.Drop: return holding;
+                case Control.Flip: return holding && canFlip;
+                case Control.PickUp: return !holding && person && onAToy;
+                default: return !holding && person;
+            }
+        }
+
+        // The pills that are wanted, stacked upward from the bottom right corner.
         void Sync()
         {
             float y = Margin;
-            for (int i = pills.Length - 1; i >= 0; i--)
+            for (int s = 0; s < Stack.Length; s++)
             {
-                bool wanted = holding && used[i] < Uses && (i != (int)Control.Flip || canFlip);
-                Sticker pill = pills[i];
+                bool wanted = Wanted(Stack[s]);
+                Sticker pill = pills[(int)Stack[s]];
                 if (wanted)
                 {
                     pill.Rect.Place(UiKit.BottomRight, new Vector2(-Margin, y), pill.Size);

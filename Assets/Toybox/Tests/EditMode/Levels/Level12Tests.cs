@@ -233,7 +233,7 @@ namespace Toybox.Tests
         // it up from under one's own feet in the air, let go of it at the top of the jump, land on it - again
         // and again (the look and the clicks are input, a tick apart, as a quick hand makes them). Returns the
         // log; the player ends on top of whatever the spool has become.
-        string SpoolJump(float towerZ, int cycles)
+        string SpoolJump(float towerZ, int cycles, System.Action beforeTheJumps = null)
         {
             var log = new System.Text.StringBuilder();
             Prop spool = level.Spool;
@@ -262,6 +262,7 @@ namespace Toybox.Tests
             log.AppendLine("  start: spool " + spool.Scale.ToString("0.00") + " at " + F(spool.Center) + ", player " + F(player.Position) + " on " + (player.GroundProp != null ? player.GroundProp.Name : "-"));
             spoolJumpStart = spool.Scale;
             if (player.GroundProp != spool) return log.ToString();
+            beforeTheJumps?.Invoke();
 
             var input = new ScriptedInput();
             Game.Input = input;
@@ -278,13 +279,29 @@ namespace Toybox.Tests
                     input.Once = Aim(below());
                     Game.Tick();
                 }
-                // In the air: the click.
+                // In the air: the click. (Since the final review it takes nothing - the engine keeps the toy
+                // one has just jumped off out of reach. The jump is made to its end all the same, with the
+                // second click at its top, as before.)
                 input.Once = Aim(below(), new InputFrame { GrabPressed = true });
                 Game.Tick();
                 if (Game.Grabber.Held != spool)
                 {
                     log.AppendLine("  cycle " + cycle + ": the click in the air picked up " + (Game.Grabber.Held != null ? Game.Grabber.Held.Name : "nothing") + " (grounded " + player.Grounded + ", feet " + F(player.Position) + ")");
-                    break;
+                    if (Game.Grabber.Held != null) break;
+                    int up = 0;
+                    while (player.Velocity.y > 0.3f && up++ < 60)
+                    {
+                        input.Once = Aim(below());
+                        Game.Tick();
+                    }
+                    input.Once = Aim(below(), new InputFrame { GrabPressed = true });
+                    Game.Tick();
+                    if (Game.Grabber.Held != null) break;
+                    int down = 0;
+                    while (!player.Grounded && down++ < 240) Game.Tick();
+                    for (int i = 0; i < 12; i++) Game.Tick();
+                    if (player.GroundProp != spool) break;
+                    continue;
                 }
                 float ratio = Game.Grabber.Ratio;
                 // To the top of the jump, looking straight down.
@@ -1379,74 +1396,77 @@ namespace Toybox.Tests
             CollectionAssert.AreEqual(new[] { L.SpoolKeyLine }, said);
         }
 
-        // LEVELS: "Jump off the key and grab it in mid-air (legal): the player falls and respawns holding the
-        // key - the same as step 2."
-        [Test]
-        public void PickedUpInMidAirAtTheDoor_TheKeyComesAlong_AndTheDoorIsAsFarAwayAsBefore()
+        // LEVELS had: "Jump off the key and grab it in mid-air (legal): the player falls and respawns holding the
+        // key - the same as step 2." Since the final review the engine keeps the toy one has just jumped off
+        // out of reach until the feet are on something else (UnderfootTests: jump, click, click was a way up
+        // in every level). The click takes nothing, the level says why, and the bridge is still the bridge.
+        [TestCase(19.2f, 17.5f, TestName = "JumpedOffTheKeyAtTheDoor_ItIsNotPickedUpInMidAir_AndTheBridgeStays")]
+        [TestCase(13f, 14.5f, TestName = "JumpedOffTheKeyInTheMiddleOfTheBridge_ItIsNotPickedUpInMidAir_AndTheBridgeStays")]
+        public void JumpedOffTheKey_ItIsNotPickedUpInMidAir_AndTheBridgeStays(float standZ, float lookZ)
         {
             Load();
             List<string> said = Listen();
-            int respawns = 0;
+            int respawns = 0, pickUps = 0;
             Game.Events.PlayerRespawned += e => respawns++;
+            Game.Events.PropGrabbed += e => pickUps++;
             IEnumerator Leap()
             {
                 yield return bot.WalkTo(new Vector3(0f, 0f, 12f), 0.1f, 12f);
-                yield return bot.WalkTo(new Vector3(0f, 0f, 19.2f), 0.05f, 12f);
-                yield return bot.LookAt(new Vector3(0f, 0.3f, 17.5f));
+                yield return bot.WalkTo(new Vector3(0f, 0f, standZ), 0.05f, 12f);
+                yield return bot.LookAt(new Vector3(0f, 0.3f, lookZ));
                 yield return bot.Jump(false);
                 yield return bot.Wait(0.05f);
                 yield return bot.Click();
             }
             BotRunner.Run(Game, Leap(), 40f);
-            Assert.AreSame(level.Key, Game.Grabber.Held, "in the air nobody stands on anything");
-            Assert.Greater(Game.Grabber.Ratio, 1f, "from this close the key looks huge");
-            Assert.IsTrue(TestHelpers.RunUntil(Game, () => respawns > 0, 4f), "and without it there is nothing to land on");
-            Assert.AreSame(level.Key, Game.Grabber.Held, "LEVELS: back at the start, still holding what was held");
-            Assert.Less(Vector3.Distance(Game.Player.Position, L.Spawn), 0.1f);
+            Assert.IsFalse(Game.Player.Grounded, "in the air");
+            Assert.AreSame(level.Key, Game.Player.Underfoot, "off the key");
+            Assert.IsNull(Game.Grabber.Held, "the key that was jumped off is out of reach until the feet are on something else");
+            Assert.IsTrue(TestHelpers.RunUntil(Game, () => Game.Player.Grounded, 3f), State());
+            Assert.AreSame(level.Key, Game.Player.GroundProp, "and down on the bridge again");
+            Assert.AreEqual(0, pickUps + respawns);
+            Assert.IsTrue(KeyIsTheBridge, State());
             Assert.IsFalse(level.Door.IsOpen);
             Assert.IsFalse(Game.LevelCompleted);
+            RunSeconds(0.2f);
+            CollectionAssert.Contains(said, L.StandingLine, "the click that did nothing is told why (" + Told(said) + ")");
 
-            // The same as step 2 from here: the key down by the shelf, the spool, and the key picked up again from
-            // a few steps away (which makes it small enough for the lock).
+            // Back to the start, and the level as it is meant.
             IEnumerator Rest()
             {
-                yield return level.PutKeyOnShelf(bot);
-                yield return level.FillDrawer(bot, L.SpoolStand, L.ThrowStand, L.OutlineCentre);
-                yield return bot.WalkTo(new Vector3(-1.5f, 0f, -1.5f), 0.2f);
-                yield return bot.Grab(level.Key);
-                yield return level.Cross(bot);
-                yield return bot.DropAt(L.Keyhole);
-                yield return level.Leave(bot);
+                yield return bot.WalkTo(new Vector3(0f, 0f, 12f), 0.1f, 12f);
+                yield return bot.WalkTo(L.Spawn, 0.1f, 12f);
+                yield return level.Solve(bot);
             }
-            BotRunner.Run(Game, Rest(), 90f);
+            BotRunner.Run(Game, Rest(), 120f);
             AssertCompleted("solved after the leap (" + Told(said) + ")");
             CollectionAssert.DoesNotContain(said, L.TooBigLine);
         }
 
-        // The same from the middle of the bridge: from there the key fills the view, and no step toward the lock
-        // would make it small enough. Said at the pick-up.
+        // A key that fills the view: no step toward the lock would make it small enough. Said at the pick-up.
+        // (It used to be shown with the key picked up in mid-air off the middle of the bridge; a key that was
+        // let go big on the chest and is picked up from beside it looks as big.)
         [Test]
-        public void PickedUpInMidAirOverTheMiddleOfTheBridge_TheKeyLooksTooBigForAnyLock_AndTheLevelSaysSo()
+        public void PickedUpFromRightBesideIt_ABigKeyLooksTooBigForAnyLock_AndTheLevelSaysSo()
         {
             Load();
             List<string> said = Listen();
-            int respawns = 0;
-            Game.Events.PlayerRespawned += e => respawns++;
-            IEnumerator Leap()
+            IEnumerator Near()
             {
-                yield return bot.WalkTo(new Vector3(0f, 0f, 13f), 0.1f, 12f);
-                yield return bot.LookAt(new Vector3(0f, 0.3f, 14.5f));
-                yield return bot.Jump(false);
-                yield return bot.Wait(0.05f);
-                yield return bot.Click();
+                yield return bot.Grab(level.Key);
+                yield return bot.DropAt(new Vector3(0f, 0f, 5.5f));
+                yield return bot.Until(() => !level.Key.Held && level.Key.Velocity.sqrMagnitude < 0.01f, 4f);
+                // (To its side: it is long, and from its end one would be standing on it.)
+                Vector3 at = level.Key.Center;
+                yield return bot.WalkTo(new Vector3(at.x + 1.5f, 0f, at.z), 0.1f, 8f);
+                yield return bot.Until(() => bot.Player.Grounded && bot.Player.GroundProp == null, 2f);
+                yield return bot.Grab(level.Key);
             }
-            BotRunner.Run(Game, Leap(), 40f);
-            Assert.AreSame(level.Key, Game.Grabber.Held);
-            Assert.Greater(Game.Grabber.Ratio, L.KeyNearRatio, "eight units of key from under two away");
+            BotRunner.Run(Game, Near(), 40f);
+            Assert.AreSame(level.Key, Game.Grabber.Held, State());
+            Assert.Greater(Game.Grabber.Ratio, L.KeyNearRatio, "a big key from two steps away");
             RunSeconds(0.1f);
-            CollectionAssert.AreEqual(new[] { L.KeyNearLine }, said);
-            Assert.IsTrue(TestHelpers.RunUntil(Game, () => respawns > 0, 4f), State());
-            Assert.AreSame(level.Key, Game.Grabber.Held, "back at the start with the key in the hand");
+            CollectionAssert.Contains(said, L.KeyNearLine, Told(said));
             Assert.IsFalse(Game.LevelCompleted);
         }
 
@@ -1626,10 +1646,12 @@ namespace Toybox.Tests
 
         // ---- Nobody gets to the door from above (the second review) ------------------------------------------------
 
-        // Spool-jumping. The engine refuses a pick-up of the toy underfoot, but not in mid-air: jump off the
+        // Spool-jumping. The engine refused a pick-up of the toy underfoot, but not in mid-air: jump off the
         // spool, pick it up from under one's own feet, let go of it at the top of the jump (from higher up, so
         // it comes out bigger), land on it. Measured before the level's rule: 0.85 to 9.9 in thirteen jumps - a
-        // tower on the chest. Now a spool picked up in mid-air gets no bigger until the player has landed.
+        // tower on the chest. The level's rule: a spool picked up in mid-air gets no bigger until the player
+        // has landed (PickedUpInMidAir_AndLandedWithIt_TheSpoolIsAnOrdinarySpool). And since the final review
+        // the engine does not let go of the toy one has just jumped off at all: nothing is picked up.
         [Test]
         public void JumpingOffTheSpool_AndPickingItUpInMidAir_BuildsNoTower()
         {
@@ -1638,16 +1660,18 @@ namespace Toybox.Tests
             BotRunner.Run(Game, ShelveTheKey(), 30f);
             Prop spool = level.Spool;
             Player player = Game.Player;
-            string log = SpoolJump(5.5f, 8);
+            int pickUps = 0;
+            string log = SpoolJump(5.5f, 8, () => Game.Events.PropGrabbed += e => pickUps++);
             Assert.AreSame(spool, player.GroundProp, "the eight jumps were made, each from the spool and back onto it:\n" + log);
             StringAssert.Contains("cycle 7", log, log);
+            Assert.AreEqual(0, pickUps, "in none of them was the spool picked up:\n" + log);
             Assert.That(spoolJumpStart, Is.InRange(L.SpoolStart, 1.2f), "it was put down about the size it started with:\n" + log);
             Assert.LessOrEqual(spool.Scale, spoolJumpStart + 1e-3f, "the spool is no bigger than it was before the jumps:\n" + log);
             Assert.Less(player.Position.y, spoolJumpStart + 0.05f, "and nobody is higher up than a hop:\n" + log);
-            CollectionAssert.Contains(said, L.AirLine, "the level says why (" + Told(said) + ")");
+            CollectionAssert.Contains(said, L.StandingLine, "the level says why (" + Told(said) + ")");
             CollectionAssert.DoesNotContain(said, L.FarLine, "and nothing about how far away it was picked up");
             RunSeconds(0.2f);
-            Assert.AreEqual(L.SpoolMax, spool.MaxScale, 1e-4f, "with the feet on something again it is an ordinary spool");
+            Assert.AreEqual(L.SpoolMax, spool.MaxScale, 1e-4f, "it is an ordinary spool");
 
             // And an ordinary spool it is: picked up from the chest, a step away, it fills the drawer.
             bot = new Bot(Game);
@@ -1905,16 +1929,16 @@ namespace Toybox.Tests
             Assert.AreEqual(0, respawns);
         }
 
-        // LEVELS' own case for the key ("jump off and pick it up in mid-air: the player falls and is back at the
-        // start holding it"), with the spool: off its top, picked up from under one's feet, down among the socks.
-        // Back at the start it is an ordinary spool again - from this close it looks huge, and it is as big as it
-        // gets a few steps from the edge.
+        // What LEVELS had as the key's case ("jump off and pick it up in mid-air: the player falls and is back at
+        // the start holding it"), with the spool: off its top over the drawer, a click at it from the air. Since
+        // the final review the engine keeps the toy one has just jumped off out of reach: the spool stays where
+        // it stands, the drawer stays filled, and the way to the door is still there.
         [Test]
-        public void TheSpoolPickedUpInMidAirOverTheDrawer_ComesBackWithThePlayer_AndFillsTheDrawerAgain()
+        public void JumpedOffTheSpoolOverTheDrawer_ItIsNotPickedUpInMidAir_AndTheDrawerStaysFilled()
         {
             Load();
             List<string> said = Listen();
-            int respawns = 0;
+            int respawns = 0, pickUps = 0;
             Game.Events.PlayerRespawned += e => respawns++;
             BotRunner.Run(Game, ShelveTheKey(), 30f);
             SpoolInTheDrawer(L.OutlineScale);
@@ -1923,6 +1947,7 @@ namespace Toybox.Tests
             Prop spool = level.Spool;
             Player player = Game.Player;
             Assert.AreSame(spool, player.GroundProp, State());
+            Game.Events.PropGrabbed += e => pickUps++;
             var input = new ScriptedInput();
             Game.Input = input;
             Vector3 down = new Vector3(player.Eye.x, spool.Center.y, player.Eye.z + 0.5f);
@@ -1933,28 +1958,24 @@ namespace Toybox.Tests
                 input.Once = Aim(down);
                 Game.Tick();
             }
-            input.Once = Aim(down, new InputFrame { GrabPressed = true });
-            Game.Tick();
-            Assert.AreSame(spool, Game.Grabber.Held, "picked up from under one's own feet, in the air");
-            Assert.AreEqual(L.OutlineScale, spool.MaxScale, 1e-3f, "in the air it gets no bigger than it is");
-            Assert.IsTrue(TestHelpers.RunUntil(Game, () => respawns > 0, 4f), "and without it there is nothing to land on (" + State() + ")");
-            RunSeconds(0.2f);
-            Assert.AreSame(spool, Game.Grabber.Held, "back at the start with the spool in the hand");
-            Assert.AreEqual(L.SpoolMax, spool.MaxScale, 1e-4f, "where it is an ordinary spool again");
-            Assert.Greater(Game.Grabber.Ratio, 1f, "that looks huge");
+            Assert.IsFalse(player.Grounded, "in the air");
+            // A click in every tick of the jump.
+            for (int i = 0; i < 120 && !player.Grounded; i++)
+            {
+                input.Once = Aim(down, new InputFrame { GrabPressed = true });
+                Game.Tick();
+                Assert.IsNull(Game.Grabber.Held, "tick " + i + ": not from under one's own feet, in the air either");
+            }
+            Assert.AreSame(spool, player.GroundProp, "down on the spool again (" + State() + ")");
+            Assert.AreEqual(0, pickUps + respawns);
+            Assert.AreEqual(L.OutlineScale, spool.Scale, 1e-3f);
+            Assert.AreEqual(L.SpoolMax, spool.MaxScale, 1e-4f, "it was never held in the air");
+            Assert.IsTrue(level.SpoolFills, State());
 
             bot = new Bot(Game);
             IEnumerator Again()
             {
-                for (float z = 0f; z <= 6.6f; z += 0.5f)
-                {
-                    yield return bot.WalkTo(new Vector3(0f, 0f, z), 0.1f);
-                    yield return bot.LookAt(L.OutlineCentre);
-                    yield return bot.Wait(0.1f);
-                    if (level.SpoolTint == FitState.Good) break;
-                }
-                yield return bot.DropAt(L.OutlineCentre);
-                yield return bot.Until(() => level.SpoolFills, 6f);
+                yield return bot.WalkTo(new Vector3(0f, 0f, L.EdgeZ - 1.5f), 0.2f, 10f);
                 yield return KeyToTheLock();
             }
             BotRunner.Run(Game, Again(), 90f);

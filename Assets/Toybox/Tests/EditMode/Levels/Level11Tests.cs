@@ -371,8 +371,9 @@ namespace Toybox.Tests
             Assert.AreEqual(11.1f, near, 0.15f, "the roof begins two units in front of the walls");
             Assert.Greater(half, Level11BlockingLasers.LaneHalfWidth + Level11BlockingLasers.LowWallThickness, "the outline is wider than both walls together");
 
-            // Paint, the stand mark and the blocks of the low walls are looks only.
-            foreach (string name in new[] { "Paint", "Outline", "Stand Mark", "Low Walls" })
+            // Paint (with the stand mark), the outline and the two merged sets (the blocks of the low walls
+            // among them) are looks only.
+            foreach (string name in new[] { "Paint", "Outline", "Set", "Flat" })
             {
                 Transform looks0 = Game.LevelRoot.Find(name);
                 Assert.IsNotNull(looks0, name);

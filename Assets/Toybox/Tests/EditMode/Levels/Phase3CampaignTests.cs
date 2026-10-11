@@ -345,7 +345,7 @@ namespace Toybox.Tests
         /// </summary>
         public static readonly float[] SolveSeconds =
         {
-            12.63f, 9.28f, 3.77f, 14.18f, 17.35f, 12.12f, 3.68f, 20.5f, 11.75f, 17.53f, 6.1f, 13.97f, 14.32f, 9.95f, 40.75f,
+            12.63f, 9.28f, 3.77f, 11.93f, 17.35f, 12.12f, 3.68f, 20.5f, 11.75f, 17.53f, 6.1f, 13.97f, 14.32f, 9.95f, 40.75f,
         };
 
         /// <summary>
@@ -745,6 +745,223 @@ namespace Toybox.Tests
                     Assert.IsFalse(pause.HintText.isTextOverflowing, title + ": hint " + (h + 1) + " is cut off");
                 }
             }
+        }
+
+        // ---- What the levels cost to draw, and to start again (the final review) ---------------------------
+
+        // What a level draws besides its toys and whatever a gadget moves: the renderers that are neither a
+        // prop's nor a body's.
+        static List<MeshRenderer> Statics(Game game)
+        {
+            var statics = new List<MeshRenderer>();
+            foreach (MeshRenderer renderer in game.LevelRoot.GetComponentsInChildren<MeshRenderer>())
+                if (renderer.GetComponentInParent<PropRef>() == null && renderer.GetComponentInParent<Rigidbody>() == null) statics.Add(renderer);
+            return statics;
+        }
+
+        /// <summary>
+        /// The most static draws each level may have, 1 to 15 (ART_BIBLE 12.1: statics are merged per
+        /// material). Levels 2, 3, 4, 8, 9 and 11 drew every block, slab, dash and print as a renderer of its
+        /// own - 40, 44, 84, 95, 47 and 38 draws - until the final review; what they draw now is their sets
+        /// (a draw per material) and what their gadgets light, press and hide: 14, 9, 10, 28, 13 and 12. The
+        /// others are as they were measured then. A level that goes over its number has grown a
+        /// piece-by-piece set again.
+        /// </summary>
+        static readonly int[] StaticDraws = { 11, 14, 9, 10, 15, 16, 32, 28, 13, 25, 12, 32, 30, 28, 33 };
+
+        [Test]
+        public void EveryLevel_DrawsItsSetMergedPerMaterial()
+        {
+            var report = new List<string>();
+            var over = new List<string>();
+            for (int id = 1; id <= Count; id++)
+            {
+                LevelDefinition level = Load(id);
+                List<MeshRenderer> statics = Statics(game);
+                int draws = 0, casters = 0;
+                var materials = new HashSet<Material>();
+                foreach (MeshRenderer renderer in statics)
+                {
+                    draws += renderer.sharedMaterials.Length;
+                    if (renderer.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.Off) casters++;
+                    foreach (Material material in renderer.sharedMaterials) materials.Add(material);
+                    MeshFilter filter = renderer.GetComponent<MeshFilter>();
+                    Assert.IsTrue(filter != null && filter.sharedMesh != null, level.Title + ": " + renderer.name + " has a mesh to draw");
+                }
+                string line = "level " + id + ": " + draws + " static draws (" + casters + " cast a shadow) for " + materials.Count + " materials";
+                report.Add(line);
+                if (draws > StaticDraws[id - 1]) over.Add(line + " - at most " + StaticDraws[id - 1]);
+            }
+            Debug.Log("[Toybox] static draws:\n" + string.Join("\n", report));
+            Assert.IsEmpty(over, string.Join("\n", over));
+        }
+
+        // R is pressed often in a puzzle game, and a restart is a whole new build. The merged meshes of a
+        // level's sets are the same every time: they are kept from one build to the next (SetMeshes) instead
+        // of being merged anew (Level 5: 15 MB of lists per restart, Level 11: 13 MB). And only for the level
+        // that is played: the next level's first set sends the last level's meshes away.
+        [Test]
+        public void ARestart_MergesNoSetAgain_AndTheNextLevelTakesTheLastOnesMeshesAway()
+        {
+            var report = new List<string>();
+            int withSets = 0;
+            for (int id = 1; id <= Count + 1; id++)
+            {
+                // (Once round and on to Level 1 again: its meshes went when Level 2 was built, and are made anew.)
+                int level = id <= Count ? id : 1;
+                game?.Dispose();
+                game = Game.Create();
+                int before = SetMeshes.Merges;
+                game.LoadLevel(level);
+                int own = SetMeshes.Merges - before;
+                string title = game.Level.Title;
+                if (own > 0)
+                {
+                    withSets++;
+                    Assert.AreEqual(own, SetMeshes.Kept, title + ": the meshes of the level before are gone, this level's are kept");
+                }
+                var first = new List<Mesh>();
+                foreach (MeshRenderer renderer in Statics(game)) first.Add(renderer.GetComponent<MeshFilter>().sharedMesh);
+
+                for (int restart = 0; restart < 3; restart++)
+                {
+                    game.RestartLevel();
+                    Assert.AreEqual(before + own, SetMeshes.Merges, title + ": restart " + (restart + 1) + " merged a set again");
+                    if (own > 0) Assert.AreEqual(own, SetMeshes.Kept, title + ": restart " + (restart + 1) + " kept more or fewer meshes");
+                    List<MeshRenderer> again = Statics(game);
+                    Assert.AreEqual(first.Count, again.Count, title + ": the same statics after a restart");
+                    for (int i = 0; i < again.Count; i++)
+                        Assert.IsTrue(again[i].GetComponent<MeshFilter>().sharedMesh != null, title + ": " + again[i].name + " lost its mesh over a restart");
+                }
+                // The level is as solvable as it was: a tick runs, and nothing is missing.
+                game.Tick();
+                report.Add("level " + level + ": " + own + " merged meshes");
+            }
+            Debug.Log("[Toybox] set meshes:\n" + string.Join("\n", report));
+            Assert.GreaterOrEqual(withSets, 12, "the levels' sets go through SetMeshes");
+
+            // With the game gone the meshes of the last level stay for a restart that never comes - and go
+            // with the next level that builds a set.
+            game.Dispose();
+            game = null;
+            int kept = SetMeshes.Kept;
+            Load(2);
+            Assert.Less(SetMeshes.Kept, kept + 1, "nothing piles up");
+        }
+
+        // What a restart costs, with the game's presenters and without (tools/out/notes/final-fix-levels-restart.txt).
+        // The final review measured Level 5 at 55-92 ms and 14.9 MB of garbage a restart, Level 11 at 58-92 ms
+        // and 12.6 MB (tools/out/notes/final-perf/restart-LNN.txt), in this same editor.
+        [Test, Explicit]
+        public void Probe_RestartCost()
+        {
+            var table = new System.Text.StringBuilder();
+            Unity.Profiling.ProfilerRecorder allocated = Unity.Profiling.ProfilerRecorder.StartNew(Unity.Profiling.ProfilerCategory.Memory, "GC Allocated In Frame");
+            try
+            {
+                foreach (bool present in new[] { false, true })
+                {
+                    table.AppendLine(present ? "With the presenters (Medium):" : "The game alone (no presenters):");
+                    for (int id = 1; id <= Count; id++)
+                    {
+                        Load(id);
+                        Presentation presentation = present ? Presentation.Create(game, new PresentationOptions { Quality = QualityTier.Medium }) : null;
+                        try
+                        {
+                            for (int i = 0; i < 5; i++)
+                            {
+                                game.Tick();
+                                presentation?.Frame(Sim.Dt, 1f);
+                            }
+                            var ms = new List<string>();
+                            long kb = 0;
+                            for (int r = 0; r < 5; r++)
+                            {
+                                long b0 = allocated.CurrentValue;
+                                long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                                game.RestartLevel();
+                                double took = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                                kb = (allocated.CurrentValue - b0) / 1024;
+                                ms.Add(took.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
+                                for (int i = 0; i < 10; i++)
+                                {
+                                    game.Tick();
+                                    presentation?.Frame(Sim.Dt, 1f);
+                                }
+                            }
+                            table.AppendLine("  level " + id.ToString().PadLeft(2) + ": RestartLevel " + string.Join(" / ", ms) + " ms, managed garbage " + kb + " KB");
+                        }
+                        finally
+                        {
+                            presentation?.Dispose();
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                allocated.Dispose();
+            }
+            string path = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Application.dataPath), "tools/out/notes/final-fix-levels-restart.txt");
+            System.IO.File.WriteAllText(path, table.ToString());
+            Debug.Log("[Toybox] probe: " + path);
+        }
+
+        // The rule of the cache itself: the same parts are the same mesh, other parts are another mesh, and
+        // what nobody draws any more goes - when the level has built again without asking for it, or when
+        // another level builds a set.
+        [Test]
+        public void SetMeshes_HandOutTheSameMeshForTheSameParts_AndLetGoOfWhatNobodyDraws()
+        {
+            float width = 2f;
+            Mesh merged = null;
+            var level = new AdHocLevel(ctx =>
+            {
+                TestHelpers.Floor(ctx);
+                float w = width;
+                var parts = new List<MeshPart>
+                {
+                    new MeshPart(MeshKit.Cached(MeshKit.Key("Box", w, 1f, 1f), () => MeshKit.Box(new Vector3(w, 1f, 1f))), new Vector3(0f, 0.5f, 3f)),
+                    new MeshPart(MeshKit.Cached(MeshKit.Key("Box", 1f, 1f, 1f), () => MeshKit.Box(Vector3.one)), new Vector3(3f, 0.5f, 3f)),
+                };
+                merged = SetMeshes.Take(ctx, "Test", parts);
+            });
+            game = Game.Create();
+            game.LoadLevel(level);
+            Mesh first = merged;
+            Assert.IsTrue(first != null);
+            Assert.AreEqual(-1f, first.bounds.min.x, 1e-4f);
+            Assert.AreEqual(3.5f, first.bounds.max.x, 1e-4f);
+            int merges = SetMeshes.Merges;
+
+            game.RestartLevel();
+            Assert.AreSame(first, merged, "the same parts: the same mesh");
+            Assert.AreEqual(merges, SetMeshes.Merges);
+            Assert.AreEqual(1, SetMeshes.Kept);
+
+            // Other parts under the same name: another mesh, merged from them.
+            width = 3f;
+            game.RestartLevel();
+            Mesh second = merged;
+            Assert.AreNotSame(first, second);
+            Assert.AreEqual(merges + 1, SetMeshes.Merges);
+            Assert.AreEqual(-1.5f, second.bounds.min.x, 1e-4f, "merged from the new parts");
+            Assert.IsTrue(first != null, "kept for one build more (it is what a restart would have asked for)");
+            // The build after that has not asked for the old one: it goes.
+            game.RestartLevel();
+            Assert.AreSame(second, merged);
+            Assert.AreEqual(merges + 1, SetMeshes.Merges);
+            Assert.IsTrue(first == null, "the mesh nobody asked for again was destroyed");
+            Assert.AreEqual(1, SetMeshes.Kept);
+
+            // The level is unloaded: its mesh waits for a restart. Another level's first set sends it away.
+            game.Dispose();
+            game = null;
+            Assert.IsTrue(second != null);
+            Load(1);
+            Assert.IsTrue(second == null, "the last level's mesh went when the next level built its sets");
+            foreach (MeshRenderer renderer in Statics(game))
+                Assert.IsTrue(renderer.GetComponent<MeshFilter>().sharedMesh != null, renderer.name);
         }
     }
 }

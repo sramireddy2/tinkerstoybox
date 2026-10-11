@@ -7,7 +7,7 @@ namespace Toybox.Platform
 {
     /// <summary>
     /// What the page address asks for: <c>?level=3&amp;autoplay=1</c>. The level may be given by id or by
-    /// slug (<c>?level=cheese-wedge</c>).
+    /// slug (<c>?level=cheese-wedge</c>). <c>&amp;debug=1</c> turns the debug keys on.
     /// </summary>
     public struct LaunchOptions
     {
@@ -19,6 +19,13 @@ namespace Toybox.Platform
         public bool Autoplay;
         /// <summary>The debug look: URP Lit materials, plain lighting, the debug HUD (<c>?plain=1</c>, <c>-toyboxPlain</c>).</summary>
         public bool Plain;
+        /// <summary>
+        /// The debug keys are live: [ and ] step through the levels, P hands the level to the bot
+        /// (<c>?debug=1</c>, <c>-toyboxDebug</c>, and always in the editor's Play Mode). Without it they do
+        /// nothing: P is the pause key of many games, and a stray ] moved the player's bookmark to a level
+        /// they had never unlocked. A launch that asks for autoplay has them too (P takes over from the bot).
+        /// </summary>
+        public bool Debug;
 
         public static LaunchOptions Default => new LaunchOptions { Level = -1 };
 
@@ -40,9 +47,15 @@ namespace Toybox.Platform
             if (!string.IsNullOrEmpty(forced)) url = forced;
 #endif
             LaunchOptions options = FromUrl(url);
+#if UNITY_EDITOR
+            // Play Mode in the editor is a developer's session.
+            options.Debug = true;
+#endif
             try
             {
-                if (Array.IndexOf(Environment.GetCommandLineArgs(), "-toyboxPlain") >= 0) options.Plain = true;
+                string[] arguments = Environment.GetCommandLineArgs();
+                if (Array.IndexOf(arguments, "-toyboxPlain") >= 0) options.Plain = true;
+                if (Array.IndexOf(arguments, "-toyboxDebug") >= 0) options.Debug = true;
             }
             catch (Exception)
             {
@@ -91,6 +104,9 @@ namespace Toybox.Platform
                         break;
                     case "plain":
                         options.Plain = value == null || IsTruthy(value);
+                        break;
+                    case "debug":
+                        options.Debug = value == null || IsTruthy(value);
                         break;
                 }
             }

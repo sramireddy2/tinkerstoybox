@@ -2412,6 +2412,79 @@ namespace Toybox.Tests
             Assert.AreEqual(0, audio.Output.EffectsSounding);
         }
 
+        // The music only ran while the game was being played and the settings card only exists over the
+        // title and the pause: the Music slider was always moved in silence. Behind that one card the tune
+        // now plays on, softly.
+        [Test]
+        public void BehindTheSettingsCard_TheMusicPlaysSoftly_SoItsSliderCanBeHeard()
+        {
+            Attach(withFlow: true, options: new AudioPresenter.Options { Audible = false, Bank = AudioLab.Bank });
+            Wait(2f);
+            Assert.IsTrue(audio.Music.Running);
+            Assert.IsTrue(flow.Pause());
+            Wait(0.5f);
+            Assert.AreEqual(0, audio.Output.MusicSounding, "test setup: the pause card is silent");
+            Assert.IsFalse(audio.Previewing);
+
+            // The settings card opens (the menu sets this when it does).
+            audio.MusicPreview = true;
+            Present();
+            Assert.IsTrue(audio.Previewing);
+            Assert.IsTrue(audio.Music.Running, "the tune goes on");
+            Assert.AreEqual(AudioPresenter.PreviewFade, audio.Output.MusicFade, 1e-4f, "softer than in play");
+            Wait(3f);
+            Assert.Greater(audio.Output.MusicSounding, 0, "and can be heard");
+            Assert.IsTrue(audio.Output.EffectsPaused, "the game's own sounds still wait");
+            // The slider sets what is sounding, at once.
+            Settings.MusicVolume = 0.2f;
+            Present();
+            Assert.AreEqual(0.2f, audio.Output.MusicVolume, 1e-4f);
+            Assert.AreEqual(AudioPresenter.PreviewFade, audio.Output.MusicFade, 1e-4f);
+
+            // The card closes: back to the pause card's silence.
+            audio.MusicPreview = false;
+            Present();
+            Assert.IsFalse(audio.Previewing);
+            Assert.IsFalse(audio.Music.Running);
+            Wait(0.5f);
+            Assert.AreEqual(0f, audio.Output.MusicFade);
+            Assert.AreEqual(0, audio.Output.MusicSounding);
+
+            // Play picks the tune up at full level; a card left open when play resumes does not hold it down.
+            audio.MusicPreview = true;
+            Wait(1f);
+            Assert.IsTrue(flow.Resume());
+            audio.MusicPreview = false;
+            Present();
+            Assert.IsTrue(audio.Music.Running);
+            Assert.AreEqual(1f, audio.Output.MusicFade);
+            Wait(1f);
+            Assert.AreEqual(1f, audio.Output.MusicFade);
+            Assert.Greater(audio.Output.MusicSounding, 0);
+
+            // Over the title the card plays the tune of the level that stands behind it.
+            flow.Pause();
+            flow.ReturnToTitle();
+            Wait(0.5f);
+            Assert.AreEqual(0, audio.Output.MusicSounding);
+            audio.MusicPreview = true;
+            Wait(2f);
+            Assert.IsTrue(audio.Previewing);
+            Assert.Greater(audio.Output.MusicSounding, 0);
+            Assert.AreEqual(AudioPresenter.PreviewFade, audio.Output.MusicFade, 1e-4f);
+            // A level that is over has no music to preview.
+            audio.MusicPreview = false;
+            Wait(0.5f);
+            flow.StartLevel(0);
+            Wait(0.5f);
+            game.CompleteLevel();
+            Wait(0.5f);
+            audio.MusicPreview = true;
+            Wait(1f);
+            Assert.IsFalse(audio.Previewing);
+            Assert.IsFalse(audio.Music.Running);
+        }
+
         [Test]
         public void AFrame_AllocatesNothing()
         {

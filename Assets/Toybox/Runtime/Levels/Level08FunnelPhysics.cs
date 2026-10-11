@@ -300,12 +300,19 @@ namespace Toybox.Levels
             Material wall = Materials.Room(RoomSurface.LevelStatic, dip, PatternSpec.Stripes.WithPitch(2f));
             Material paint = Materials.Room(RoomRecipe.Solid(Palette.Paper));
 
-            BuildLid(ctx, lid);
-            BuildWalls(ctx, wall, lid);
+            // What is only drawn is merged per material (ART_BIBLE 12.1; the level drew 95 statics for 8
+            // materials): what casts a shadow in one set, what casts none - the boxes whose shadow nobody
+            // sees, labels, paint and trim - in another, so the shadows are the ones there were. The
+            // colliders stay where they are. Left as they were: the funnels, plates, lamps, studs and
+            // landing dashes (gadgets light, press and hide them) and the gate.
+            var set = new Level01Set();
+            var flat = new Level01Set();
+            BuildLid(ctx, set, lid);
+            BuildWalls(ctx, set, flat, wall, lid);
             SkyCap.Add(ctx, -HalfX - WallThickness, HalfX + WallThickness, NearZ - WallThickness, FarZ + WallThickness, WallTop);
 
             // The marbles, in the order the level means them to be met: Prop.Id 0, 1, 2.
-            SetPiece(ctx, ToyFactory.ThreadSpool(SpoolRadius, SpoolHeight, grabbable: false), SpoolBase + Vector3.up * (SpoolHeight * 0.5f), Quaternion.identity);
+            SetPiece(ctx, set, flat, ToyFactory.ThreadSpool(SpoolRadius, SpoolHeight, grabbable: false), SpoolBase + Vector3.up * (SpoolHeight * 0.5f), Quaternion.identity);
             marbles[0] = AddMarble(ctx, 0, PeeweeOrigin, PeeweeScale, true);
             marbles[1] = AddMarble(ctx, 1, AggieOrigin, AggieScale, false);
             marbles[2] = AddMarble(ctx, 2, ShooterOrigin, ShooterScale, true);
@@ -324,7 +331,7 @@ namespace Toybox.Levels
                 if (!prop.Body.isKinematic) prop.Body.linearVelocity = PortVelocity;
             };
 
-            for (int i = 0; i < count; i++) BuildFunnel(ctx, i, paint);
+            for (int i = 0; i < count; i++) BuildFunnel(ctx, i, paint, set, flat);
 
             // The jam rule: a marble at rest below a throat that no plate holds is given back.
             var below = new List<Zone>();
@@ -371,7 +378,9 @@ namespace Toybox.Levels
             };
             ctx.OnUpdate(dt => Watch(ctx));
 
-            BuildDressing(ctx, paint);
+            BuildDressing(ctx, set, flat, paint);
+            set.Finish(ctx, "Set");
+            flat.Finish(ctx, "Flat", castShadows: false);
 
             ctx.SetSpawn(SpawnPoint, SpawnYaw, SpawnPitch);
             ctx.AddCheckpoint(Volume.Box(6f, 4f, 4f), SpawnPoint + Vector3.up * 2f, SpawnPoint, SpawnYaw, "Spawn");
@@ -406,15 +415,15 @@ namespace Toybox.Levels
 
         // A box of the level. Where its shadow would fall on nothing anybody sees (a floor over the bench, a
         // piece of wall under the lid or in front of another one) it casts none: shadow draws are budgeted.
-        static void Slab(LevelContext ctx, Material material, float x0, float x1, float y0, float y1, float z0, float z1, bool shadow = true)
+        // Its collider stands in the level; its looks join the set that casts shadows, or the one that casts none.
+        static void Slab(LevelContext ctx, Level01Set set, Level01Set flat, Material material, float x0, float x1, float y0, float y1, float z0, float z1, bool shadow = true)
         {
             GameObject slab = ctx.AddStatic(BasicToys.Slab(new Vector3(x1 - x0, y1 - y0, z1 - z0), material), new Vector3((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, (z0 + z1) * 0.5f));
-            if (shadow) return;
-            foreach (MeshRenderer renderer in slab.GetComponentsInChildren<MeshRenderer>()) NoShadow(renderer);
+            (shadow ? set : flat).Absorb(slab);
         }
 
         // The lid: one sheet with the three mouths cut out of it, corner for corner the funnels' rims.
-        static void BuildLid(LevelContext ctx, Material material)
+        static void BuildLid(LevelContext ctx, Level01Set set, Material material)
         {
             Mesh mesh = MeshKit.Cached("Level08|Lid", () =>
             {
@@ -426,8 +435,7 @@ namespace Toybox.Levels
             MeshCollider collider = root.AddComponent<MeshCollider>();
             collider.convex = false;
             collider.sharedMesh = mesh;
-            root.AddComponent<MeshFilter>().sharedMesh = mesh;
-            root.AddComponent<MeshRenderer>().sharedMaterial = material;
+            set.Shape(material, mesh, Vector3.zero, Quaternion.identity);
             ctx.AddStatic(root, Vector3.zero);
 
             // The sheet has no thickness, and a small marble that comes down fast goes through a sheet
@@ -469,67 +477,68 @@ namespace Toybox.Levels
         // The tray's walls, the port's alcove in the -X wall, and in the middle of the +Z wall the tower with
         // the tunnel (behind the gate) and the niche above it. The walls are drawn five high - the sun
         // reaches the whole lid and the workbench shows over them - and stand, unseen, up to the sky cap.
-        static void BuildWalls(LevelContext ctx, Material wall, Material floor)
+        static void BuildWalls(LevelContext ctx, Level01Set set, Level01Set flat, Material wall, Material floor)
         {
             const float t = WallThickness, low = BenchY, drawn = DrawnWall, top = WallTop;
             float outX = HalfX + t;
             Material ink = GadgetKit.Body;
 
             // -Z and +X: whole.
-            Slab(ctx, wall, -outX, outX, low, drawn, NearZ - t, NearZ);
+            Slab(ctx, set, flat, wall, -outX, outX, low, drawn, NearZ - t, NearZ);
             Unseen(ctx, -outX, outX, drawn, top, NearZ - t, NearZ);
-            Slab(ctx, wall, HalfX, outX, low, drawn, NearZ, FarZ);
+            Slab(ctx, set, flat, wall, HalfX, outX, low, drawn, NearZ, FarZ);
             Unseen(ctx, HalfX, outX, drawn, top, NearZ, FarZ);
 
             // -X, round the port.
-            Slab(ctx, wall, -outX, -HalfX, low, drawn, NearZ, PortZ - PortHalfWidth);
-            Slab(ctx, wall, -outX, -HalfX, low, drawn, PortZ + PortHalfWidth, FarZ);
-            Slab(ctx, wall, -outX, -HalfX, PortHeight, drawn, PortZ - PortHalfWidth, PortZ + PortHalfWidth);
-            Slab(ctx, wall, -outX, -HalfX, low, -0.5f, PortZ - PortHalfWidth, PortZ + PortHalfWidth, false);
+            Slab(ctx, set, flat, wall, -outX, -HalfX, low, drawn, NearZ, PortZ - PortHalfWidth);
+            Slab(ctx, set, flat, wall, -outX, -HalfX, low, drawn, PortZ + PortHalfWidth, FarZ);
+            Slab(ctx, set, flat, wall, -outX, -HalfX, PortHeight, drawn, PortZ - PortHalfWidth, PortZ + PortHalfWidth);
+            Slab(ctx, set, flat, wall, -outX, -HalfX, low, -0.5f, PortZ - PortHalfWidth, PortZ + PortHalfWidth, false);
             Unseen(ctx, -outX, -HalfX, drawn, top, NearZ, FarZ);
             // The alcove: an Ink box behind the opening, its floor level with the lid.
-            Slab(ctx, ink, PortBack, -HalfX, -0.5f, 0f, PortZ - PortHalfWidth, PortZ + PortHalfWidth, false);
-            Slab(ctx, ink, PortBack, -outX, -0.5f, PortHeight + 0.5f, PortZ - PortHalfWidth - 0.5f, PortZ - PortHalfWidth);
-            Slab(ctx, ink, PortBack, -outX, -0.5f, PortHeight + 0.5f, PortZ + PortHalfWidth, PortZ + PortHalfWidth + 0.5f);
-            Slab(ctx, ink, PortBack, -outX, PortHeight, PortHeight + 0.5f, PortZ - PortHalfWidth, PortZ + PortHalfWidth);
-            Slab(ctx, ink, PortBack - 0.5f, PortBack, -0.5f, PortHeight + 0.5f, PortZ - PortHalfWidth - 0.5f, PortZ + PortHalfWidth + 0.5f);
+            Slab(ctx, set, flat, ink, PortBack, -HalfX, -0.5f, 0f, PortZ - PortHalfWidth, PortZ + PortHalfWidth, false);
+            Slab(ctx, set, flat, ink, PortBack, -outX, -0.5f, PortHeight + 0.5f, PortZ - PortHalfWidth - 0.5f, PortZ - PortHalfWidth);
+            Slab(ctx, set, flat, ink, PortBack, -outX, -0.5f, PortHeight + 0.5f, PortZ + PortHalfWidth, PortZ + PortHalfWidth + 0.5f);
+            Slab(ctx, set, flat, ink, PortBack, -outX, PortHeight, PortHeight + 0.5f, PortZ - PortHalfWidth, PortZ + PortHalfWidth);
+            Slab(ctx, set, flat, ink, PortBack - 0.5f, PortBack, -0.5f, PortHeight + 0.5f, PortZ - PortHalfWidth - 0.5f, PortZ + PortHalfWidth + 0.5f);
 
             // +Z: low on both sides of the tower.
             float z0 = FarZ, z1 = FarZ + t, towerX0 = NicheX0 - 1f, towerX1 = NicheX1 + 1f;
-            Slab(ctx, wall, -outX, towerX0, low, drawn, z0, z1);
-            Slab(ctx, wall, towerX1, outX, low, drawn, z0, z1);
+            Slab(ctx, set, flat, wall, -outX, towerX0, low, drawn, z0, z1);
+            Slab(ctx, set, flat, wall, towerX1, outX, low, drawn, z0, z1);
             Unseen(ctx, -outX, towerX0, drawn, top, z0, z1);
             Unseen(ctx, towerX1, outX, drawn, top, z0, z1);
             Unseen(ctx, towerX0, towerX1, TowerTop, top, z0, z1);
             // The tower's front, round the gate and the niche.
-            Slab(ctx, wall, towerX0, NicheX0, low, TowerTop, z0, z1, false);
-            Slab(ctx, wall, NicheX1, towerX1, low, TowerTop, z0, z1, false);
-            Slab(ctx, wall, NicheX0, GateX0, low, NicheY0, z0, z1);
-            Slab(ctx, wall, GateX1, NicheX1, low, NicheY0, z0, z1);
-            Slab(ctx, wall, GateX0, GateX1, GateHeight, NicheY0, z0, z1);
-            Slab(ctx, wall, GateX0, GateX1, low, -0.5f, z0, z1, false);
-            Slab(ctx, wall, NicheX0, NicheX1, NicheY1, TowerTop, z0, z1);
+            Slab(ctx, set, flat, wall, towerX0, NicheX0, low, TowerTop, z0, z1, false);
+            Slab(ctx, set, flat, wall, NicheX1, towerX1, low, TowerTop, z0, z1, false);
+            Slab(ctx, set, flat, wall, NicheX0, GateX0, low, NicheY0, z0, z1);
+            Slab(ctx, set, flat, wall, GateX1, NicheX1, low, NicheY0, z0, z1);
+            Slab(ctx, set, flat, wall, GateX0, GateX1, GateHeight, NicheY0, z0, z1);
+            Slab(ctx, set, flat, wall, GateX0, GateX1, low, -0.5f, z0, z1, false);
+            Slab(ctx, set, flat, wall, NicheX0, NicheX1, NicheY1, TowerTop, z0, z1);
 
             // Behind it: the tunnel's floor, walls and end; the block between tunnel and niche; the niche.
             float back = TunnelEnd + 1f;
-            Slab(ctx, floor, GateX0, GateX1, -0.5f, 0f, z0, TunnelEnd, false);
-            Slab(ctx, wall, GateX0 - 1f, GateX0, -0.5f, GateHeight, z1, TunnelEnd);
-            Slab(ctx, wall, GateX1, GateX1 + 1f, -0.5f, GateHeight, z1, TunnelEnd);
-            Slab(ctx, wall, GateX0 - 1f, GateX1 + 1f, -0.5f, GateHeight, TunnelEnd, back);
-            Slab(ctx, wall, towerX0, towerX1, GateHeight, NicheY0, z1, back);
-            Slab(ctx, wall, towerX0, NicheX0, NicheY0, NicheY1, z1, back);
-            Slab(ctx, wall, NicheX1, towerX1, NicheY0, NicheY1, z1, back);
-            Slab(ctx, wall, NicheX0, NicheX1, NicheY0, NicheY1, NicheBack, back);
-            Slab(ctx, wall, towerX0, towerX1, NicheY1, TowerTop, z1, back);
+            Slab(ctx, set, flat, floor, GateX0, GateX1, -0.5f, 0f, z0, TunnelEnd, false);
+            Slab(ctx, set, flat, wall, GateX0 - 1f, GateX0, -0.5f, GateHeight, z1, TunnelEnd);
+            Slab(ctx, set, flat, wall, GateX1, GateX1 + 1f, -0.5f, GateHeight, z1, TunnelEnd);
+            Slab(ctx, set, flat, wall, GateX0 - 1f, GateX1 + 1f, -0.5f, GateHeight, TunnelEnd, back);
+            Slab(ctx, set, flat, wall, towerX0, towerX1, GateHeight, NicheY0, z1, back);
+            Slab(ctx, set, flat, wall, towerX0, NicheX0, NicheY0, NicheY1, z1, back);
+            Slab(ctx, set, flat, wall, NicheX1, towerX1, NicheY0, NicheY1, z1, back);
+            Slab(ctx, set, flat, wall, NicheX0, NicheX1, NicheY0, NicheY1, NicheBack, back);
+            Slab(ctx, set, flat, wall, towerX0, towerX1, NicheY1, TowerTop, z1, back);
         }
 
         // A toy that is part of the set (a pedestal, a block in a corner): its body casts a shadow, the paper
         // labels, pips and thread on it do not need one of their own.
-        static GameObject SetPiece(LevelContext ctx, GameObject toy, Vector3 position, Quaternion rotation)
+        static void SetPiece(LevelContext ctx, Level01Set set, Level01Set flat, GameObject toy, Vector3 position, Quaternion rotation)
         {
             foreach (MeshRenderer renderer in toy.GetComponentsInChildren<MeshRenderer>())
                 if (renderer.gameObject.name != "Visual") NoShadow(renderer);
-            return ctx.AddStatic(toy, position, rotation);
+            ctx.AddStatic(toy, position, rotation);
+            set.Absorb(toy, flat);
         }
 
         // Paint, studs, trim and light lie on what they are drawn on: they cast no shadow of their own.
@@ -541,7 +550,7 @@ namespace Toybox.Levels
 
         // One funnel: the Ink cone with its tube and chamber, the plate on the chamber's floor, the hazard
         // for whoever falls in, the gauge with its lamp on a post behind the mouth, the studs and the paint.
-        void BuildFunnel(LevelContext ctx, int i, Material paint)
+        void BuildFunnel(LevelContext ctx, int i, Material paint, Level01Set set, Level01Set flat)
         {
             Hole hole = Holes[i];
             funnels[i] = Funnel.Build(ctx, new FunnelOptions
@@ -632,6 +641,7 @@ namespace Toybox.Levels
             NoShadow(GadgetKit.Visual(post.transform, "Cup", GadgetKit.DiscMesh(hole.LampRadius * 0.9f, hole.LampRadius * 0.5f, 16), GadgetKit.Body, new Vector3(0f, postTop - hole.LampRadius * 0.05f, 0f)));
             if (gauges[i].Lamp != null && gauges[i].Lamp.Renderer is MeshRenderer gaugeLamp) NoShadow(gaugeLamp);
             ctx.AddStatic(post, new Vector3(lamp.x, 0f, lamp.z));
+            set.Absorb(post, flat);
 
             latchedLamps[i] = new GameObject("Latched Lamp " + hole.Name);
             float lampRadius = hole.LampRadius;
@@ -643,12 +653,12 @@ namespace Toybox.Levels
             // Round the mouth: a band of paint, and a ring of studs that says what the gauge says.
             var marks = new GameObject("Mouth " + hole.Name);
             float band = 0.1f + hole.Mouth * 0.03f;
-            NoShadow(GadgetKit.Visual(marks.transform, "Paint", MeshKit.Cached(MeshKit.Key("Level08|MouthBand", hole.Mouth, band),
-                () => Level08Shapes.Band(hole.Mouth + 0.01f, 0.004f, hole.Mouth + band, 0.004f, 0.006f, 64)), paint));
+            flat.Shape(paint, MeshKit.Cached(MeshKit.Key("Level08|MouthBand", hole.Mouth, band),
+                () => Level08Shapes.Band(hole.Mouth + 0.01f, 0.004f, hole.Mouth + band, 0.004f, 0.006f, 64)), hole.Axis, Quaternion.identity);
             // The throat is what the marble is measured against: a ring of paint on the cone, right above it.
             float ring = hole.Throat * 0.12f, lift = 0.012f;
-            NoShadow(GadgetKit.Visual(marks.transform, "Throat", MeshKit.Cached(MeshKit.Key("Level08|ThroatBand", hole.Throat, hole.Mouth, hole.ConeDepth),
-                () => Level08Shapes.Band(hole.Throat + 0.01f, hole.ConeY(hole.Throat + 0.01f) + lift, hole.Throat + ring, hole.ConeY(hole.Throat + ring) + lift, 0.008f, 64)), paint));
+            flat.Shape(paint, MeshKit.Cached(MeshKit.Key("Level08|ThroatBand", hole.Throat, hole.Mouth, hole.ConeDepth),
+                () => Level08Shapes.Band(hole.Throat + 0.01f, hole.ConeY(hole.Throat + 0.01f) + lift, hole.Throat + ring, hole.ConeY(hole.Throat + ring) + lift, 0.008f, 64)), hole.Axis, Quaternion.identity);
             // And where a marble held across the funnel comes to lie: dashes on the far side of the cone, as seen
             // from the start (the lamp's post stands behind them). The size language of the campaign, as far as
             // a cone allows it: the paint is on the surface the toy stops against.
@@ -709,51 +719,50 @@ namespace Toybox.Levels
 
         // Things that make it a place on a workbench. All of it stands against a wall behind or beside the
         // start, out of the way of a marble held toward a funnel, or is paint.
-        static void BuildDressing(LevelContext ctx, Material paint)
+        static void BuildDressing(LevelContext ctx, Level01Set set, Level01Set flat, Material paint)
         {
-            Transform root = ctx.Root;
             // Out of the port: an arrow of paint on the lid, and an Ink frame round the opening.
             Mesh arrow = MeshKit.Cached("Level08|Arrow", () => MeshKit.Extrude(new List<Vector2>
             {
                 new Vector2(0f, -0.22f), new Vector2(1.1f, -0.22f), new Vector2(1.1f, -0.55f), new Vector2(1.9f, 0f),
                 new Vector2(1.1f, 0.55f), new Vector2(1.1f, 0.22f), new Vector2(0f, 0.22f),
             }, 0.008f));
-            NoShadow(GadgetKit.Visual(root, "Port Arrow", arrow, paint, new Vector3(-HalfX + 0.6f, 0.006f, PortZ), Quaternion.Euler(90f, 0f, 0f)));
+            flat.Shape(paint, arrow, new Vector3(-HalfX + 0.6f, 0.006f, PortZ), Quaternion.Euler(90f, 0f, 0f));
             const float frame = 0.22f, proud = 0.1f;
             Material ink = GadgetKit.Body;
             for (int side = -1; side <= 1; side += 2)
-                NoShadow(GadgetKit.Visual(root, "Port Frame", GadgetKit.RoundedBoxMesh(new Vector3(proud * 2f, PortHeight + frame, frame), 0.04f), ink,
-                    new Vector3(-HalfX, (PortHeight + frame) * 0.5f, PortZ + side * (PortHalfWidth + frame * 0.5f))));
-            NoShadow(GadgetKit.Visual(root, "Port Frame", GadgetKit.RoundedBoxMesh(new Vector3(proud * 2f, frame, PortHalfWidth * 2f + frame * 2f), 0.04f), ink,
-                new Vector3(-HalfX, PortHeight + frame * 0.5f, PortZ)));
+                flat.Shape(ink, GadgetKit.RoundedBoxMesh(new Vector3(proud * 2f, PortHeight + frame, frame), 0.04f),
+                    new Vector3(-HalfX, (PortHeight + frame) * 0.5f, PortZ + side * (PortHalfWidth + frame * 0.5f)), Quaternion.identity);
+            flat.Shape(ink, GadgetKit.RoundedBoxMesh(new Vector3(proud * 2f, frame, PortHalfWidth * 2f + frame * 2f), 0.04f),
+                new Vector3(-HalfX, PortHeight + frame * 0.5f, PortZ), Quaternion.identity);
 
             // Paper trim round the niche and round the gate, a finger proud of the tower's front.
             const float trim = 0.3f, out2 = 0.07f;
             Mesh Bar(float x, float y) => GadgetKit.RoundedBoxMesh(new Vector3(x, y, out2 * 2f), 0.03f);
             float nicheMid = (NicheX0 + NicheX1) * 0.5f, nicheWide = NicheX1 - NicheX0, nicheTall = NicheY1 - NicheY0;
-            NoShadow(GadgetKit.Visual(root, "Niche Trim", Bar(nicheWide + trim * 2f, trim), paint, new Vector3(nicheMid, NicheY0 - trim * 0.5f, FarZ)));
-            NoShadow(GadgetKit.Visual(root, "Niche Trim", Bar(nicheWide + trim * 2f, trim), paint, new Vector3(nicheMid, NicheY1 + trim * 0.5f, FarZ)));
-            NoShadow(GadgetKit.Visual(root, "Niche Trim", Bar(trim, nicheTall), paint, new Vector3(NicheX0 - trim * 0.5f, (NicheY0 + NicheY1) * 0.5f, FarZ)));
-            NoShadow(GadgetKit.Visual(root, "Niche Trim", Bar(trim, nicheTall), paint, new Vector3(NicheX1 + trim * 0.5f, (NicheY0 + NicheY1) * 0.5f, FarZ)));
+            flat.Shape(paint, Bar(nicheWide + trim * 2f, trim), new Vector3(nicheMid, NicheY0 - trim * 0.5f, FarZ), Quaternion.identity);
+            flat.Shape(paint, Bar(nicheWide + trim * 2f, trim), new Vector3(nicheMid, NicheY1 + trim * 0.5f, FarZ), Quaternion.identity);
+            flat.Shape(paint, Bar(trim, nicheTall), new Vector3(NicheX0 - trim * 0.5f, (NicheY0 + NicheY1) * 0.5f, FarZ), Quaternion.identity);
+            flat.Shape(paint, Bar(trim, nicheTall), new Vector3(NicheX1 + trim * 0.5f, (NicheY0 + NicheY1) * 0.5f, FarZ), Quaternion.identity);
             float gateMid = (GateX0 + GateX1) * 0.5f, gateWide = GateX1 - GateX0;
-            NoShadow(GadgetKit.Visual(root, "Gate Trim", Bar(gateWide + trim * 2f, trim), ink, new Vector3(gateMid, GateHeight + trim * 0.5f, FarZ)));
-            NoShadow(GadgetKit.Visual(root, "Gate Trim", Bar(trim, GateHeight), ink, new Vector3(GateX0 - trim * 0.5f, GateHeight * 0.5f, FarZ)));
-            NoShadow(GadgetKit.Visual(root, "Gate Trim", Bar(trim, GateHeight), ink, new Vector3(GateX1 + trim * 0.5f, GateHeight * 0.5f, FarZ)));
+            flat.Shape(ink, Bar(gateWide + trim * 2f, trim), new Vector3(gateMid, GateHeight + trim * 0.5f, FarZ), Quaternion.identity);
+            flat.Shape(ink, Bar(trim, GateHeight), new Vector3(GateX0 - trim * 0.5f, GateHeight * 0.5f, FarZ), Quaternion.identity);
+            flat.Shape(ink, Bar(trim, GateHeight), new Vector3(GateX1 + trim * 0.5f, GateHeight * 0.5f, FarZ), Quaternion.identity);
 
             // Building blocks and a marker left in the corners behind the start.
-            SetPiece(ctx, ToyFactory.WoodenBlock(new Vector3(2.2f, 1.1f, 1.1f), grabbable: false), new Vector3(-11.8f, 0.55f, -11.1f), Quaternion.Euler(0f, 8f, 0f));
-            SetPiece(ctx, ToyFactory.WoodenBlock(new Vector3(1.1f, 1.1f, 1.1f), grabbable: false), new Vector3(-12.1f, 1.65f, -11.2f), Quaternion.Euler(0f, -12f, 0f));
-            SetPiece(ctx, ToyFactory.WoodenBlock(new Vector3(1.3f, 1.3f, 1.3f), grabbable: false), new Vector3(-9.6f, 0.65f, -10.9f), Quaternion.Euler(0f, 27f, 0f));
-            SetPiece(ctx, ToyFactory.Marker(0.45f, 4.2f), new Vector3(10.6f, 0.45f, -11.1f), Quaternion.Euler(0f, 94f, 0f));
+            SetPiece(ctx, set, flat, ToyFactory.WoodenBlock(new Vector3(2.2f, 1.1f, 1.1f), grabbable: false), new Vector3(-11.8f, 0.55f, -11.1f), Quaternion.Euler(0f, 8f, 0f));
+            SetPiece(ctx, set, flat, ToyFactory.WoodenBlock(new Vector3(1.1f, 1.1f, 1.1f), grabbable: false), new Vector3(-12.1f, 1.65f, -11.2f), Quaternion.Euler(0f, -12f, 0f));
+            SetPiece(ctx, set, flat, ToyFactory.WoodenBlock(new Vector3(1.3f, 1.3f, 1.3f), grabbable: false), new Vector3(-9.6f, 0.65f, -10.9f), Quaternion.Euler(0f, 27f, 0f));
+            SetPiece(ctx, set, flat, ToyFactory.Marker(0.45f, 4.2f), new Vector3(10.6f, 0.45f, -11.1f), Quaternion.Euler(0f, 94f, 0f));
             // A ruler along the right wall: something to pace the steps against.
-            SetPiece(ctx, ToyFactory.Ruler(new Vector3(1.2f, 0.08f, 16f), grabbable: false), new Vector3(13.1f, 0.04f, -3f), Quaternion.identity);
+            SetPiece(ctx, set, flat, ToyFactory.Ruler(new Vector3(1.2f, 0.08f, 16f), grabbable: false), new Vector3(13.1f, 0.04f, -3f), Quaternion.identity);
             // And in the two far corners, behind the funnels: a domino leaning on its neighbour, a spool on its side.
             // (The second one rests on its near bottom edge, 25 degrees over, its top a hair from the first.)
             Quaternion along = Quaternion.Euler(0f, 80f, 0f);
             var first = new Vector3(-12.9f, 0f, 14.6f);
-            SetPiece(ctx, ToyFactory.Domino(grabbable: false), first + Vector3.up, along);
-            SetPiece(ctx, ToyFactory.Domino(grabbable: false), first + along * new Vector3(0f, 0.972f, 0.73f), along * Quaternion.Euler(-25f, 0f, 0f));
-            SetPiece(ctx, ToyFactory.ThreadSpool(0.7f, 1.3f, grabbable: false), new Vector3(12.6f, 0.7f, 14.9f), Quaternion.Euler(0f, 35f, 90f));
+            SetPiece(ctx, set, flat, ToyFactory.Domino(grabbable: false), first + Vector3.up, along);
+            SetPiece(ctx, set, flat, ToyFactory.Domino(grabbable: false), first + along * new Vector3(0f, 0.972f, 0.73f), along * Quaternion.Euler(-25f, 0f, 0f));
+            SetPiece(ctx, set, flat, ToyFactory.ThreadSpool(0.7f, 1.3f, grabbable: false), new Vector3(12.6f, 0.7f, 14.9f), Quaternion.Euler(0f, 35f, 90f));
         }
 
         // ---- What the gadgets do to the place ---------------------------------------------------------------

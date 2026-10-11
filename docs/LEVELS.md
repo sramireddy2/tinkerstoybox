@@ -21,7 +21,15 @@ behaviour that only PhysX can confirm is listed in Appendix C with a fallback pe
 2026-10-05 and 2026-10-11) and solved by their bots in the simulation: each of their sections ends with
 an "As built" note saying where the level departs from the text above and what was measured; Appendix D
 puts the first four side by side, Appendix E the next five and Appendix F the last six, with the end of
-the game. Where a note and the text above it disagree, the note is what the game does.
+the game. Where a note and the text above it disagree, the note is what the game does. Appendix G is
+the final review before release: what it changed in the levels, every solver's time on the final code,
+and what is knowingly left.
+Three sections were written before the build and are kept as written, each with a line saying so:
+0.4 (engine requests), Appendix B (scale windows) and Appendix C (risks and fallbacks).
+
+Paths under `tools/out` are the builders' local logs and pictures; they are not in the repository.
+The close-out logs of the three phases are in [design-notes/](design-notes/README.md), two contact
+sheets in [media/](media), and the level author's reference is [LEVEL_AUTHORING.md](LEVEL_AUTHORING.md).
 
 **Restart marker.** Sections are appended in order. The file is complete only when its last line is
 `END OF LEVELS.md`.
@@ -29,7 +37,8 @@ the game. Where a note and the text above it disagree, the note is what the game
 **Contents.** 0 Conventions and rules · 1 Campaign overview · 2 Gadget catalog · 3 Toy catalog ·
 4 Settings and environment presets · 5 Levels 1–15 · Appendix A Design corrections · Appendix B Scale
 windows for the bot tests · Appendix C Risks and fallbacks · Appendix D As built: phase 1 ·
-Appendix E As built: phase 2 · Appendix F As built: phase 3 and the end of the game
+Appendix E As built: phase 2 · Appendix F As built: phase 3 and the end of the game · Appendix G The
+final review
 
 ---
 
@@ -69,8 +78,11 @@ Appendix E As built: phase 2 · Appendix F As built: phase 3 and the end of the 
    corner with less than 0.05 to spare.
 5. **A held toy is not in the world.** It is on the `Held` layer: nothing collides with it, triggers
    and gadgets ignore it (`prop.Held`), lasers pass through it, a held sponge neither soaks nor leaks,
-   a held doorway is not a portal. Mid-air grabs are legal (only a toy the player is grounded on is
-   refused); no level is broken by one.
+   a held doorway is not a portal. A toy may be picked up in mid-air - except the one that is
+   underfoot: the toy the feet are on and, in the air, still the one they left, until the feet are on
+   something else (`player.Underfoot`; since the final review - picked up in a jump off it and let go
+   again under oneself it grew, a way up in every level with a toy to stand on). No level is broken by
+   a mid-air pick-up.
 6. **Presentation of a held toy** follows `ART_BIBLE.md` §8 (sticker pass: no cast or received
    shadow, no haze, constant-pixel border). No gadget effect is drawn on it. The cast shadow returning
    on release is the true-size reveal; each level's wow beats say what that reveal shows.
@@ -101,6 +113,10 @@ Appendix E As built: phase 2 · Appendix F As built: phase 3 and the end of the 
   in place of the literal 0. This is a request to the engine and render teams (0.4, item 6).
 
 ### 0.4 Engine requests (consolidated; each level names the ones it needs)
+
+> **All seven were delivered** in milestone 2: see `ARCHITECTURE.md`, "Core types", and
+> `EngineAsksTests` (`GroundY`: `EnvironmentTests`). The table and the note after it are kept as they
+> were written - "today", the "Without it" column and "what is missing" describe the time before.
 
 | # | Request | Used by | Without it |
 |---|---|---|---|
@@ -979,6 +995,10 @@ The barricade now fills an arch 12 high, so any tip strike lands on it.
 | Painted footprint on the board, 4.1 × 1.25, with an inner dashed line 3.1 wide ("at least this") | centre 0 | centre 18.5 | on the board |
 
 Spawn (0, 3, −3), yaw 0, checkpoint at spawn. Exit box 6 × 3 × 4 centred (0, −1, 36).
+*As built (final review, 2026-10-11):* the spawn is **(−3, 3, 6.9), yaw 0, pitch −8°** — on the shoe
+prints in front of the pedestal, 1.1 from the domino with the crosshair on it. From (0, 3, −3) the
+domino was 11.4 away: the first click was a pick-up that cannot work (`k` = 0.04) and left the domino
+out of sight at the foot of the wall.
 
 **Props.**
 
@@ -1077,16 +1097,24 @@ physics takes it back. The puzzle (size, and room to fall) is unchanged.
 was not needed: the domino pivots on the board and the impact is sampled.
 - **The solve.** Pick up from (−3, 3, 6.94): `g` = 1.10, `k` = 0.455. Let go from the balcony edge at
   pitch −7.2°: **s = 4.105**, mass 33.2, standing at Z 18.4. The barricade breaks 1.37 s later at a
-  speed of 8.1 into the face (Appendix B asks for at least 5). Level complete after **14.18 s**.
+  speed of 8.1 into the face (Appendix B asks for at least 5). Level complete after **14.18 s**
+  (Since the final review the level starts at the pick-up spot, see the spawn above: the solver picks
+  up from 1.11, `k` = 0.450, lets go at **s = 4.128**, and the level is complete after **11.93 s**.)
 - **Window from the edge.** Mass floor between 3.0 and 3.2. Pitch **−12° to −3°** breaks (3.2–5.3;
   text: −10°), lower is too light or falls short, higher only leans. A domino turned sideways on the
   board does not stand: it topples and breaks through at any yaw.
 - **Pick-up distance decides everything** (the campaign teaches it in Level 8): taken from 1.3 or
   nearer (`k` ≥ 0.39) the whole painted footprint works; from 1.45 only its far end; from 2.0 a 2° band;
-  from 2.5 on and from the spawn (`k` = 0.044, at most 0.73) nothing. So: Level 1's sentence on a grab
-  below `k` = 0.38, a domino let go smaller than 0.6 goes back to its pedestal (`PropLeash`), stand
-  marks (a pad with shoe prints) in front of the pedestal and at the balcony edge, and hint 3 begins
-  "Pick the domino up from right beside it."
+  from 2.5 on and from the back of the balcony, where the level used to start (`k` = 0.044, at most
+  0.73) nothing. So: Level 1's sentence on a grab below `k` = 0.38, a domino let go smaller than 0.6
+  goes back to its pedestal (`PropLeash`), stand marks (a pad with shoe prints) in front of the
+  pedestal and at the balcony edge, and hint 3 begins "Pick the domino up from right beside it."
+  Since the final review the level starts on the first of those marks, looking at the domino: the
+  first click is the pick-up that works (`k` = 0.45).
+- **The wooden dominoes** along the balcony wall look like the toy (the biggest is bigger than it) and
+  cannot be picked up. A click at one says so, once: "Those are stuck fast. The purple one is yours."
+- **Draws.** Everything that is only drawn is two merged sets (`Level01Set`: "Hall", and "Paint", which
+  casts no shadow): 9 static draws where there were 84 (the footprint alone was 39 renderers).
 - **Every try that fails gets a word** once the domino has come to rest: too light, heavy enough but no
   room to fall, fell short of the wall, stands firm on the flat floor, lying flat.
 - **The footprint** is painted in the toy's colour, 4.1 × 1.25 with the least size (3.1) dashed inside;
@@ -1859,9 +1887,15 @@ bot in **11.75 s**: plank 0.65 → **4.086**, gripped by a wagon 13 ticks after 
   size before it touched; below the train; crumb; out of reach). The engine's roof is slick and its
   funnel has no collider, so a plank let go over the engine slides onto the first wagon instead of
   riding the roof for a lap. Level 1's sentence below `k` = 0.2, its mirror image above 0.6.
-- **Boarding.** The plank on a wagon is a kerb of half a unit: it takes a running jump along the
-  train (a hop from a standstill comes down where it went up, and the level says so). A jump from the
-  platform goes clean over the three-wide deck; the level says to step off the edge instead.
+- **Boarding.** The plank on a wagon is a kerb of half a unit. What gets anybody onto it at any speed
+  and any timing is its END: stand in front of it, face the lighthouse, jump (measured in the final
+  review: walk 33 of 34, sprint 34 of 34). A jump along the train at its side works about half the
+  time at a walk and, with the sprint key and any run-up, never - it goes over the 2.45-wide plank -
+  so neither the third hint nor the line after a failed hop says "run" any more: the hint ends "Step
+  down by its end, face the lighthouse, jump on, walk in.", the line (a hop from a standstill at its
+  side comes down where it went up) "Jump onto its end, facing the lighthouse." A jump from the
+  platform goes clean over the three-wide deck, or comes down on its far rim and slides off; the
+  level says to step off the edge instead, in both cases.
   The engine fix this needed is shared: `Player.LimitSteepFaces` measures the speed into a steep face
   relative to the face's own sideways motion (a hop at a step that rides the same train used to cost
   the train's whole speed).
@@ -2002,7 +2036,10 @@ shelf, yellow 0.9 → **0.971** on the rug, blue 0.6 → **1.081** on the red on
   the shelf: 0 of 13 and 0 of 72. 1.15 is the text's own largest rise and the top of its windows, so
   the intended sizes are untouched.
 - **Nothing is picked up from a box:** the box under the feet, and the one last jumped off, cannot be
-  picked up until the feet are on the rug or the shelf (`FeetLine`). The text's "jump-and-drop climbing
+  picked up until the feet are on the rug or the shelf (`FeetLine`). (The engine has the half of this
+  that every level needs since the final review - `player.Underfoot`. The level keeps its own rule,
+  which is wider: from up on a box no *other* box is picked up either, or the step is pulled up
+  after oneself.) The text's "jump-and-drop climbing
   is blocked" did not hold: picked up and let go at the top of a jump, the box one jumped off came back
   under the feet bigger (0.32 → 0.51 → 0.67 a jump).
 - **Start** (0, 0, −2.6), pitch −13, the crosshair on the box (`k` = 0.434, the text's own first
@@ -2145,9 +2182,13 @@ scripted part is the hazard test.
 `k` = 0.377 from the start, let go from the same spot; nothing is said. Where the game departs from the
 text:
 
-- **The beams are magenta, not red.** They wear the art bible's Hazard signal (`#FF2BD6`, "Lasers, kill
-  surfaces", `ART_BIBLE.md` §2.3), the one colour every hazard of the game has; red is this level's own
-  "would be no roof" cue and would have sat in front of red beams.
+- **The beams are red, as the brief says** - since the final review. Until then they wore the art
+  bible's Hazard magenta (`#FF2BD6`), the one colour every hazard of the game had. Now they have a
+  signal of their own, `Palette.Laser` (`#FF1414`, a pure red with a near-white heart; `ART_BIBLE.md`
+  §2.3): beams, the dots they leave, the pinpoints under the roof, the lenses and the ring where one
+  catches the player. Kill surfaces stay magenta. The outline's "would be no roof" cue is Level 2's
+  orange-red (`#FF4A32`), big dashes that blink, lying on the floor in front of and under the curtain:
+  see Appendix G for how the two reds read together.
 - **Start** (0, 0, 1.75), pitch −19.4, the crosshair on the card on a table 1.1 high (text: (0, 0, −1)
   and a 0.8 table: 4.1 from the card, `k` 0.12, a roof of 2.7). `GroundY` −0.1 (the box's own cardboard
   bottom). The rain begins at Z 14.5 (text 14): a card on both walls and against the far wall is then
@@ -2259,8 +2300,9 @@ Masses: key 0.056·s³ (28.7 at 8); spool 0.38·s³ (289 at 9.1).
 
 **Blocked bypasses and softlocks.**
 - Cross on the key and take it from the far side: there is no far side. Jump off the key and grab it
-  in mid-air (legal): the player falls and respawns holding the key — the same as step 2. Posting it
-  into the lock during that jump opens the door but leaves no bridge; the spool is still needed.
+  in mid-air: refused since the final review (the engine takes no toy that is underfoot, in the air
+  off it either - `player.Underfoot`); the click is told `StandingLine` and the bridge stays. (Until
+  then it was legal: the player fell and respawned holding the key — the same as step 2.)
 - Posting the key from the landing, 12 away: works if the key looks tiny enough (`k` ≤ 0.04). The door
   opens, and the spool is still needed to reach it. Tolerated.
 - Spool placed while the key still bridges the pit: it stops against the key. Beside the 1.6-wide
@@ -3162,6 +3204,10 @@ Gadget merge map:
 
 ## Appendix B — Scale windows for the bot tests
 
+> **Drafted before the build.** The measured windows are in Appendices D, E and F (and in each level's
+> "As built" note) and win where they differ: Level 3's apple, for one, works from 0.10 to 0.64, not
+> from 0.27 to 0.50, and Level 13's sponge soaks enough from 6.09, not from 8.4.
+
 Each level test asserts `LevelCompleted`; these are the scales the solver's drops should produce
 (± 5 %) and the windows the gadgets accept.
 
@@ -3197,6 +3243,9 @@ events in order with the marble's apex 6.8.
 ---
 
 ## Appendix C — Risks and fallbacks
+
+> **Written before the build.** Every level was built as designed; no fallback was needed and none
+> exists (`HingeChain`'s single-piece mode, `LaunchSeat` and `FunnelCapture` were never built).
 
 Levels whose behaviour still depends on PhysX or on engine work that does not exist yet, with what to
 ship instead if it does not hold up in the bot test.
@@ -3236,14 +3285,15 @@ scripted seat.
 Measured in the Unity simulation on 2026-10-04 with each level's own bot solver. Times are game
 seconds from the load to `LevelCompleted`; `Phase1CampaignTests` plays the four in one `Game`, forwards
 and backwards, and gets the same times to the tick. The details are in each level's "As built" note
-and in `tools/out/notes/level0N-build.md`, `level0N-review.md` and `phase-1-campaign.md`.
+and in the close-out log, [design-notes/phase-1-campaign.md](design-notes/phase-1-campaign.md) (the
+builders' and reviewers' own logs, `tools/out/notes/level0N-build.md` and `level0N-review.md`, are local).
 
 | Level | Toy: start → solver's drop (text) | Works from → to | Solve | Pick-up `k` (solver; too small below) | Tests |
 |---|---|---|---|---|---|
 | 1 The Cheese Wedge | Wedge 0.4 → **9.46** (9.4) | 5.5 → 14 (clamp) | **12.63 s** | 0.365; 0.23 | 64 |
 | 2 The Thimble Chasm | Thimble 0.8 → **11.62** (11.5) | 9 → 13 (clamp) | **9.28 s** | 0.53; 0.30 | 43 |
 | 3 Shrinking the Apple | Apple 11.4 → **0.451** (0.40) | 0.10 (clamp) → 0.64 | **3.77 s** | 0.297; — | 55 |
-| 4 Domino Effect | Domino 0.5 → **4.105** (4.1) | 3.2 → 5.3 (mass floor 3.0–3.2; placement decides the rest) | **14.18 s** | 0.455; 0.38 | 44 |
+| 4 Domino Effect | Domino 0.5 → **4.128** (4.1; 4.105 before the start was moved to the pedestal) | 3.2 → 5.3 (mass floor 3.0–3.2; placement decides the rest) | **11.93 s** (14.18 before) | 0.450; 0.38 | 50 |
 
 What the four agree on (and `Phase1CampaignTests` asserts):
 
@@ -3262,7 +3312,8 @@ Still open after phase 1 (none of it stops a level from being solved):
 - A pick-up from too far away remains a second, unstated variable in Levels 1, 2 and 4; it is said out
   loud and undone for free, not designed out.
 - Level 2: from the spawn itself the throw tolerates only ±2.9° of yaw.
-- Not checked: a WebGL build of these levels.
+- Not checked at the time: a WebGL build of these levels. (Since then every level has run in a browser
+  through `tools/webgl_check.py`; see the end of Appendix F.)
 
 Closed since (the prelude to phase 2):
 
@@ -3280,8 +3331,9 @@ Closed since (the prelude to phase 2):
 Measured in the Unity simulation on 2026-10-05 with each level's own bot solver. Times are game seconds
 from the load to `LevelCompleted`; `Phase2CampaignTests` plays the five in one `Game`, forwards and
 backwards, and gets the same times to the tick. The details are in each level's "As built" note and in
-`tools/out/notes/level0N-build.md`, `level0N-review.md` and `phase-2-campaign.md`; contact sheets are in
-`tools/out/shots/phase-2`.
+the close-out log, [design-notes/phase-2-campaign.md](design-notes/phase-2-campaign.md) (local, not in
+the repository: `tools/out/notes/level0N-build.md`, `level0N-review.md` and the contact sheets in
+`tools/out/shots/phase-2`).
 
 | Level | Toy: start → solver's let-go (text) | Works from → to | Solve | Pick-up `k` (solver; told below) | Said in the solve |
 |---|---|---|---|---|---|
@@ -3321,8 +3373,10 @@ Still open after phase 2 (none of it stops a level from being solved):
 
 - Level 9's second route (a pier on a wagon) skips the lighthouse wall and the timing. It is the
   owner's call whether to keep it; the one-line change that removes it is in the level's note.
-- Level 9: getting onto the riding plank takes a running jump at a half-unit kerb; a first-timer will
-  need a try or two, and a fall costs the walk back from the start.
+- Level 9: getting onto the riding plank takes a jump at a half-unit kerb; a first-timer will need a
+  try or two, and a fall costs the walk back from the start. (Final review: the words no longer ask
+  for a run, which with the sprint key made the jump fail; they point at the plank's end, where a
+  jump toward the lighthouse lands at any speed.)
 - Level 8: a marble held over the throat (the natural first aim) stops on the lid in front of the
   hole; it is signalled and explained, not designed out.
 - Level 6: turned 60 to 90° in the hand the eraser is at the very edge of its window.
@@ -3331,7 +3385,9 @@ Still open after phase 2 (none of it stops a level from being solved):
 - Level 7: the level card covers the upper half of the outline for the first 3.5 s.
 - `Gadgets/Funnel.cs`: the chamber floor is a zero-thickness sheet (Level 8 has its own blocks and a
   net under it; Level 15's hopper needs the same or a fix in the gadget).
-- Not checked: a WebGL build of these levels.
+- Not checked at the time: a WebGL build of these levels. (Checked since; the first one froze the page
+  in Level 5 - a loop that ended on a float, `ARCHITECTURE.md`, rule 2 - and that is what the browser
+  check was written for.)
 
 ## Appendix F — As built: phase 3 (Levels 10–15) and the end of the game
 
@@ -3339,8 +3395,11 @@ Measured in the Unity simulation on 2026-10-11 with each level's own bot solver.
 from the load to `LevelCompleted`; `Phase3CampaignTests` plays the six in one `Game`, forwards and
 backwards, and gets the same times to the tick - and plays the whole campaign, 1 to 15, by autoplay
 through the real runner in one game, to the ending. The details are in each level's "As built" note and
-in `tools/out/notes/level1N-build.md`, `level1N-review.md` and `phase-3-campaign.md`; contact sheets are
-in `tools/out/shots/phase-3`.
+in the close-out log, [design-notes/phase-3-campaign.md](design-notes/phase-3-campaign.md); the fifteen
+spawn views are [media/campaign-spawn-sheet.png](media/campaign-spawn-sheet.png) and the ending is
+[media/ending-sheet.png](media/ending-sheet.png) (local, not in the repository:
+`tools/out/notes/level1N-build.md`, `level1N-review.md` and the other contact sheets in
+`tools/out/shots/phase-3`).
 
 | Level | Toy: start → solver's let-go (text) | Works from → to | Solve | Pick-up `k` (solver) | Said in the solve |
 |---|---|---|---|---|---|
@@ -3351,14 +3410,15 @@ in `tools/out/shots/phase-3`.
 | 14 The Infinite Hallway | Doorway 1.0 → **0.281 / 3.2 / 1.319** (0.28 / 3.2 / 1.35) | to 0.47 / from 2.48 / to 2.00 | **9.95 s** | 0.166 / 0.687 / 0.343 | the tip about turning the door edge-on |
 | 15 The Rube Goldberg Machine | Dominoes 0.6 → **3.103** (3.0); ball 0.6 → **3.000** (3.0); ruler 1.0 → **1.012** (1.1); fan 5 → **0.924** (0.94) | 2.2–3.5 / 2.25–3.0 / 0.8–1.2 / 0.6–1.2 | **40.75 s** | 0.353 / 0.398 / 0.285 / 0.206 | "The alarm rings ..." |
 
-The whole campaign by its solvers is 207.9 s of play (Appendix D and E for Levels 1 to 9).
+The whole campaign by its solvers is 205.7 s of play (Appendix D and E for Levels 1 to 9; 207.9 s
+before Level 4 started at its pedestal).
 
 In Play Mode (the real `GameRunner` loop, `?level=N&autoplay=1`, wall-clock seconds from the start of
-the check to the load of the next level, start-up frames included) on the final code of 2026-10-11:
+the check to the load of the next level, start-up frames included) when phase 3 closed:
 16.0 / 12.5 / 7.0 / 17.6 / 20.6 / 15.4 / 6.9 / 23.8 / 15.2 for Levels 1 to 9 and **20.9 / 9.5 / 17.5 /
 17.8 / 12.9 / 44.1** for Levels 10 to 15, every one completed, each loading the level after it - and
 Level 15 showing the ending instead of loading anything. With no address the game opens on the title
-over Level 1.
+over Level 1. (The same run on the code of the final review is in Appendix G.)
 
 What the six agree on, with each other and with the nine before them (and `Phase3CampaignTests` asserts):
 
@@ -3409,12 +3469,13 @@ menus' own sticker style on the catalogue's Paper surface:
   COLLECTED", Kraft cards with a "?", no stamp, "14 toys are still waiting in the catalogue.").
   While a bot plays, the ending is the bot's ("15 OF 15 PLAYED", "THE BOT PLAYED IT THROUGH") and
   nothing of it is kept.
-- The level keys (`[` and `]`) still step round the list; they are for looking at levels.
+- The level keys (`[` and `]`) still step round the list; they are for looking at levels, and since
+  the final review they only work where the address asks for them (`&debug=1`).
 
 Still open after phase 3 (none of it stops a level from being solved):
 
-- Level 11: the beams are the art bible's magenta, not the brief's red (decided for the art bible; one
-  colour constant if the owner wants red). The lean-to is a second way through that is kept.
+- Level 11: the lean-to is a second way through that is kept. (The beams were the art bible's magenta
+  when phase 3 closed; the owner wanted the brief's red, and they are red since the final review.)
 - Level 10: the inner boxes' limit makes a top box picked up from very near tumble and knock the step.
 - Level 12: the spool's window is narrow (ratio 1.19) and rests on the paint to be found.
 - Level 13: Lagoon sponge on pool-blue water; the held sponge hides its own target.
@@ -3422,6 +3483,79 @@ Still open after phase 3 (none of it stops a level from being solved):
   of a big door is not explained.
 - Level 15: about 41 s of solving is mostly walking between four stations; the dawn is a change of
   light only (the room stays plum).
-- Not checked: a WebGL build of these levels (builds were not allowed in these sessions).
+- A WebGL build of these levels was not made while they were built (builds were not allowed in those
+  sessions). The build of commit `9ca6138`, all fifteen levels and the ending, was run through
+  `tools/webgl_check.py` and published on 2026-10-11; what that check does and does not judge is in
+  `ARCHITECTURE.md`, "Testing and verification".
+
+## Appendix G — The final review (2026-10-11): what changed in the levels, and what is knowingly left
+
+Before release the whole game was reviewed once more (`ARCHITECTURE.md`, "The final review", has the
+account for the engine, the menus, the picture and the page). This is what it did to the levels. Each
+level's own "As built" note carries the detail.
+
+**One rule of the engine changed under every level.** A toy that is underfoot cannot be picked up -
+the one the feet are on and, in the air, still the one they left, until the feet are on something else
+(`player.Underfoot`). Until then "jump off it, click, let go under yourself" made the toy bigger or put
+it higher: a way up in every level with a toy to stand on except Level 10, which had its own guard
+(Level 2's thimble from 0.8 to 3.5 with the feet 3.9 up in four jumps; Level 13's sponge to 6.3; Level
+15's dominoes to 6.95). The table of every level before and after is `UnderfootTests`' probe. What it
+changed in play: Level 3's apple can no longer be surfed over the low wall, Level 6's eraser is not
+taken in the air over it, Level 12's key and spool are not taken in a jump off them (the click is told
+why, and the bridge stays). Stepping off onto the floor gives the toy back at once, and any *other* toy
+can still be picked up in mid-air.
+
+| Level | What changed |
+|---|---|
+| 2, 3, 8, 9, 11 | What is only drawn is merged per material (the art bible's 12 draws: 40 → 14, 44 → 9, 95 → 28, 47 → 13, 38 → 12 static draws; Level 3's printing casts no shadow). Nothing moved, no collider changed |
+| 4 Domino Effect | The same (84 → 10). **It starts on the shoe prints in front of the pedestal**, a step from the domino with the crosshair on it: from its old start, 11 away, the first click was a pick-up that could not work. A click at one of the wooden dominoes says "Those are stuck fast. The purple one is yours." once |
+| 9 The Moving Train | The third hint and the line for a failed hop no longer ask for a run (with the sprint key a running jump clears the plank): they point at the plank's end, facing the lighthouse, where a jump lands at any speed. A leap off the platform that clips the deck's far rim and slides off is told what a leap over the train is told. The plank looks like wood: grain through the paint, bare sawn ends |
+| 11 Blocking Lasers | The beams are red (the owner's brief), with a near-white heart; kill surfaces elsewhere stay magenta. The line for a click at the card underfoot is also said in the air off it |
+| 12 The Keyhole | The same line in the air off the key or the spool; the mid-air pick-up of either is gone (above) |
+| 15 The Rube Goldberg Machine | A toy held at its own largest size reads green at its station (it was "too big" for one pick-up in ten, by a rounding hair) |
+| all | A restart builds no set mesh again; the game names its keys on the HUD, the title and the pause card, where the level's name and blurb can be read for as long as the player likes |
+
+**The solvers' times** on the final code (game seconds from the load to `LevelCompleted`; the three
+campaign tests hold each to half a second), and the same levels in Play Mode through the real
+`GameRunner` (`?level=N&autoplay=1`, wall-clock seconds from the start of the check to the load of the
+next level, start-up frames included), every one completed without an error:
+
+| Level | Solve | Play Mode | | Level | Solve | Play Mode |
+|---|---|---|---|---|---|---|
+| 1 The Cheese Wedge | 12.63 | 16.2 | | 9 The Moving Train | 11.75 | 15.3 |
+| 2 The Thimble Chasm | 9.28 | 13.0 | | 10 Matryoshka Boxes | 17.53 | 21.2 |
+| 3 Shrinking the Apple | 3.77 | 7.3 | | 11 Blocking Lasers | 6.10 | 9.8 |
+| 4 Domino Effect | 11.93 | 15.8 | | 12 The Keyhole | 13.97 | 17.7 |
+| 5 The Fan and the Feather | 17.35 | 21.1 | | 13 Escaping the Fishbowl | 14.32 | 18.0 |
+| 6 Bouncing Eraser | 12.12 | 15.8 | | 14 The Infinite Hallway | 9.95 | 12.9 |
+| 7 The Teeter-Totter | 3.68 | 7.3 | | 15 The Rube Goldberg Machine | 40.75 | 44.6 (then the ending) |
+| 8 Funnel Physics | 20.50 | 24.3 | | **The campaign** | **205.7** | |
+
+When each solver picks up and lets go is in [design-notes/phase-3-holds.txt](design-notes/phase-3-holds.txt),
+written again on this code; the two contact sheets in [media/](media) - the fifteen starts and the end
+of the game - were taken again too (Level 4's start, Level 9's plank, Level 11's beams and the ending's
+"Best runs" had changed).
+
+**Knowingly left** (none of it stops a level from being solved; the lists at the ends of Appendices D,
+E and F still stand, except where a line there says otherwise):
+
+- **Level 4:** let go askew from a corner of the balcony, a domino of the largest size can come to lie
+  across the arch with 0.3 free beside it (1 of 60 swept cases since the level starts at the pedestal,
+  none before). It is picked up and put out of the way; the level's own solver does that.
+- **Level 11:** the outline's "would be no roof" red (Level 2's orange-red, in big blinking dashes on
+  the floor) now lies in front of red beams. The dashes are far bigger and brighter than the beams'
+  dots, they blink, and green is unmistakable; but "red means no" is one colour nearer the curtain than
+  it was against magenta.
+- **Level 14:** a jump can take a player of about their starting size into the corner of the first
+  hall behind the thread spool, where no walk leads out (the gaps are 0.45, the player 0.63 wide). A
+  jump does (the spool is 1.0 high, the hop 1.37). The random-player sweep reported it as "not
+  recovered" because its recovery only walked; it jumps now, and 209 episodes end solved.
+- **Level 10** keeps its own rule on top of the engine's: from up on a box no other box is picked up
+  either.
+- **Lines that ask for a turn or a flip do not name the key** (Levels 1, 9, 11, 13, 14), and Level 6's
+  "Jump on it." does not name Space. The key caps on the HUD do while they are needed, and the pause
+  card lists every key.
+- **Level 9:** boarding the riding plank is still the campaign's hardest piece of platforming; the
+  words are right now, the jump is the same.
 
 END OF LEVELS.md

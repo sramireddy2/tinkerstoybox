@@ -247,6 +247,44 @@ namespace Toybox.Tests
             Assert.IsFalse(Physics.GetIgnoreCollision(propCollider, Game.Player.Collider));
         }
 
+        // far = MaxScale / ratio, and ratio * far is not MaxScale in 32 bits (3.00000024 for a limit of 3 in
+        // 15 of these 300 pick-ups, before the hold clamped what it places); the same at the small end. A
+        // held prop is never outside its limits, not by a hair - in the hand or let go.
+        [Test]
+        public void HeldAtItsLimit_APropIsNeverAHairOverIt([Values] bool largest)
+        {
+            const float least = 0.7f, most = 3f;
+            for (int k = 0; k < 300; k++)
+            {
+                float distance = 1.2f + k * 0.0371f;
+                Prop ball = null;
+                Game?.Dispose();
+                Game = null;
+                Build(ctx =>
+                {
+                    TestHelpers.Floor(ctx, 400f);
+                    ball = ctx.AddProp(BasicToys.Ball(0.5f), new Vector3(0f, 0.6f, distance), new PropOptions { Scale = 1f, MinScale = least, MaxScale = most, FrozenUntilGrabbed = true });
+                    ctx.SetSpawn(Vector3.zero, 0f);
+                });
+                drops.Clear();
+                Game.Events.PropDropped += drops.Add;
+                Run(2);
+                LookAt(ball.Center);
+                Click();
+                Assert.AreSame(ball, Game.Grabber.Held, "picked up from " + distance);
+                // Up into the open air, where nothing but its largest size stops it - or down at the floor
+                // by the feet, where it would be smaller than its smallest.
+                Game.Player.Pitch = largest ? 50f : -89f;
+                Run(3);
+                string what = "picked up from " + distance.ToString("R") + ": looks " + Game.Grabber.Ratio.ToString("R") + ", is " + ball.Scale.ToString("R");
+                if (largest) Assert.Greater(ball.Scale, most - 1e-5f, "at its largest - " + what);
+                Assert.That(ball.Scale, Is.InRange(least, most), what);
+                PropHoldEvent drop = Drop();
+                Assert.AreEqual(ball.Scale, drop.NewScale, what);
+                Assert.That(ball.Scale, Is.InRange(least, most), "let go - " + what);
+            }
+        }
+
         [Test]
         public void ConvexWedgeIsPlacedFlushOnTheFloor()
         {

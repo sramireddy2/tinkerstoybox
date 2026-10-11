@@ -134,22 +134,21 @@ namespace Toybox.Levels
 
         /// <summary>
         /// Merges what was collected into one renderer per material under a new object of the level. The
-        /// meshes belong to the level and are destroyed with it. A set that stands between the sun and the
-        /// level can be drawn without casting a shadow.
+        /// meshes are kept for the level's next build (<see cref="SetMeshes"/>). A set that stands between
+        /// the sun and the level can be drawn without casting a shadow.
         /// </summary>
         public GameObject Finish(LevelContext ctx, string name, bool castShadows = true)
         {
             var root = new GameObject(name);
             for (int i = 0; i < materials.Count; i++)
             {
-                Mesh merged = MeshKit.Merge(name + " " + i, parts[i]);
+                Mesh merged = SetMeshes.Take(ctx, name + " " + i, parts[i]);
                 var visual = new GameObject(materials[i] != null ? materials[i].name : "Visual");
                 visual.transform.SetParent(root.transform, false);
                 visual.AddComponent<MeshFilter>().sharedMesh = merged;
                 MeshRenderer renderer = visual.AddComponent<MeshRenderer>();
                 renderer.sharedMaterial = materials[i];
                 if (!castShadows) renderer.shadowCastingMode = ShadowCastingMode.Off;
-                ctx.OnDispose(() => MeshKit.Release(merged));
             }
             materials.Clear();
             parts.Clear();

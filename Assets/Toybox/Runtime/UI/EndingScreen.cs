@@ -24,8 +24,13 @@ namespace Toybox.UI
     ///           Play again (Cherry) / Levels / Title
     ///
     /// "Reduce motion" drops the stamp's punch and the confetti. The numbers are the player's saved
-    /// progress (<see cref="GameFlow.Report"/>): the best run of every level, however many sessions it took.
-    /// While a bot plays they are the bot's runs of this session, the card says so, and nothing is stamped.
+    /// progress (<see cref="GameFlow.Report"/>): the best run of every level, however many sessions it took
+    /// ("Best runs": it is not the time spent playing). While a bot plays they are the bot's runs of this
+    /// session, the card says so, and nothing is stamped. That card tells the watcher to press P: when
+    /// they do (the bot lets go), the screen does what it promised and starts the first level for them.
+    ///
+    /// Coming back from the catalogue (Levels, then Back) the screen is as it was left: everything up,
+    /// no second build-up, fanfare or confetti.
     ///
     /// Play again starts the campaign's first level; Levels opens the catalogue (Back returns here); Title
     /// and Esc go back to the title, which then stands over the first level. Nothing here moves on by itself.
@@ -40,6 +45,8 @@ namespace Toybox.UI
         public const string Heading = "THE END", Thanks = "THANK YOU FOR PLAYING", WatchedThanks = "THE BOT PLAYED IT THROUGH";
         public const string FullLine = "Every toy is back in its box.";
         public const string WatchedLine = "None of it counts as yours. Press P and the toys are in your hands.";
+        /// <summary>What the two figures of the result card are: the player's best runs added up, or the bot's runs of this session.</summary>
+        public const string BestLabel = "Best runs ", WatchedLabel = "Total time ";
 
         static readonly Vector2 CardSize = new Vector2(240f, 150f);
         const float Gap = 20f, CircleSize = 92f, Top = 462f, GridTop = Top - 168f, RoomForGrid = 490f;
@@ -70,7 +77,7 @@ namespace Toybox.UI
         Vector2 gridSize;
         float time, stampAt, infoAt, confettiTime = -1f;
         int shown;
-        bool stamped, informed;
+        bool stamped, informed, watching, handedOver;
 
         public IReadOnlyList<Entry> Entries => entries;
         public RectTransform Grid => grid;
@@ -252,16 +259,27 @@ namespace Toybox.UI
                 : report.Full ? FullLine
                 : missing == 1 ? "One toy is still waiting in the catalogue." : missing + " toys are still waiting in the catalogue.";
             stats.text = report.CollectedCount == 0 ? ""
-                : "Total time " + UiKit.Time(report.Seconds) + "  ·  " + report.PickUps + (report.PickUps == 1 ? " pick-up" : " pick-ups");
+                : (report.Watched ? WatchedLabel : BestLabel) + UiKit.Time(report.Seconds) + "  ·  " + report.PickUps + (report.PickUps == 1 ? " pick-up" : " pick-ups");
+        }
+
+        void SetLive(bool live)
+        {
+            Again.Interactable = live;
+            LevelsButton.Interactable = live;
+            TitleButton.Interactable = live;
         }
 
         protected override void Opening()
         {
+            // Back from the catalogue: the same ending, already told.
+            bool back = Menu.CameFrom == Menu.Catalogue && Menu.CameFrom != null;
             Refresh();
             time = 0f;
             shown = 0;
             stamped = false;
             informed = false;
+            watching = Menu.Context.Autoplay;
+            handedOver = false;
             confettiTime = -1f;
             foreach (Entry entry in entries) entry.Card.Tween.Hide(true);
             Stamp.Tween.Hide(true);
@@ -269,14 +287,26 @@ namespace Toybox.UI
             Info.Tween.Hide(true);
             confettiRoot.gameObject.SetActive(false);
             // Nothing can be pressed before it can be seen: a key held over from the last card must not skip the ending.
-            Again.Interactable = false;
-            LevelsButton.Interactable = false;
-            TitleButton.Interactable = false;
+            SetLive(false);
             stampAt = CardsAt + entries.Count * CardEvery + StampAfter;
             infoAt = stampAt + InfoAfter;
             Screen.First = Again;
             // A capture shows the finished screen.
             if (UiCapture.Wants("ending")) time = infoAt + 1f;
+            if (!back) return;
+
+            time = infoAt + 1f;
+            shown = entries.Count;
+            foreach (Entry entry in entries) entry.Card.Tween.Show(true);
+            stamped = true;
+            if (Report.Full && !Report.Watched)
+            {
+                Stamp.Tween.Show(true);
+                Stamp.Rect.SetAsLastSibling();
+            }
+            informed = true;
+            Info.Tween.Show(true);
+            SetLive(true);
         }
 
         protected override void Closing()
@@ -318,12 +348,21 @@ namespace Toybox.UI
             {
                 informed = true;
                 Info.Tween.Show();
-                Again.Interactable = true;
-                LevelsButton.Interactable = true;
-                TitleButton.Interactable = true;
+                SetLive(true);
                 Screen.Focus(Again);
             }
             Fall(dt);
+
+            // The bot's ending says "Press P and the toys are in your hands". P takes the game from the bot;
+            // this is the other half: the first level, for the player. (Only when the bot was at it while
+            // this screen was up - a player who took a level over from the bot and finished it sees the
+            // ending they came to.)
+            if (Menu.Context.Autoplay) watching = true;
+            else if (watching && !handedOver && Report.Watched && Menu.Flow != null)
+            {
+                handedOver = true;
+                Screen.Run(PlayAgain);
+            }
         }
 
         // ---- Paper confetti, on the canvas (the world's camera is off behind a surface) ----------------------

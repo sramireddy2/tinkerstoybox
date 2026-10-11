@@ -308,6 +308,46 @@ namespace Toybox.Toys
             return b.Build("Dot");
         }
 
+        /// <summary>
+        /// A sliver: a flat streak lying on the XZ plane (facing +Y), <paramref name="length"/> long along Z
+        /// about the origin and <paramref name="width"/> wide at its middle, tapering to nothing at both
+        /// ends; <paramref name="wander"/>(0..1) is where its middle line lies along X. Grain showing
+        /// through paint, a growth ring, a scratch. 2 x pieces triangles.
+        /// </summary>
+        public static Mesh Sliver(float length, float width, int pieces, Func<float, float> wander = null)
+        {
+            pieces = Mathf.Clamp(pieces, 2, 64);
+            var b = new GeoBuilder();
+            for (int i = 0; i <= pieces; i++)
+            {
+                float t = (float)i / pieces;
+                float x = wander != null ? wander(t) : 0f;
+                // (Clamped: the sine of pi is a hair below zero in single precision, and a power of that is no number.)
+                float half = width * 0.5f * Mathf.Pow(Mathf.Clamp01(Mathf.Sin(Mathf.PI * t)), 0.6f);
+                b.Add(new Vector3(x - half, 0f, (t - 0.5f) * length), Vector3.up);
+                b.Add(new Vector3(x + half, 0f, (t - 0.5f) * length), Vector3.up);
+            }
+            for (int i = 0; i < pieces; i++)
+            {
+                int a = i * 2;
+                b.Quad(a, a + 1, a + 3, a + 2);
+            }
+            return b.Build("Sliver");
+        }
+
+        /// <summary>A flat rectangle on the XZ plane (facing +Y), centred on the origin: a label, a sawn end.</summary>
+        public static Mesh Plate(float width, float depth)
+        {
+            var b = new GeoBuilder();
+            float w = width * 0.5f, d = depth * 0.5f;
+            int a = b.Add(new Vector3(-w, 0f, -d), Vector3.up);
+            b.Add(new Vector3(w, 0f, -d), Vector3.up);
+            b.Add(new Vector3(w, 0f, d), Vector3.up);
+            b.Add(new Vector3(-w, 0f, d), Vector3.up);
+            b.Quad(a, a + 1, a + 2, a + 3);
+            return b.Build("Plate");
+        }
+
         // ------------------------------------------------------------------------------------------------
         // Mesh operations
         // ------------------------------------------------------------------------------------------------

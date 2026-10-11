@@ -115,12 +115,14 @@ namespace Toybox.UI
             if (target != null) Sim.Destroy(target);
         }
 
-        /// <summary>"0:42.3" below ten minutes, "12:05" from there on.</summary>
+        /// <summary>"0:42.3" below ten minutes, "12:05" from there on, "1:02:05" from an hour on.</summary>
         public static string Time(float seconds, bool tenths = true)
         {
             if (float.IsNaN(seconds) || seconds < 0f) seconds = 0f;
+            if (float.IsInfinity(seconds) || seconds > 359999f) seconds = 359999f;
             int minutes = (int)(seconds / 60f);
             float rest = seconds - minutes * 60f;
+            if (minutes >= 60) return minutes / 60 + ":" + (minutes % 60).ToString("00") + ":" + ((int)rest).ToString("00");
             if (tenths && minutes < 10)
             {
                 int whole = (int)rest;

@@ -31,7 +31,11 @@ namespace Toybox.Art
     /// - A template that is missing, or whose shader is not one of the game's ("Toybox/..."), gets the
     ///   stand-in treatment: URP Lit with the recipe's base colour, smoothness, metallic and emission -
     ///   enough for everything to render in the right colours before the shaders exist. The plain look
-    ///   (<see cref="Plain"/>) always does that, from PlainLit.mat.
+    ///   (<see cref="Plain"/>) always does that, from PlainLit.mat - and what glows there, from
+    ///   PlainLitEmissive.mat: URP Lit only emits with its _EMISSION keyword, a shader_feature, and a
+    ///   player build only has the variant if a material asset in it uses the keyword. Enabling it at
+    ///   runtime on a clone of PlainLit.mat worked in the editor and lit nothing in the browser (signal
+    ///   lamps, an Ink base that only emits, were black).
     /// </summary>
     public static class Materials
     {
@@ -39,6 +43,9 @@ namespace Toybox.Art
         const string RoomTemplatePath = "Materials/RoomLit";
         const string FlatTemplatePath = "Materials/Flat";
         const string PlainTemplatePath = "Materials/PlainLit";
+        /// <summary>Resources path of the plain look's template for materials that emit (made by CoreSetup, with _EMISSION on).</summary>
+        public const string PlainEmissiveTemplatePath = "Materials/PlainLitEmissive";
+        public const string EmissionKeyword = "_EMISSION";
         const string OwnShaders = "Toybox/";
 
         // Toybox/ToyLit (ART_BIBLE 3.2)
@@ -128,7 +135,8 @@ namespace Toybox.Art
                 ToyMaterials.RemoveAll(entry => entry.Key == null);
                 foreach (KeyValuePair<Material, ToyRecipe> entry in ToyMaterials) entry.Key.SetFloat(DetailBumpId, DetailBump(entry.Value));
                 RepointDetailMaps();
-                TexCache.Trim(tier);
+                // Nothing is trimmed: the other size stays (under a megabyte), so that neither this change nor
+                // the way back has to generate a texture - a step down comes when the machine is too slow already.
             }
         }
 
@@ -288,7 +296,7 @@ namespace Toybox.Art
 
         static Material MakeToy(string name, ToyRecipe recipe, Color candy, Color emission)
         {
-            Material material = CloneToy(name, out bool own);
+            Material material = CloneToy(name, out bool own, emission.maxColorComponent > 0f);
             if (material == null) return null;
             if (own) ApplyToy(material, recipe, recipe.BaseColor(candy), recipe.RimColor(candy), emission);
             else StandIn(material, recipe.BaseColor(candy), recipe.Smoothness, recipe.Metallic, emission);
@@ -345,7 +353,7 @@ namespace Toybox.Art
             Color emission = recipe.Color;
             float peak = Mathf.Max(1f, emission.maxColorComponent);
             var body = new Color(emission.r / peak, emission.g / peak, emission.b / peak, 1f);
-            material = CloneToy(name, out bool own);
+            material = CloneToy(name, out bool own, emission.maxColorComponent > 0f);
             if (material == null) return null;
             if (own) ApplyToy(material, Matte, Color.black, Color.black, emission);
             else StandIn(material, body, 0f, 0f, emission);
@@ -405,8 +413,10 @@ namespace Toybox.Art
             material.SetFloat(SmoothnessId, smoothness);
             material.SetFloat(MetallicId, metallic);
             if (emission.maxColorComponent <= 0f) return;
-            // URP Lit only emits with its keyword on; fine in the editor, and the game's shader has no keywords.
-            material.EnableKeyword("_EMISSION");
+            // URP Lit only emits with its keyword on. In the plain look the clone comes from the template that
+            // has it already (and so keeps the variant in a build); this line is for the stand-ins of a
+            // project whose setup has not run - the game's own shaders have no keywords.
+            material.EnableKeyword(EmissionKeyword);
             SetConverted(material, EmissionColorId, emission);
             material.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
         }
@@ -424,11 +434,12 @@ namespace Toybox.Art
             return new Vector4(linear.r, linear.g, linear.b, 1f);
         }
 
-        // A clone of the toy template - or of the plain template while the plain look is on. "own" says
-        // whether its shader is one of the game's.
-        static Material CloneToy(string name, out bool own)
+        // A clone of the toy template - or of the plain template while the plain look is on (of the plain
+        // template that emits, for a material that does). "own" says whether its shader is one of the game's.
+        static Material CloneToy(string name, out bool own, bool emissive = false)
         {
-            Material template = Template(Plain ? PlainTemplatePath : ToyTemplatePath);
+            Material template = Plain && emissive ? Template(PlainEmissiveTemplatePath) : null;
+            if (template == null) template = Template(Plain ? PlainTemplatePath : ToyTemplatePath);
             if (template == null) template = Fallback();
             own = false;
             if (template == null) return null;

@@ -915,14 +915,13 @@ namespace Toybox.Levels
 
             Color pool = Palette.Lin(LampColor) * 0.2f;
             pool.a = 1f;
-            Mesh merged = MeshKit.Merge("Level14 Glows", glows);
+            Mesh merged = SetMeshes.Take(ctx, "Level14 Glows", glows);
             var glow = new GameObject("Glows");
             glow.AddComponent<MeshFilter>().sharedMesh = merged;
             MeshRenderer renderer = glow.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = Materials.Flat(new FlatRecipe { Name = "Level14 Glow", Color = pool, Shape = FlatShape.SoftDisc, Soft = 1f, Blend = FlatBlend.Additive });
             renderer.shadowCastingMode = ShadowCastingMode.Off;
             renderer.receiveShadows = false;
-            ctx.OnDispose(() => MeshKit.Release(merged));
             ctx.AddStatic(glow, Vector3.zero);
         }
 

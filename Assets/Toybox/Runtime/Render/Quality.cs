@@ -304,6 +304,23 @@ namespace Toybox.Render
     /// session: the scale by 0.1 if it had been lowered, else from Medium to High if the session started
     /// on Medium. A step up that is followed by slow frames within 10 s is taken back and nothing is ever
     /// raised again (<see cref="Locked"/>).
+    ///
+    /// **A slow display is not a slow GPU.** A frame over 20 ms is also what a 50 Hz or 48 Hz display, a
+    /// battery saver at 30 Hz or a browser that paces animation below 60 delivers with every frame on
+    /// time - and what a machine does that drops a frame now and then whatever it draws. From the frame
+    /// times alone the two cannot be told apart at the start: a weak GPU at a steady 33 ms looks exactly
+    /// like a 30 Hz display. So the governor goes down as before and then asks what the descent bought:
+    /// at the bottom (Low at its floor) the pace of the frames is compared with the pace at which the
+    /// descent began (<see cref="DescentPace"/>; a pace is the median frame time of the judged window,
+    /// which a single hitch does not move). If it is not at least
+    /// <see cref="WorthIt"/> shorter, the picture was never the cause: everything is given back
+    /// (<see cref="StartTier"/> at full scale, <see cref="Locked"/>, <see cref="GaveBack"/>), and that
+    /// pace is what the session runs at (<see cref="Pace"/>). From then on a step down takes a window
+    /// that is clearly slower than it - its mean over <see cref="Tolerance"/> times the pace - so a
+    /// heavier level later on can still be answered, and a second descent that buys nothing is given
+    /// back the same way, with its own pace as the new one. Only a descent that came all the way from
+    /// the top (the starting tier at full scale) is such a test; one that began lower down - a last step
+    /// from Low at 0.7 - says too little, and a descent that did help is never given back.
     /// </summary>
     public sealed class QualityGovernor
     {
@@ -324,11 +341,17 @@ namespace Toybox.Render
         public const float ScaleStep = 0.1f;
         public const int Window = 120;
         public const int SlowLimit = 12;
+        /// <summary>A descent to the bottom was worth it if the frames got shorter by at least this share.</summary>
+        public const float WorthIt = 0.1f;
+        /// <summary>Once a pace is known to be the session's own, a window this many times slower than it is slow.</summary>
+        public const float Tolerance = 1.25f;
 
         readonly bool[] window = new bool[Window];
-        int head, filled, slow, longRun;
+        readonly float[] times = new float[Window], sorted = new float[Window];
+        int head, filled, slow, longRun, descentSteps;
+        double sum;
         float grace, settle, calm, probe;
-        bool probing;
+        bool probing, descending, descentFromTop;
         QualityTier probeTier;
         float probeScale;
 
@@ -339,12 +362,39 @@ namespace Toybox.Render
         public float Scale { get; private set; } = 1f;
         /// <summary>The one step up of the session has been taken.</summary>
         public bool SteppedUp { get; private set; }
-        /// <summary>The step up did not hold and was taken back; nothing is raised again this session.</summary>
+        /// <summary>
+        /// Nothing is raised again this session: the step up did not hold and was taken back, or a descent
+        /// bought nothing and was given back (<see cref="GaveBack"/>).
+        /// </summary>
         public bool Locked { get; private set; }
         public int StepsDown { get; private set; }
         public int StepsUp { get; private set; }
+        /// <summary>How often a descent to the bottom bought nothing and was given back.</summary>
+        public int GaveBack { get; private set; }
+        /// <summary>
+        /// The pace the session is known to run at whatever the picture costs (the display's, or the
+        /// machine's own), in seconds per frame; 0 while nothing of the kind is known.
+        /// </summary>
+        public float Pace { get; private set; }
+        /// <summary>
+        /// The pace at which the descent under way began: the median frame time of the window that set it
+        /// off, or of the next one if that was slower (the first window still holds the frames from before
+        /// the trouble began); 0 outside a descent.
+        /// </summary>
+        public float DescentPace { get; private set; }
         /// <summary>Slow frames among the last <see cref="Window"/> judged ones.</summary>
         public int SlowInWindow => slow;
+        /// <summary>The mean frame time of the judged window, in seconds (0 while it is empty).</summary>
+        public float WindowMean => filled > 0 ? (float)(sum / filled) : 0f;
+
+        /// <summary>The median frame time of the judged window, in seconds (0 while it is empty).</summary>
+        public float WindowMedian()
+        {
+            if (filled == 0) return 0f;
+            Array.Copy(times, sorted, filled);
+            Array.Sort(sorted, 0, filled);
+            return sorted[filled / 2];
+        }
         /// <summary>Seconds since the last slow frame that was judged.</summary>
         public float Calm => calm;
         /// <summary>True while frames are not judged (after a level load or a step).</summary>
@@ -393,11 +443,17 @@ namespace Toybox.Render
             }
             if (probing && probe > ProbeTime) probing = false;
 
-            bool isSlow = dt > SlowFrame;
-            Push(isSlow);
+            // With a pace of its own known, a frame is slow against that pace, not against 60 Hz.
+            bool isSlow = dt > (Pace > 0f ? Mathf.Max(SlowFrame, Tolerance * Pace) : SlowFrame);
+            Push(isSlow, dt);
             calm = isSlow ? 0f : calm + dt;
+            // A long quiet stretch ends a descent: what comes after it is another one, with a start of its own.
+            if (descending && calm >= CalmTime) EndDescent();
 
-            if (slow >= SlowLimit) return StepDown();
+            // Without a known pace: the count of 7.4. With one: a whole window that is clearly slower than
+            // it (single late frames are what gave the pace away in the first place).
+            bool tooSlow = Pace > 0f ? filled == Window && WindowMean > Tolerance * Pace : slow >= SlowLimit;
+            if (tooSlow) return StepDown();
             if (!SteppedUp && !Locked && calm >= CalmTime) return StepUp();
             return false;
         }
@@ -411,11 +467,14 @@ namespace Toybox.Render
                 Locked = true;
                 Tier = probeTier;
                 Scale = probeScale;
+                EndDescent();
                 AfterStep();
                 StepsDown++;
                 return true;
             }
 
+            float pace = WindowMedian();
+            bool fromTop = Tier >= StartTier && Scale > 1f - 0.001f;
             float floor = TierSpec.Of(Tier).ScaleFloor;
             if (Scale > floor + 0.001f)
             {
@@ -426,12 +485,41 @@ namespace Toybox.Render
                 Tier = Tier - 1;
                 Scale = 1f;
             }
+            else if (descending && descentFromTop && pace > DescentPace * (1f - WorthIt))
+            {
+                // Low at its floor, and the frames are as long as when the descent began at the top: the
+                // picture was never the cause (a 50 Hz display, a throttled browser, a frame dropped now
+                // and then whatever is drawn). Everything is given back, and this pace is the session's own.
+                // (Not below the window's mean either: what set this descent off must not set off the next.)
+                Pace = Mathf.Max(DescentPace, Mathf.Max(pace, WindowMean));
+                Tier = StartTier;
+                Scale = 1f;
+                Locked = true;
+                GaveBack++;
+                EndDescent();
+                AfterStep();
+                return true;
+            }
             else
             {
-                // Low at its floor: there is nothing left to give up. Start counting afresh.
+                // Low at its floor, and it helped (or the descent did not come from the top): there is
+                // nothing left to give up, and here it stays. Start counting afresh.
+                EndDescent();
                 ClearWindow();
                 return false;
             }
+            if (!descending)
+            {
+                descending = true;
+                descentFromTop = fromTop;
+                descentSteps = 0;
+                DescentPace = pace;
+            }
+            else if (descentSteps == 1)
+            {
+                DescentPace = Mathf.Max(DescentPace, pace);
+            }
+            descentSteps++;
             AfterStep();
             StepsDown++;
             return true;
@@ -452,9 +540,18 @@ namespace Toybox.Render
             SteppedUp = true;
             Tier = tier;
             Scale = scale;
+            EndDescent();
             AfterStep();
             StepsUp++;
             return true;
+        }
+
+        void EndDescent()
+        {
+            descending = false;
+            descentFromTop = false;
+            descentSteps = 0;
+            DescentPace = 0f;
         }
 
         void AfterStep()
@@ -464,17 +561,20 @@ namespace Toybox.Render
             ClearWindow();
         }
 
-        void Push(bool isSlow)
+        void Push(bool isSlow, float dt)
         {
             if (filled == Window)
             {
                 if (window[head]) slow--;
+                sum -= times[head];
             }
             else
             {
                 filled++;
             }
             window[head] = isSlow;
+            times[head] = dt;
+            sum += dt;
             if (isSlow) slow++;
             head = (head + 1) % Window;
         }
@@ -485,6 +585,7 @@ namespace Toybox.Render
             filled = 0;
             slow = 0;
             longRun = 0;
+            sum = 0.0;
         }
     }
 
@@ -522,6 +623,30 @@ namespace Toybox.Render
         public override string ToString() =>
             Renderers + " renderers, " + Draws + " draws, " + ShadowCasterDraws + " shadow caster draws per cascade, " +
             Triangles + " triangles, " + Materials + " materials, " + Particles + " particles";
+
+        /// <summary>
+        /// The same scene drawn by two cameras in a frame, as a level with a <c>PortalDoorway</c> is on Medium
+        /// and High (<see cref="PortalView"/>): the draws, the shadow casters and the triangles count twice,
+        /// materials and particles once.
+        /// </summary>
+        public SceneCensus WithSecondView()
+        {
+            SceneCensus twice = this;
+            twice.Draws *= 2;
+            twice.ShadowCasterDraws *= 2;
+            twice.Triangles *= 2;
+            return twice;
+        }
+
+        /// <summary>Whether the loaded level can show a second view at this tier: it has a portal, and the tier gives portals a camera.</summary>
+        public static bool HasSecondView(Game game, QualityTier tier)
+        {
+            if (tier == QualityTier.Low) return false;
+            IReadOnlyList<Toybox.Gadgets.Gadget> gadgets = Toybox.Gadgets.GadgetList.Of(game);
+            for (int i = 0; i < gadgets.Count; i++)
+                if (gadgets[i] is Toybox.Gadgets.PortalDoorway) return true;
+            return false;
+        }
 
         static void Check(ref string text, string name, int value, int budget)
         {
@@ -715,7 +840,15 @@ namespace Toybox.Render
                     if (dt > QualityGovernor.SlowFrame) SlowFrames++;
                     if (dt > WorstFrame) WorstFrame = dt;
                 }
-                if (Governing && Governor.Frame(dt)) Apply(Governor.Tier, Governor.Scale);
+                if (Governing)
+                {
+                    int gaveBack = Governor.GaveBack;
+                    if (Governor.Frame(dt)) Apply(Governor.Tier, Governor.Scale);
+                    // Worth a line in the browser's console: it explains a frame rate nothing here can raise.
+                    if (Governor.GaveBack != gaveBack)
+                        Debug.Log("[Toybox] quality: lowering the picture did not shorten the frames (about " + (Governor.Pace * 1000f).ToString("0.0") +
+                                  " ms each: the display's or the browser's own pace) - back to " + Governor.Tier + " at full scale");
+                }
             }
 
             // The screen was resized: the same pixel budget is another scale.
@@ -820,10 +953,13 @@ namespace Toybox.Render
         {
             Census = SceneCensus.Take(game);
             if (game.Level == null) return;
-            string over = Census.Over(Spec);
+            // The census is of one view. A portal's camera is a second one: the level is checked as drawn twice.
+            bool second = SceneCensus.HasSecondView(game, Tier);
+            string over = (second ? Census.WithSecondView() : Census).Over(Spec);
             // Once per level and session: a restart must not repeat it.
             if (over != null && reported.Add(game.Level.Id * 4 + (int)Tier))
-                Debug.LogWarning("[Toybox] budget: level " + game.Level.Id + " may exceed the " + Spec.Name + " budget before culling: " + over + " (" + Census + ")");
+                Debug.LogWarning("[Toybox] budget: level " + game.Level.Id + " may exceed the " + Spec.Name + " budget before culling: " + over + " (" + Census +
+                    (second ? "; counted twice: a portal's camera draws the level and casts its shadows again" : "") + ")");
         }
 
         static ProfilerRecorder Recorder(string name)

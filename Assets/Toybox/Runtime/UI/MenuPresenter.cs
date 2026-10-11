@@ -19,6 +19,9 @@ namespace Toybox.UI
     /// Esc that resumes the game behind it - and, when the key that pressed the button is Space or Enter,
     /// only once that key is up again: Space is also the jump.
     ///
+    /// A direction key that is down when a menu opens (the player was walking) does not move its focus:
+    /// the screen ignores moves until a frame has seen no direction held (<see cref="UiScreen.MoveBlocked"/>).
+    ///
     /// It runs before the HUD's presenter, so that what a button did is what both of them show that frame.
     ///
     /// Tests and tools drive it without an EventSystem: <see cref="Move"/>, <see cref="Submit"/>,
@@ -37,7 +40,8 @@ namespace Toybox.UI
         GameFlow flow;
         string capture;
         UiInput input;
-        MenuScreen current;
+        MenuScreen current, cameFrom;
+        int ownGrabs;
         LevelList ownLevels;
         Progress ownProgress;
         bool settingsOpen, previousAutoAdvance, built, disposed;
@@ -63,8 +67,20 @@ namespace Toybox.UI
         public MenuScreen Current => current;
         /// <summary>The screen the keyboard talks to.</summary>
         public UiScreen Active => current != null ? current.Screen : null;
-        /// <summary>How often the player grabbed a toy since the level was loaded.</summary>
-        public int Grabs { get; private set; }
+        /// <summary>The menu that was up right before the one that is (null: the game was being played).</summary>
+        public MenuScreen CameFrom => cameFrom;
+        /// <summary>
+        /// How often a toy was picked up since the level was loaded, by whoever plays: the flow's count,
+        /// which is also what is kept as progress and what the ending adds up.
+        /// </summary>
+        public int Grabs => flow != null ? flow.PickUps : ownGrabs;
+        /// <summary>
+        /// Whether a key that moves the focus is down right now; null to ask the EventSystem's actions
+        /// (tests have none and say so themselves).
+        /// </summary>
+        public Func<bool> NavigationHeld { get; set; }
+        /// <summary>Whether a key that activates (Enter, Space) is still down; null to ask the EventSystem's actions.</summary>
+        public Func<bool> SubmitHeld { get; set; }
         public int PendingActions => pending.Count;
         public bool SettingsOpen => settingsOpen;
         /// <summary>The EventSystem's side of things; null outside Play Mode.</summary>
@@ -153,6 +169,9 @@ namespace Toybox.UI
             context.EscapeClaimed = settingsOpen && state == FlowState.Paused;
             MenuScreen wanted = Wanted(state);
             if (wanted != current) Switch(wanted);
+            // The walk that was under way when the menu opened is over once no direction is held.
+            UiScreen active = Active;
+            if (active != null && active.MoveBlocked && !(NavigationHeld != null ? NavigationHeld() : input != null && input.NavigateHeld)) active.MoveBlocked = false;
             SyncWorld(state);
 
             bool busy = false;
@@ -223,8 +242,11 @@ namespace Toybox.UI
         void Switch(MenuScreen next)
         {
             if (current != null) current.Close(false);
+            cameFrom = current;
             current = next;
-            if (next != null) next.Open();
+            if (next == null) return;
+            next.Open();
+            next.Screen.MoveBlocked = true;
         }
 
         // What the world does behind the menu that is up.
@@ -260,7 +282,7 @@ namespace Toybox.UI
                 pendingAge = 0f;
                 return;
             }
-            if (input != null && input.SubmitHeld && pendingAge < SubmitHoldLimit)
+            if ((SubmitHeld != null ? SubmitHeld() : input != null && input.SubmitHeld) && pendingAge < SubmitHoldLimit)
             {
                 pendingAge += dt;
                 return;
@@ -314,17 +336,14 @@ namespace Toybox.UI
 
         void OnLevelLoaded(LevelEvent e)
         {
-            Grabs = 0;
+            ownGrabs = 0;
             if (!built) return;
             Pause?.ResetHints();
             // The level behind the title changed (or only now arrived): the turntable stands in it.
             Stage.LevelLoaded(UiCapture.StateFor(context, capture) == FlowState.Title);
         }
 
-        void OnPropGrabbed(PropHoldEvent e)
-        {
-            if (!context.Autoplay) Grabs++;
-        }
+        void OnPropGrabbed(PropHoldEvent e) => ownGrabs++;
     }
 
     /// <summary>

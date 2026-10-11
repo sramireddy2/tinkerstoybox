@@ -1,5 +1,9 @@
 # Phase 2 — Physics & Momentum (Levels 5–9): level design spec
 
+> **Historical draft.** A first level specification, hand-calculated before anything ran in the engine. It is
+> superseded by [LEVELS.md](../LEVELS.md), whose "As built" notes and appendices D, E and F hold what the game
+> does. See [README.md](README.md).
+
 **Conventions.** Unity, left-handed, Y-up, yaw 0 looks down +Z, positive yaw turns right, positive pitch looks up, degrees. All positions are `(X, Y, Z)`; player positions are feet. API names follow `docs/ARCHITECTURE.md` and the engine source as of 2026-10-03 (`LevelContext`, `PropOptions`, `Mover`, `Trigger`, `Volume`, `Bot`).
 
 **Status.** Every number is hand-calculated; nothing has been run in the engine. Aim points and thresholds are starting values for the bot tests to tune. Each level ends with an honest physics-confidence note and, where confidence is not high, a simpler fallback.

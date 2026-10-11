@@ -1071,9 +1071,10 @@ namespace Toybox.Tests
             Assert.IsTrue(Game.LevelCompleted, "bot at " + Game.Player.Position + ", eraser " + level.Eraser.Scale + " at " + level.Eraser.Center);
         }
 
-        // In the air over the eraser, picked up from above and let go again: legal (a toy may be picked up
-        // in the air), and it does not break the level - whatever comes of it, the eraser can be picked up
-        // again and the level solved.
+        // In the air over the eraser one has just bounced off, a click at it from above: it takes nothing
+        // (since the final review the engine keeps the toy the feet were last on out of reach until they are
+        // on something else - UnderfootTests), and it does not break the level: the eraser can be picked up
+        // from the floor again and the level solved.
         static IEnumerator PickItUpInTheAir(Bot bot, Level06BouncingEraser level)
         {
             Vector3 spot = Level06BouncingEraser.GrabSpot;
@@ -1083,19 +1084,28 @@ namespace Toybox.Tests
             IEnumerator climb = level.Climb(bot);
             while (pad.BounceCount == 0 && climb.MoveNext()) yield return climb.Current;
             yield return bot.Until(() => bot.Player.Velocity.y < 6f, 3f);
-            yield return bot.Grab(level.Eraser);
+            yield return bot.LookAt(level.Eraser, 2f);
+            yield return bot.Click();
+            if (bot.Game.Grabber.Held != null) throw new BotException("the eraser that was bounced off was picked up in the air");
             yield return bot.Wait(0.2f);
             yield return bot.Click();
-            yield return bot.Until(() => bot.Player.Grounded, 6f);
+            if (bot.Game.Grabber.Held != null) throw new BotException("the eraser that was bounced off was picked up in the air");
+            // Nothing came of it. Off the eraser (it goes on bouncing whoever comes straight down on it), back
+            // toward the start, and down on the floor.
+            yield return bot.WalkTo(new Vector3(bot.Player.Position.x, 0f, 6f), 0.4f, 20f);
+            yield return bot.Until(() => bot.Player.Grounded && bot.Player.GroundProp != level.Eraser, 8f);
             yield return bot.Wait(1.5f);
         }
 
         [Test]
-        public void PickedUpInTheAirOverIt_NothingBreaks_AndTheLevelCanStillBeSolved()
+        public void AClickAtItFromTheAirOverIt_TakesNothing_AndTheLevelCanStillBeSolved()
         {
             Level06BouncingEraser level = Load();
             var bot = new Bot(Game);
+            int pickUps = 0;
+            Game.Events.PropGrabbed += e => pickUps++;
             BotRunner.Run(Game, PickItUpInTheAir(bot, level), 90f);
+            Assert.AreEqual(1, pickUps, "the eraser was picked up once, from the floor, and not again in the air over it");
             Assert.IsNull(Game.Grabber.Held);
             Assert.IsFalse(level.Eraser.Removed);
             Assert.Greater(Game.Player.Position.y, -0.1f);

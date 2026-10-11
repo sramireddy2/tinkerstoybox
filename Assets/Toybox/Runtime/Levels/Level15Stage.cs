@@ -331,8 +331,9 @@ namespace Toybox.Levels
                 path.Add(new Vector3(riser + bend - bend * Mathf.Cos(a), NozzleTip.y - bend + bend * Mathf.Sin(a), AxisZ));
             }
             path.Add(new Vector3(NozzleTip.x - 0.6f, NozzleTip.y, AxisZ));
-            Mesh straw = ToyGeo.Tube(path, ductRadius * 0.9f, ductRadius * 0.9f, 14, Vector3.forward);
-            ctx.OnDispose(() => MeshKit.Release(straw));
+            // (The same straw in every build: shared, so the set it is merged into is kept over a restart.)
+            Mesh straw = MeshKit.Cached(MeshKit.Key("Level15/Straw", ControlMaxX, riser, NozzleTip.x, NozzleTip.y, AxisZ, ductRadius, bend),
+                () => ToyGeo.Tube(path, ductRadius * 0.9f, ductRadius * 0.9f, 14, Vector3.forward));
             stage.Shape(trim, straw, Vector3.zero, Quaternion.identity, 0.72f);
             for (int i = 0; i < 5; i++)
             {
@@ -647,7 +648,7 @@ namespace Toybox.Levels
             Pool(glows, new Vector3(SpawnPoint.x, GalleryTop, 4.8f), Vector3.up, 4.9f);
             Pool(glows, PedalPoint, Vector3.up, 1.9f);
 
-            Mesh merged = MeshKit.Merge("Level15 Glows", glows);
+            Mesh merged = SetMeshes.Take(ctx, "Level15 Glows", glows);
             var glow = new GameObject("Glows");
             glow.AddComponent<MeshFilter>().sharedMesh = merged;
             MeshRenderer renderer = glow.AddComponent<MeshRenderer>();
@@ -656,7 +657,6 @@ namespace Toybox.Levels
             renderer.sharedMaterial = Materials.Flat(new FlatRecipe { Name = "Level15 Glow", Color = pool, Shape = FlatShape.SoftDisc, Soft = 1f, Blend = FlatBlend.Additive });
             renderer.shadowCastingMode = ShadowCastingMode.Off;
             renderer.receiveShadows = false;
-            ctx.OnDispose(() => MeshKit.Release(merged));
             ctx.AddStatic(glow, Vector3.zero);
         }
 

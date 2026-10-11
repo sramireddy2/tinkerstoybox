@@ -1848,6 +1848,9 @@ namespace Toybox.Tests
             {
                 foreach (TierSpec tier in TierSpec.All)
                 {
+                    // As in the game, the tier is in force before the level is built: the toys' materials
+                    // are chosen while it builds (a glass toy's back shell is a draw of its own).
+                    Materials.Tier = tier.Tier;
                     Load();
                     Presentation presentation = Presentation.Create(Game, new PresentationOptions { Quality = tier.Tier });
                     try

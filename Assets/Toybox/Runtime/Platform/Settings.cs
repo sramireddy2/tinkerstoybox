@@ -25,6 +25,7 @@ namespace Toybox.Platform
         SfxVolume,
         ReduceMotion,
         HighVisibility,
+        InvertLook,
     }
 
     /// <summary>
@@ -49,7 +50,7 @@ namespace Toybox.Platform
         static IPrefStore custom, loadedFrom;
         static QualitySetting quality;
         static float lensBlur, mouseSensitivity, fieldOfView, masterVolume, musicVolume, sfxVolume;
-        static bool reduceMotion, highVisibility;
+        static bool reduceMotion, highVisibility, invertLook;
 
         /// <summary>Raised after a setting has changed (not when it is set to the value it already has).</summary>
         public static event Action<Setting> Changed;
@@ -140,6 +141,13 @@ namespace Toybox.Platform
             set => Set(ref highVisibility, value, "highVisibility", Setting.HighVisibility);
         }
 
+        /// <summary>Mouse up looks down, as in a flight stick (off by default).</summary>
+        public static bool InvertLook
+        {
+            get { Load(); return invertLook; }
+            set => Set(ref invertLook, value, "invertLook", Setting.InvertLook);
+        }
+
         /// <summary>Writes the store through (the browser persists PlayerPrefs only on request).</summary>
         public static void Save() => Store.Save();
 
@@ -155,6 +163,7 @@ namespace Toybox.Platform
             SfxVolume = DefaultSfxVolume;
             ReduceMotion = false;
             HighVisibility = false;
+            InvertLook = false;
         }
 
         /// <summary>
@@ -167,7 +176,7 @@ namespace Toybox.Platform
             QualitySetting oldQuality = quality;
             float oldBlur = lensBlur, oldSensitivity = mouseSensitivity, oldFov = fieldOfView;
             float oldMaster = masterVolume, oldMusic = musicVolume, oldSfx = sfxVolume;
-            bool oldMotion = reduceMotion, oldVisibility = highVisibility;
+            bool oldMotion = reduceMotion, oldVisibility = highVisibility, oldInvert = invertLook;
 
             custom = store;
             loadedFrom = null;
@@ -182,6 +191,7 @@ namespace Toybox.Platform
             if (sfxVolume != oldSfx) Raise(Setting.SfxVolume);
             if (reduceMotion != oldMotion) Raise(Setting.ReduceMotion);
             if (highVisibility != oldVisibility) Raise(Setting.HighVisibility);
+            if (invertLook != oldInvert) Raise(Setting.InvertLook);
         }
 
         // Reads everything once per store. The default store differs between Play Mode and the editor, so
@@ -201,6 +211,7 @@ namespace Toybox.Platform
             sfxVolume = Mathf.Clamp01(Number(store, "sfxVolume", DefaultSfxVolume));
             reduceMotion = store.GetInt(Prefix + "reduceMotion", 0) != 0;
             highVisibility = store.GetInt(Prefix + "highVisibility", 0) != 0;
+            invertLook = store.GetInt(Prefix + "invertLook", 0) != 0;
         }
 
         static float Number(IPrefStore store, string name, float fallback)

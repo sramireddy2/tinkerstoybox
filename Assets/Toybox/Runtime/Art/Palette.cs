@@ -153,12 +153,21 @@ namespace Toybox.Art
         public static readonly Signal Amber = new Signal("Amber", Hex("#FFB627"), 2.2f, 1.2f, 1f);
         /// <summary>Satisfied: steady.</summary>
         public static readonly Signal Go = new Signal("Go", Hex("#2BE8A6"), 2.6f);
-        /// <summary>Lasers, kill surfaces: steady, and striped with Ink.</summary>
+        /// <summary>Kill surfaces: steady, and striped with Ink. (Lasers were Hazard too until the final review: see <see cref="Laser"/>.)</summary>
         public static readonly Signal Hazard = new Signal("Hazard", Hex("#FF2BD6"), 3.0f, striped: true);
+        /// <summary>
+        /// The laser pointers of Level 11 - "red laser pointers act as security beams" (the owner's brief,
+        /// which wins over the art bible's magenta as it did for the silver thimble): their beams, the dots
+        /// they leave and their lenses. A pure red, steady; no candy colour (Cherry leans to pink) and never
+        /// on anything that can be picked up. The beam's hot middle is <see cref="LaserCore"/>.
+        /// </summary>
+        public static readonly Signal Laser = new Signal("Laser", Hex("#FF1414"), 3.0f);
+        /// <summary>The near-white heart of a laser beam and of its dot, as a laser pointer has one (sRGB).</summary>
+        public static readonly Color LaserCore = Hex("#FFF0E4");
         /// <summary>The exit portal, drawn as the four-pane mark.</summary>
         public static readonly Signal Exit = new Signal("Exit", Hex("#FFFFFF"), 3.0f);
 
-        public static readonly Signal[] Signals = { Amber, Go, Hazard, Exit };
+        public static readonly Signal[] Signals = { Amber, Go, Hazard, Exit, Laser };
 
         /// <summary>Hazard stripes: 45 degrees, this pitch in units, half Ink.</summary>
         public const float HazardStripePitch = 0.6f;

@@ -244,7 +244,8 @@ namespace Toybox.Tests
         // ---- The bot plays the batch through ---------------------------------------------------------------
 
         /// <summary>Game seconds from the load to LevelCompleted with the level's own solver (measured; half a second either way is allowed).</summary>
-        static readonly float[] SolveSeconds = { 12.63f, 9.28f, 3.77f, 14.18f };
+        // (Level 4: 14.18 until the final review moved its start from the back of the balcony to the pedestal.)
+        static readonly float[] SolveSeconds = { 12.63f, 9.28f, 3.77f, 11.93f };
 
         // One Game, the four levels one after the other, as the runner loads them: nothing a level leaves
         // behind (ignored collisions, cached meshes, physics materials, subscriptions) may reach the next.

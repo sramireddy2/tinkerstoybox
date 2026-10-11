@@ -175,12 +175,188 @@ namespace Toybox.Tests
             Assert.AreEqual(QualityTier.Low, governor.Tier);
             Assert.AreEqual(1f, governor.Scale);
 
-            // Low goes down to 0.6 and then has nothing left to give.
-            Assert.AreEqual(4, FeedSeconds(governor, Slow, 30f));
+            // Low goes down to 0.6 and then has nothing left to give. (A picture that is cheaper the
+            // lower it is set - but never cheap enough. Frames that stay the same all the way down are
+            // another story: ADisplayLimitedSession below.)
+            int changes = 0;
+            for (float time = 0f; time < 30f;)
+            {
+                float dt = Slow * Mathf.Lerp(0.84f, 1f, Mathf.InverseLerp(0.6f, 1f, governor.Scale));
+                time += dt;
+                if (governor.Frame(dt)) changes++;
+            }
+            Assert.AreEqual(4, changes);
             Assert.AreEqual(QualityTier.Low, governor.Tier);
             Assert.AreEqual(0.6f, governor.Scale, 1e-4f);
-            Assert.AreEqual(0, FeedSeconds(governor, Slow, 30f));
+            Assert.AreEqual(0, FeedSeconds(governor, Slow * 0.84f, 30f), "21 ms where it was 25: it helped, if not enough, and it stays down");
+            Assert.AreEqual(QualityTier.Low, governor.Tier);
+            Assert.AreEqual(0.6f, governor.Scale, 1e-4f);
             Assert.AreEqual(7, governor.StepsDown);
+            Assert.AreEqual(0, governor.GaveBack);
+            Assert.AreEqual(0f, governor.Pace);
+            Assert.IsFalse(governor.Locked);
+            // ... also when the picture gets heavier again later: what helped once is not given back.
+            Assert.AreEqual(0, FeedSeconds(governor, Slow * 1.5f, 30f));
+            Assert.AreEqual(0.6f, governor.Scale, 1e-4f);
+            Assert.AreEqual(0, governor.GaveBack);
+        }
+
+        // A made-up session: frame times from a function of the governor's state, the time and the frame's number.
+        static int Run(QualityGovernor governor, float seconds, Func<QualityGovernor, float, int, float> frameTime, List<string> trace = null)
+        {
+            float time = 0f;
+            int changes = 0;
+            for (int frame = 0; time < seconds; frame++)
+            {
+                float dt = frameTime(governor, time, frame);
+                time += dt;
+                if (!governor.Frame(dt)) continue;
+                changes++;
+                trace?.Add(time.ToString("0.0") + " s: " + governor.Tier + " x" + governor.Scale.ToString("0.0"));
+            }
+            return changes;
+        }
+
+        // +-0.5 ms, the same every run: what a display's own interval looks like through a millisecond timer.
+        static float Jitter(int frame) => (((frame * 1103515245 + 12345) >> 8) & 1023) / 1023f - 0.5f;
+
+        // The governor read a slow display as a slow GPU. Under 50 frames a second - a 50 Hz or 48 Hz display,
+        // a battery saver at 30, a browser that paces animation below 60, with every frame on time - an Auto
+        // session fell to Low at 60% scale within half a minute (on a 1080p screen 922 x 518 pixels, upscaled)
+        // and stayed there for the session, having bought nothing: resolution was never what set the pace.
+        [Test]
+        public void ADisplayLimitedSession_IsGivenBackWhatTheDescentTook_AndThenLeftAlone()
+        {
+            var paces = new (string name, Func<QualityGovernor, float, int, float> frame, float pace)[]
+            {
+                ("50 Hz with a millisecond of jitter", (g, t, f) => 0.020f + 0.001f * Jitter(f), 0.020f),
+                ("48 Hz", (g, t, f) => 1f / 48f, 1f / 48f),
+                ("40 Hz", (g, t, f) => 1f / 40f, 1f / 40f),
+                ("30 Hz (a throttled browser)", (g, t, f) => 1f / 30f, 1f / 30f),
+                ("60 Hz with one frame dropped in every ten", (g, t, f) => f % 10 == 0 ? 1f / 30f : 1f / 60f, 0.0183f),
+            };
+            foreach (var pace in paces)
+                foreach (QualityTier start in new[] { QualityTier.Medium, QualityTier.Low })
+                {
+                    string what = pace.name + ", starting on " + start;
+                    var governor = new QualityGovernor(start);
+                    governor.LevelLoaded();
+                    var trace = new List<string>();
+                    // It goes down as it always did - nothing tells this from a weak GPU yet - and then gives it all back.
+                    int changes = Run(governor, 60f, pace.frame, trace);
+                    string steps = string.Join("; ", trace);
+                    Assert.AreEqual(start, governor.Tier, what + ": back on the tier it started on (" + steps + ")");
+                    Assert.AreEqual(1f, governor.Scale, what + ": at full scale (" + steps + ")");
+                    Assert.IsTrue(governor.Locked, what + ": nothing is raised from here");
+                    Assert.AreEqual(1, governor.GaveBack, what);
+                    Assert.AreEqual(start == QualityTier.Medium ? 7 : 4, governor.StepsDown, what + ": the whole ladder was tried first");
+                    Assert.AreEqual(governor.StepsDown + 1, changes, what + ": " + steps);
+                    Assert.AreEqual(pace.pace, governor.Pace, 0.0008f, what + ": the session's own pace");
+                    // No further change, however long it goes on.
+                    Assert.AreEqual(0, Run(governor, 120f, pace.frame), what + ": and there it stays");
+                    Assert.AreEqual(start, governor.Tier, what);
+                    Assert.AreEqual(1f, governor.Scale, what);
+                    Assert.AreEqual(1, governor.GaveBack, what);
+                }
+        }
+
+        // What telling the two apart must not cost: a machine that is really too weak still goes down and stays down.
+        [Test]
+        public void AWeakMachine_StillGoesDown_AndStaysDown()
+        {
+            // 45 frames a second on Medium at any scale, 60 on Low: Low, after three steps.
+            var governor = new QualityGovernor(QualityTier.Medium);
+            governor.LevelLoaded();
+            Assert.AreEqual(3, Run(governor, 120f, (g, t, f) => g.Tier == QualityTier.Low ? 1f / 60f : 1f / 45f));
+            Assert.AreEqual(QualityTier.Low, governor.Tier);
+            Assert.AreEqual(1f, governor.Scale);
+            Assert.AreEqual(3, governor.StepsDown);
+            Assert.AreEqual(0, governor.GaveBack);
+            Assert.IsFalse(governor.Locked);
+
+            // 60 only at the very bottom: it gets there, tries its one step up, takes it back, and stays.
+            governor = new QualityGovernor(QualityTier.Medium);
+            governor.LevelLoaded();
+            Func<QualityGovernor, float, int, float> bottom = (g, t, f) => g.Tier == QualityTier.Low && g.Scale < 0.65f ? 1f / 60f : 1f / 40f;
+            Run(governor, 180f, bottom);
+            Assert.AreEqual(QualityTier.Low, governor.Tier);
+            Assert.AreEqual(0.6f, governor.Scale, 1e-4f);
+            Assert.AreEqual(0, governor.GaveBack, "the bottom is where it runs: nothing is given back");
+            Assert.AreEqual(0, Run(governor, 120f, bottom));
+
+            // From 15 frames a second to 30: still slow at the bottom, but twice as fast - it stays down.
+            governor = new QualityGovernor(QualityTier.Medium);
+            governor.LevelLoaded();
+            Func<QualityGovernor, float, int, float> heavy = (g, t, f) =>
+                g.Tier == QualityTier.Low ? Mathf.Lerp(1f / 30f, 1f / 22f, Mathf.InverseLerp(0.6f, 1f, g.Scale)) : Mathf.Lerp(1f / 20f, 1f / 15f, Mathf.InverseLerp(0.8f, 1f, g.Scale));
+            Assert.AreEqual(7, Run(governor, 120f, heavy));
+            Assert.AreEqual(QualityTier.Low, governor.Tier);
+            Assert.AreEqual(0.6f, governor.Scale, 1e-4f);
+            Assert.AreEqual(0, governor.GaveBack);
+            Assert.AreEqual(0, Run(governor, 120f, heavy));
+
+            // A GPU behind a 60 Hz display: 24 ms a frame at full scale shows as 33 ms, and so does 19.4 ms
+            // at 90% - one step buys nothing that can be seen, the second does. It must not give up after one.
+            governor = new QualityGovernor(QualityTier.Medium);
+            governor.LevelLoaded();
+            Func<QualityGovernor, float, int, float> quantised = (g, t, f) => Mathf.Ceil(0.024f * g.Scale * g.Scale / (1f / 60f) - 1e-3f) * (1f / 60f);
+            Assert.AreEqual(2, Run(governor, 20f, quantised));
+            Assert.AreEqual(QualityTier.Medium, governor.Tier);
+            Assert.AreEqual(0.8f, governor.Scale, 1e-4f, "Medium at 80% takes 15.4 ms: 60 again");
+            Assert.AreEqual(0, governor.GaveBack);
+
+            // A last step from Low at 70% is no test of anything: it is not given back to the top.
+            governor = new QualityGovernor(QualityTier.Low);
+            governor.LevelLoaded();
+            float load = 1f;
+            Func<QualityGovernor, float, int, float> varying = (g, t, f) => (g.Scale < 0.65f ? 1f / 60f : 1f / 45f) * load;
+            Run(governor, 25f, varying);
+            Assert.AreEqual(0.6f, governor.Scale, 1e-4f);
+            load = 0.5f;
+            Run(governor, 40f, varying);
+            Assert.AreEqual(0.7f, governor.Scale, 1e-4f, "test setup: the one step up, in a light scene");
+            load = 1.6f;
+            Run(governor, 60f, varying);
+            Assert.AreEqual(QualityTier.Low, governor.Tier);
+            Assert.AreEqual(0.6f, governor.Scale, 1e-4f, "down again, and no further");
+            Assert.AreEqual(0, governor.GaveBack);
+        }
+
+        // Given back is not given up: with the session's own pace known, a level that is clearly slower than
+        // that pace is still answered - and if that buys nothing either, its pace is the new one.
+        [Test]
+        public void OnceThePaceIsKnown_OnlyAWindowClearlySlowerThanItIsAStepDown()
+        {
+            var governor = new QualityGovernor(QualityTier.Medium);
+            Func<QualityGovernor, float, int, float> fifty = (g, t, f) => 0.020f + 0.001f * Jitter(f);
+            Run(governor, 60f, fifty);
+            Assert.AreEqual(1, governor.GaveBack);
+            Assert.AreEqual(0.020f, governor.Pace, 0.0006f);
+
+            // Frames now and then that are late against the pace change nothing by themselves...
+            Assert.AreEqual(0, Run(governor, 60f, (g, t, f) => f % 8 == 0 ? 0.040f : 0.020f));
+            // ... a heavier level, 33 ms a frame until the picture is lowered, does: a step for every window of it.
+            int steps = governor.StepsDown;
+            Func<QualityGovernor, float, int, float> heavier = (g, t, f) => g.Tier == QualityTier.Medium && g.Scale > 0.85f ? 1f / 30f : 0.020f;
+            Assert.AreEqual(2, Run(governor, 60f, heavier));
+            Assert.AreEqual(QualityTier.Medium, governor.Tier);
+            Assert.AreEqual(0.8f, governor.Scale, 1e-4f);
+            Assert.AreEqual(steps + 2, governor.StepsDown);
+            Assert.AreEqual(1, governor.GaveBack);
+            Assert.IsTrue(governor.Locked, "nothing is raised again");
+            Assert.AreEqual(0, Run(governor, 120f, heavier));
+
+            // The display itself slows down (a laptop unplugged: 50 Hz to 30): down the ladder once more,
+            // nothing gained, given back, and 30 Hz is the pace from here on.
+            var second = new QualityGovernor(QualityTier.Medium);
+            Run(second, 60f, fifty);
+            Assert.AreEqual(1, second.GaveBack);
+            Run(second, 200f, (g, t, f) => 1f / 30f);
+            Assert.AreEqual(2, second.GaveBack);
+            Assert.AreEqual(QualityTier.Medium, second.Tier);
+            Assert.AreEqual(1f, second.Scale);
+            Assert.AreEqual(1f / 30f, second.Pace, 0.0006f);
+            Assert.AreEqual(0, Run(second, 120f, (g, t, f) => 1f / 30f));
         }
 
         [Test]
@@ -1162,7 +1338,7 @@ namespace Toybox.Tests
             UnityEngine.TestTools.LogAssert.ignoreFailingMessages = true;
             try
             {
-                runner.Begin(LaunchOptions.FromUrl("?plain=1"), new RunnerOptions
+                runner.Begin(LaunchOptions.FromUrl("?plain=1&debug=1"), new RunnerOptions
                 {
                     Devices = devices, Levels = levels, Present = true, SkipTitle = true, Store = new MemoryStore(),
                     Presenters = PipelineSetup.PlainLitPresenters(),

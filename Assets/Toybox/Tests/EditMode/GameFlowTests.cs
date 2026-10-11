@@ -487,6 +487,92 @@ namespace Toybox.Tests
             Assert.AreEqual(0, flow.ContinueLevel);
         }
 
+        // The level-complete card is the natural place to stop for the day. The bookmark used to move only
+        // with "Next" (or the card's countdown): whoever closed the tab on the card came back to the level
+        // they had just finished, and nothing on the title said that it was done.
+        [Test]
+        public void StoppingAtTheCard_TheNextSessionContinuesWithTheLevelAfterTheOneJustFinished()
+        {
+            Create(Campaign());
+            flow.AutoAdvance = false;
+            flow.StartLevel(1);
+            for (int i = 0; i < 60; i++) game.Tick();
+            game.CompleteLevel();
+            Assert.AreEqual(FlowState.LevelComplete, flow.State);
+            Assert.AreEqual(1, flow.LevelId, "the card is still the finished level's");
+            Assert.AreEqual(2, flow.Progress.LastPlayed, "but the bookmark is on the next one already");
+            // The tab is closed with the card up.
+            flow.Dispose();
+            game.Dispose();
+
+            loads = 0;
+            Create(Campaign());
+            Assert.AreEqual(2, flow.ContinueLevel);
+            Assert.IsTrue(flow.ShowTitle());
+            Assert.AreEqual(2, Number, "the title opens over the next level");
+            Assert.IsTrue(flow.Progress.IsCompleted(1));
+            Assert.IsTrue(flow.Progress.IsUnlocked(2, flow.Levels));
+            Assert.IsTrue(flow.StartLevel(flow.LevelId));
+            Assert.AreEqual(2, Number);
+
+            // In the session itself nothing changes: Again on the card plays the finished level once more
+            // (and leaves the bookmark where it is), Next goes on.
+            for (int i = 0; i < 30; i++) game.Tick();
+            game.CompleteLevel();
+            Assert.AreEqual(3, flow.Progress.LastPlayed);
+            Assert.IsTrue(flow.Restart());
+            Assert.AreEqual(2, Number);
+            Assert.AreEqual(3, flow.Progress.LastPlayed);
+            game.CompleteLevel();
+            Assert.IsTrue(flow.Advance());
+            Assert.AreEqual(3, Number);
+            Assert.AreEqual(3, flow.Progress.LastPlayed);
+        }
+
+        // The last level's bookmark stays on it until Finish: the ending is what puts it back to the first
+        // (After() would wrap round to the first at once, and the session after would never see the ending).
+        [Test]
+        public void StoppingAtTheLastLevelsCard_TheBookmarkStaysOnTheLastLevel()
+        {
+            Create(Campaign());
+            flow.AutoAdvance = false;
+            flow.StartLevel(3);
+            for (int i = 0; i < 60; i++) game.Tick();
+            game.CompleteLevel();
+            Assert.IsTrue(flow.AtLastLevel);
+            Assert.AreEqual(3, flow.Progress.LastPlayed);
+            flow.Dispose();
+            game.Dispose();
+
+            Create(Campaign());
+            Assert.AreEqual(3, flow.ContinueLevel);
+            Assert.IsTrue(flow.ShowTitle());
+            Assert.AreEqual(3, Number);
+            Assert.AreEqual(0, flow.Progress.Endings);
+        }
+
+        // Neither a level outside the campaign nor a bot's run moves it.
+        [Test]
+        public void ACompletionOutsideTheCampaign_OrByABot_LeavesTheBookmarkAlone()
+        {
+            Create(Campaign());
+            flow.AutoAdvance = false;
+            flow.StartLevel(2);
+            Assert.AreEqual(2, flow.Progress.LastPlayed);
+            flow.StartLevel(0);
+            game.CompleteLevel();
+            Assert.AreEqual(2, flow.Progress.LastPlayed, "the sandbox");
+            flow.StartLevel(99);
+            game.CompleteLevel();
+            Assert.AreEqual(2, flow.Progress.LastPlayed, "the showroom");
+
+            flow.RecordProgress = false;
+            flow.StartLevel(1);
+            game.CompleteLevel();
+            Assert.AreEqual(2, flow.Progress.LastPlayed, "a bot");
+            Assert.IsFalse(flow.Progress.IsCompleted(1));
+        }
+
         [Test]
         public void TheCampaign_IsWhatPlayMovesThrough_OtherLevelsAreOnlyAskedFor()
         {
@@ -642,12 +728,16 @@ namespace Toybox.Tests
         // Stands in for the game's own HUD and menus. (Not marked [Presenter]: it is handed to the runner by hand.)
         sealed class MenuProbe : IPresenter
         {
+            /// <summary>What a button of the menu does in the frame it is pressed.</summary>
+            public Action OnFrame;
+
             public void Attach(Game attached, PresentationContext context) { }
-            public void Frame(float dt, float alpha) { }
+            public void Frame(float dt, float alpha) => OnFrame?.Invoke();
             public void Dispose() { }
         }
 
-        GameRunner Begin(string url, bool withMenus = false, bool present = true)
+        // (The debug keys are on unless a test says otherwise: several tests step through levels with them.)
+        GameRunner Begin(string url, bool withMenus = false, bool present = true, bool? debugKeys = true)
         {
             host = new GameObject("Test Game Runner") { hideFlags = HideFlags.DontSave };
             runner = host.AddComponent<GameRunner>();
@@ -668,6 +758,7 @@ namespace Toybox.Tests
                 Present = present,
                 Store = store,
                 Presenters = presenters,
+                DebugKeys = debugKeys,
             });
             game = null;   // the runner owns it
             return runner;
@@ -843,6 +934,11 @@ namespace Toybox.Tests
             Frames(TestHelpers.Ticks(GameRunner.AdvanceDelay));
             Assert.AreEqual(1, runner.LevelId);
             Assert.AreEqual(FlowState.Playing, runner.Flow.State);
+            // Nobody touched anything through the countdown: the next level waits for its player
+            // (Runner_ALevelTheCardMovedOnToByItself_WaitsForItsPlayer), and goes at the first key.
+            Assert.AreEqual(ticks, g.TickCount);
+            devices.State.MoveZ = 1f;
+            Frames(5);
             Assert.Greater(g.TickCount, ticks, "the next level is being played");
         }
 
@@ -903,10 +999,10 @@ namespace Toybox.Tests
             Shutdown();
             Assert.GreaterOrEqual(store.Saves, 1);
 
-            // A new session finds it, and opens the title over the level played last.
+            // A new session finds it, and opens the title over the level after the one that was finished.
             Begin("", present: false);
             Assert.AreEqual(FlowState.Title, runner.Flow.State);
-            Assert.AreEqual(1, runner.LevelId);
+            Assert.AreEqual(2, runner.LevelId);
             Assert.IsTrue(runner.Flow.Progress.IsCompleted(1));
             Shutdown();
 
@@ -915,7 +1011,310 @@ namespace Toybox.Tests
             for (int i = 0; i < TestHelpers.Ticks(30f) && runner.LevelId == 0; i++) runner.Frame(Sim.Dt);
             Assert.AreEqual(1, runner.LevelId, "the bot solved level 0 and the runner moved on");
             Assert.IsFalse(runner.Flow.Progress.IsCompleted(0));
-            Assert.AreEqual(1, runner.Flow.Progress.LastPlayed, "nor does it move the bookmark");
+            Assert.AreEqual(2, runner.Flow.Progress.LastPlayed, "nor does it move the bookmark");
         }
+
+        // ------------------------------------------------------------------------------------------
+        // The debug keys, R, and the level that begins with nobody there (the final review)
+        // ------------------------------------------------------------------------------------------
+
+        // [ ] and P are for looking at levels. In the published game they did what a stray key does: ] on
+        // the title put the bookmark on a level that was never unlocked, [ went to the last level, P - the
+        // pause key of many games - threw the level away and handed the campaign to the bot.
+        [Test]
+        public void Runner_TheDebugKeysDoNothing_UnlessTheLaunchAsksForThem()
+        {
+            Assert.IsFalse(GameRunner.DebugKeysFor(LaunchOptions.Default), "the game as it is published");
+            Assert.IsFalse(GameRunner.DebugKeysFor(LaunchOptions.FromUrl("?level=3&plain=1")));
+            Assert.IsFalse(GameRunner.DebugKeysFor(LaunchOptions.FromUrl("?debug=0")));
+            Assert.IsTrue(GameRunner.DebugKeysFor(LaunchOptions.FromUrl("?debug=1")));
+            Assert.IsTrue(GameRunner.DebugKeysFor(LaunchOptions.FromUrl("?level=2&debug")), "a bare debug counts as on");
+            Assert.IsTrue(GameRunner.DebugKeysFor(LaunchOptions.FromUrl("?autoplay=1")), "P takes over from the bot");
+            Assert.IsTrue(LaunchOptions.FromUrl("?debug=true").Debug);
+            Assert.IsFalse(LaunchOptions.Default.Debug);
+
+            foreach (FlowState state in new[] { FlowState.Title, FlowState.Playing, FlowState.Paused, FlowState.LevelComplete })
+            {
+                store = new MemoryStore();
+                Begin("", present: false, debugKeys: null);
+                Assert.IsFalse(runner.DebugKeys);
+                Game g = runner.Game;
+                if (state != FlowState.Title) runner.Flow.StartLevel(0);
+                if (state == FlowState.Paused) runner.Flow.Pause();
+                if (state == FlowState.LevelComplete)
+                {
+                    runner.Flow.AutoAdvance = false;
+                    g.CompleteLevel();
+                }
+                Frames(3);
+                Assert.AreEqual(state, runner.Flow.State);
+                int bookmark = runner.Flow.Progress.LastPlayed, writes = store.Count, ticks = g.LevelTicks, restarts = 0, loaded = 0;
+                g.Events.LevelRestarted += e => restarts++;
+                g.Events.LevelLoaded += e => loaded++;
+                foreach (int key in new[] { 0, 1, 2, 2 })
+                {
+                    devices.State.NextLevelPressed = key == 0;
+                    devices.State.PreviousLevelPressed = key == 1;
+                    devices.State.AutoplayPressed = key == 2;
+                    runner.Frame(Sim.Dt);
+                    Assert.AreEqual(state, runner.Flow.State, state + ", key " + key);
+                    Assert.AreEqual(0, runner.LevelId, state + ", key " + key);
+                    Assert.IsFalse(runner.Autoplay, state + ", key " + key);
+                    Assert.AreSame(runner.Human, g.Input);
+                }
+                Assert.AreEqual(0, restarts + loaded, state + ": nothing was loaded or started over");
+                Assert.AreEqual(bookmark, runner.Flow.Progress.LastPlayed, state + ": the bookmark is where it was");
+                Assert.AreEqual(writes, store.Count, state + ": nothing was written");
+                if (state == FlowState.Playing) Assert.AreEqual(ticks + 4, g.LevelTicks, "the level goes on undisturbed");
+                Shutdown();
+            }
+
+            // Asked for, they are what they were.
+            store = new MemoryStore();
+            Begin("?debug=1", present: false, debugKeys: null);
+            Assert.IsTrue(runner.DebugKeys);
+            devices.State.NextLevelPressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.AreEqual(FlowState.Playing, runner.Flow.State);
+            Assert.AreEqual(1, runner.LevelId);
+            devices.State.PreviousLevelPressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.AreEqual(0, runner.LevelId);
+            devices.State.AutoplayPressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.IsTrue(runner.Autoplay);
+            Shutdown();
+
+            // And a launch that starts with the bot has the key that takes over from it.
+            Begin("?autoplay=1", present: false, debugKeys: null);
+            Assert.IsTrue(runner.DebugKeys);
+            Assert.IsTrue(runner.Autoplay);
+            devices.State.AutoplayPressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.IsFalse(runner.Autoplay);
+            Assert.AreSame(runner.Human, runner.Game.Input);
+        }
+
+        // P, a while of the bot, P again and a walk into the exit: that run was kept as the player's best
+        // (the review: "best 1.15, pick-ups 1, level 2 unlocked"). A level the bot has had its hands on is
+        // nobody's progress; the next one, played from its start, is the player's again.
+        [Test]
+        public void Runner_ALevelTheBotHasPlayedPartOf_IsNotThePlayersCompletion()
+        {
+            Begin("?level=1", present: false);
+            Game g = runner.Game;
+            Frames(10);
+            devices.State.AutoplayPressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.IsTrue(runner.Autoplay);
+            Assert.IsFalse(runner.Flow.RecordProgress);
+            Frames(40);
+            devices.State.AutoplayPressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.IsFalse(runner.Autoplay, "the player has taken over");
+            Assert.AreSame(runner.Human, g.Input);
+            Assert.IsFalse(runner.Flow.RecordProgress, "but the level is not theirs");
+            Frames(5);
+            int written = store.Count;
+            g.CompleteLevel();
+            Assert.AreEqual(FlowState.LevelComplete, runner.Flow.State);
+            Assert.IsFalse(runner.Flow.Progress.IsCompleted(1));
+            Assert.Less(runner.Flow.Progress.BestTime(1), 0f);
+            Assert.IsFalse(runner.Flow.LastCompletionWasBest);
+            Assert.AreEqual(written, store.Count, "nothing was written");
+
+            // Again on the card: the level from its start, by the player alone.
+            devices.State.RestartPressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.AreEqual(FlowState.Playing, runner.Flow.State);
+            Assert.IsTrue(runner.Flow.RecordProgress);
+            Frames(30);
+            g.CompleteLevel();
+            Assert.IsTrue(runner.Flow.Progress.IsCompleted(1));
+            Assert.AreEqual(0.5f, runner.Flow.Progress.BestTime(1), 0.02f);
+        }
+
+        // R sits between E (pick up) and F (flip), and it used to start the level over on the tick of the
+        // press: a slip threw away everything placed so far. While playing it is a hold of half a second
+        // now, and a touch says so.
+        [Test]
+        public void Runner_RStartsTheLevelOver_OnlyWhenItIsHeld()
+        {
+            Begin("?level=0", present: false);
+            Game g = runner.Game;
+            int restarts = 0;
+            var said = new List<string>();
+            g.Events.LevelRestarted += e => restarts++;
+            g.Events.Message += e => said.Add(e.Text);
+            Frames(30);
+
+            // A touch: a frame or two of R.
+            devices.State.RestartPressed = true;
+            devices.State.RestartHeld = true;
+            runner.Frame(Sim.Dt);
+            runner.Frame(Sim.Dt);
+            devices.State.RestartHeld = false;
+            Frames(60);
+            Assert.AreEqual(0, restarts, "a touch of R restarts nothing");
+            Assert.AreEqual(FlowState.Playing, runner.Flow.State);
+            Assert.Greater(g.LevelTicks, 80, "the level went on");
+            CollectionAssert.AreEqual(new[] { GameRunner.HoldRestartLine }, said, "and is told what R is");
+
+            // Three touches in a row are three touches, not a hold.
+            for (int i = 0; i < 3; i++)
+            {
+                devices.State.RestartPressed = true;
+                devices.State.RestartHeld = true;
+                Frames(12);
+                devices.State.RestartHeld = false;
+                Frames(3);
+            }
+            Assert.AreEqual(0, restarts);
+
+            // Held: nothing for 0.4 s, then one restart - and no second one, however long it stays down.
+            devices.State.RestartPressed = true;
+            devices.State.RestartHeld = true;
+            Frames(TestHelpers.Ticks(0.4f));
+            Assert.AreEqual(0, restarts, "not yet");
+            Assert.That(runner.Human.RestartHold, Is.InRange(0.7f, 0.9f), "the hold can be shown");
+            Frames(TestHelpers.Ticks(0.2f));
+            Assert.AreEqual(1, restarts, "held for " + HumanInput.RestartHoldSeconds + " s: the level starts over");
+            Assert.Less(g.LevelTicks, 10);
+            Assert.AreEqual(0f, runner.Human.RestartHold);
+            Frames(TestHelpers.Ticks(2f));
+            Assert.AreEqual(1, restarts, "one hold, one restart");
+            devices.State.RestartHeld = false;
+            Frames(2);
+
+            // A frame that took seconds (the tab was hidden) is not a held key.
+            devices.State.RestartPressed = true;
+            devices.State.RestartHeld = true;
+            runner.Frame(Sim.Dt);
+            runner.Frame(30f);
+            Assert.AreEqual(1, restarts);
+            devices.State.RestartHeld = false;
+            Frames(2);
+
+            // On the pause card R is a choice, not a slip: at once, as before. And the R that is still down
+            // from there is not the start of a hold in the level.
+            devices.State.EscapePressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.AreEqual(FlowState.Paused, runner.Flow.State);
+            devices.State.RestartPressed = true;
+            devices.State.RestartHeld = true;
+            runner.Frame(Sim.Dt);
+            Assert.AreEqual(FlowState.Playing, runner.Flow.State);
+            Assert.AreEqual(2, restarts);
+            Frames(TestHelpers.Ticks(1.5f));
+            Assert.AreEqual(2, restarts, "R held on from the pause card does not restart again");
+            devices.State.RestartHeld = false;
+            Frames(2);
+
+            // While the bot plays, R is not the player's to press.
+            runner.SetAutoplay(true);
+            int before = restarts;
+            devices.State.RestartPressed = true;
+            devices.State.RestartHeld = true;
+            Frames(TestHelpers.Ticks(1f));
+            Assert.AreEqual(before, restarts);
+        }
+
+        // The card that moves on by itself used to start the next level's clock with nobody there: thirty
+        // seconds at the kettle were thirty seconds of the level's first - and so best - time. Now a level
+        // that begins without a key, a click or a move of the mouse stands still until there is one.
+        [Test]
+        public void Runner_ALevelTheCardMovedOnToByItself_WaitsForItsPlayer()
+        {
+            Begin("?level=0", present: false);
+            Game g = runner.Game;
+            // The browser gives no pointer without a click.
+            devices.RefuseLock = true;
+            Frames(10);
+            g.CompleteLevel();
+            Assert.AreEqual(FlowState.LevelComplete, runner.Flow.State);
+            Frames(TestHelpers.Ticks(GameRunner.AdvanceDelay) + 2);
+            Assert.AreEqual(FlowState.Playing, runner.Flow.State, "the countdown ran out");
+            Assert.AreEqual(1, runner.LevelId);
+            Assert.IsTrue(runner.AwaitingPlayer);
+
+            // Thirty seconds of nobody.
+            Frames(TestHelpers.Ticks(30f));
+            Assert.AreEqual(0, g.LevelTicks, "the level's clock has not started");
+            Assert.AreEqual(0f, g.Time);
+            Assert.AreEqual(FlowState.Playing, runner.Flow.State);
+
+            // The mouse moves: here they are.
+            devices.State.Look = new Vector2(3f, 0f);
+            runner.Frame(Sim.Dt);
+            Assert.IsFalse(runner.AwaitingPlayer);
+            Frames(29);
+            Assert.AreEqual(30, g.LevelTicks);
+            g.CompleteLevel();
+            Assert.AreEqual(0.5f, runner.Flow.Progress.BestTime(1), 1e-3f, "half a second of play is what is kept");
+            Assert.AreEqual(0.5f, runner.Flow.LastCompletion.Time, 1e-3f);
+        }
+
+        [Test]
+        public void Runner_ALevelSomebodyMovedOnTo_OrTheBotPlays_StartsAtOnce()
+        {
+            // A key held through the countdown: somebody is there.
+            Begin("?level=0", present: false);
+            Game g = runner.Game;
+            Frames(10);
+            g.CompleteLevel();
+            devices.State.MoveZ = 1f;
+            Frames(TestHelpers.Ticks(GameRunner.AdvanceDelay) + 2);
+            Assert.AreEqual(1, runner.LevelId);
+            Assert.IsFalse(runner.AwaitingPlayer);
+            Assert.Greater(g.LevelTicks, 0);
+            Shutdown();
+
+            // Next on the card, by a click.
+            Begin("?level=0", withMenus: true);
+            g = runner.Game;
+            runner.Flow.AutoAdvance = false;
+            Frames(10);
+            g.CompleteLevel();
+            Frames(20);
+            Assert.AreEqual(FlowState.LevelComplete, runner.Flow.State);
+            // (The menu presses its Next pill in the frame the click arrives in.)
+            MenuProbe probe = runner.Presentation.Get<MenuProbe>();
+            probe.OnFrame = () => runner.Flow.Advance();
+            devices.State.ClickPressed = true;
+            runner.Frame(Sim.Dt);
+            probe.OnFrame = null;
+            Assert.AreEqual(FlowState.Playing, runner.Flow.State);
+            Assert.AreEqual(1, runner.LevelId);
+            Assert.IsFalse(runner.AwaitingPlayer, "a click is a sign of life");
+            Frames(5);
+            Assert.AreEqual(5, g.LevelTicks);
+            Shutdown();
+
+            // The bot needs nobody.
+            Begin("?level=0&autoplay=1", present: false);
+            for (int i = 0; i < TestHelpers.Ticks(40f) && runner.LevelId == 0; i++) runner.Frame(Sim.Dt);
+            Assert.AreEqual(1, runner.LevelId);
+            Assert.IsFalse(runner.AwaitingPlayer);
+            int ticks = runner.Game.LevelTicks;
+            Frames(10);
+            Assert.AreEqual(ticks + 10, runner.Game.LevelTicks);
+            Shutdown();
+
+            // And a level that is started over, or chosen, while another one waits does not wait.
+            Begin("?level=0", present: false);
+            g = runner.Game;
+            Frames(10);
+            g.CompleteLevel();
+            Frames(TestHelpers.Ticks(GameRunner.AdvanceDelay) + 2);
+            Assert.IsTrue(runner.AwaitingPlayer);
+            devices.State.EscapePressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.AreEqual(FlowState.Paused, runner.Flow.State);
+            Assert.IsFalse(runner.AwaitingPlayer);
+            runner.Flow.Resume();
+            Frames(5);
+            Assert.AreEqual(5, g.LevelTicks);
+        }
+
     }
 }

@@ -147,21 +147,75 @@ namespace Toybox.Tests
         [Test]
         public void EveryEdgeIsLatched_NotOnlyGrab()
         {
-            devices.State.RestartPressed = true;
             devices.State.RotatePitchPressed = true;
             devices.State.JumpPressed = true;   // tapped and released again before the poll: Jump itself is false
             human.Update(null);
             human.Update(null);                 // a second frame without a tick must not lose them
 
             InputFrame first = human.Sample();
-            Assert.IsTrue(first.RestartPressed);
             Assert.IsTrue(first.RotatePitch);
             Assert.IsTrue(first.Jump, "a tap between two ticks still has to make the player jump");
 
             InputFrame second = human.Sample();
-            Assert.IsFalse(second.RestartPressed);
             Assert.IsFalse(second.RotatePitch);
             Assert.IsFalse(second.Jump);
+        }
+
+        // R is not an edge: it sits between E and F, and what it does cannot be undone. The level starts
+        // over once R has been down for half a second, and that is handed to exactly one tick.
+        [Test]
+        public void RestartIsAHold_HandedToOneTickWhenItHasLastedHalfASecond()
+        {
+            // A tap: down for a frame, up again.
+            devices.State.RestartPressed = true;
+            devices.State.RestartHeld = true;
+            human.Update(null, 0.016f);
+            devices.State.RestartHeld = false;
+            human.Update(null, 0.016f);
+            Assert.IsFalse(human.Sample().RestartPressed, "a tap is not a restart");
+            Assert.AreEqual(0f, human.RestartHold);
+
+            // Held: the time counts from the frame after it went down.
+            devices.State.RestartPressed = true;
+            devices.State.RestartHeld = true;
+            human.Update(null, 5f);
+            Assert.AreEqual(0f, human.RestartHold, "the frame it went down in is not time held");
+            for (int i = 0; i < 4; i++) human.Update(null, 0.1f);
+            Assert.AreEqual(0.8f, human.RestartHold, 1e-3f);
+            Assert.IsFalse(human.Sample().RestartPressed, "0.4 s is not yet");
+            human.Update(null, 0.1f);
+            human.Update(null, 0.1f);       // a second frame without a tick must not lose it
+            Assert.IsTrue(human.Sample().RestartPressed, "0.5 s is");
+            Assert.IsFalse(human.Sample().RestartPressed, "once");
+            for (int i = 0; i < 30; i++) human.Update(null, 0.1f);
+            Assert.IsFalse(human.Sample().RestartPressed, "and not again while it stays down");
+            Assert.AreEqual(0f, human.RestartHold);
+
+            // Up and down again: a new hold. A frame that took seconds counts as a tenth of one.
+            devices.State.RestartHeld = false;
+            human.Update(null, 0.016f);
+            devices.State.RestartHeld = true;
+            human.Update(null, 0.016f);
+            human.Update(null, 30f);
+            Assert.IsFalse(human.Sample().RestartPressed, "a hitch is not a held key");
+            for (int i = 0; i < 4; i++) human.Update(null, 0.1f);
+            Assert.IsTrue(human.Sample().RestartPressed);
+
+            // Whatever is forgotten (a menu closes, focus comes back) forgets the hold too, and an R that
+            // is still down then has to come up before it counts.
+            devices.State.RestartHeld = false;
+            human.Update(null, 0.016f);
+            devices.State.RestartHeld = true;
+            human.Update(null, 0.016f);
+            for (int i = 0; i < 3; i++) human.Update(null, 0.1f);
+            human.Clear();
+            for (int i = 0; i < 10; i++) human.Update(null, 0.1f);
+            Assert.IsFalse(human.Sample().RestartPressed);
+            devices.State.RestartHeld = false;
+            human.Update(null, 0.016f);
+            devices.State.RestartHeld = true;
+            for (int i = 0; i < 7; i++) human.Update(null, 0.1f);
+            Assert.IsTrue(human.Sample().RestartPressed);
         }
 
         [Test]
@@ -527,6 +581,8 @@ namespace Toybox.Tests
                 // These tests are about playing; the title has tests of its own (GameFlowTests).
                 SkipTitle = true,
                 Store = new MemoryStore(),
+                // [ ] and P are tried here; a launch has to ask for them (GameFlowTests).
+                DebugKeys = true,
             });
             loads = 0;
             runner.Game.Events.LevelLoaded += e => loads++;

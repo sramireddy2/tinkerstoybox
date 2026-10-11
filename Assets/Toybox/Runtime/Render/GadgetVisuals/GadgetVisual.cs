@@ -225,6 +225,11 @@ namespace Toybox.Render
     /// <summary>
     /// A mesh that is written again whenever what it shows changes: quads with a colour per corner, in
     /// world space. The lists are kept, so writing it allocates nothing once it has reached its size.
+    ///
+    /// A mesh whose quads stay the same and only move (a lattice of beams, a set of ribbons) is laid out
+    /// once - <see cref="Quad"/> for each, <see cref="Apply"/> - and from then on has its corners and
+    /// colours rewritten in place (<see cref="Move"/>, <see cref="Tint"/>) and only those uploaded
+    /// (<see cref="ApplyMoved"/>): the triangles and the UVs are not written again.
     /// </summary>
     public sealed class FxMesh
     {
@@ -318,9 +323,34 @@ namespace Toybox.Render
             }
         }
 
+        /// <summary>Moves the corners of a quad that is already there (the n-th added since the last Clear); its colours, UVs and triangles stay.</summary>
+        public void Move(int quad, Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+        {
+            int first = quad * 4;
+            vertices[first] = a;
+            vertices[first + 1] = b;
+            vertices[first + 2] = c;
+            vertices[first + 3] = d;
+        }
+
+        /// <summary>Recolours the corners of a quad that is already there.</summary>
+        public void Tint(int quad, Color ca, Color cb, Color cc, Color cd)
+        {
+            int first = quad * 4;
+            colors[first] = ca;
+            colors[first + 1] = cb;
+            colors[first + 2] = cc;
+            colors[first + 3] = cd;
+        }
+
+        /// <summary>How often the whole mesh was written (triangles and UVs included), and how often only what moved.</summary>
+        public int Applied { get; private set; }
+        public int Moved { get; private set; }
+
         /// <summary>Writes the lists into the mesh. An empty mesh draws nothing.</summary>
         public void Apply()
         {
+            Applied++;
             Mesh.Clear();
             if (vertices.Count == 0) return;
             Mesh.indexFormat = vertices.Count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16;
@@ -328,6 +358,23 @@ namespace Toybox.Render
             Mesh.SetUVs(0, uvs);
             Mesh.SetColors(colors);
             Mesh.SetTriangles(triangles, 0, true);
+        }
+
+        /// <summary>
+        /// Writes the corners (and, if asked, the colours) of a mesh whose quads are those of the last
+        /// <see cref="Apply"/>, moved or recoloured since. If the quads are not the same number it is an Apply.
+        /// </summary>
+        public void ApplyMoved(bool colours = false)
+        {
+            if (vertices.Count == 0 || Mesh.vertexCount != vertices.Count)
+            {
+                Apply();
+                return;
+            }
+            Moved++;
+            Mesh.SetVertices(vertices);
+            if (colours) Mesh.SetColors(colors);
+            Mesh.RecalculateBounds();
         }
     }
 

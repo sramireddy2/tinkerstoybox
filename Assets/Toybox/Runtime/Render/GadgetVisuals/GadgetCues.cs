@@ -10,7 +10,8 @@ namespace Toybox.Render
     /// <summary>
     /// The small things gadgets do that would otherwise happen without a trace. A ring where it happened,
     /// in the colour of what it means - Paper for "something moved", the Go signal for "accepted", the
-    /// wrong-size red for "refused", the Hazard signal where a hazard caught the player:
+    /// wrong-size red for "refused", the Hazard signal where a hazard caught the player (laser red where it
+    /// was a laser):
     ///
     /// - a leash or a return port puts a toy back: a ring where it vanished and one where it reappears;
     /// - a socket seats or refuses a toy, a plate goes down or finds a toy too light, a carrier grips;
@@ -66,7 +67,7 @@ namespace Toybox.Render
             events.PortalBlocked += OnRefused;
             events.SailStalled += OnRefused;
             events.MachineFizzled += OnRefused;
-            events.LaserZapped += OnCaught;
+            events.LaserZapped += OnZapped;
             events.HazardCaught += OnCaught;
             events.WaterSwept += OnCaught;
         }
@@ -87,7 +88,7 @@ namespace Toybox.Render
             events.PortalBlocked -= OnRefused;
             events.SailStalled -= OnRefused;
             events.MachineFizzled -= OnRefused;
-            events.LaserZapped -= OnCaught;
+            events.LaserZapped -= OnZapped;
             events.HazardCaught -= OnCaught;
             events.WaterSwept -= OnCaught;
         }
@@ -168,10 +169,14 @@ namespace Toybox.Render
             pool.Ring(e.Position, Vector3.zero, size * 0.3f, size * 1.7f, wrong, Seconds);
         }
 
-        void OnCaught(GadgetEvent e)
+        void OnCaught(GadgetEvent e) => Caught(e, Palette.Hazard.Emission);
+
+        // The beams are red: so is the ring where one of them caught the player.
+        void OnZapped(GadgetEvent e) => Caught(e, Palette.Laser.Emission);
+
+        void Caught(GadgetEvent e, Color hazard)
         {
             if (pool == null) return;
-            Color hazard = Palette.Hazard.Emission;
             hazard.a = 0.9f;
             float size = Game.Player.Scale;
             pool.Ring(e.Position + Vector3.up * (0.9f * size), Vector3.zero, 0.3f * size, 1.8f * size, hazard, Seconds);

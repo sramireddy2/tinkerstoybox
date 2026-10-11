@@ -453,7 +453,8 @@ namespace Toybox.Tests
             host = new GameObject("Test Game Runner") { hideFlags = HideFlags.DontSave };
             runner = host.AddComponent<GameRunner>();
             var devices = new FakeDevices();
-            runner.Begin(LaunchOptions.FromUrl("?level=0"), new RunnerOptions
+            // (debug=1: P, the bot's key, is pressed below - it is live only where the launch asks for it.)
+            runner.Begin(LaunchOptions.FromUrl("?level=0&debug=1"), new RunnerOptions
             {
                 Devices = devices,
                 Levels = new LevelList(new[] { 0, 1 }, id => new WalkLevel()),

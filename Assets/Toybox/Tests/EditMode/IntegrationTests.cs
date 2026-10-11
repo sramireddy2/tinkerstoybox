@@ -678,6 +678,10 @@ namespace Toybox.Tests
             {
                 Assert.IsNotNull(menu.Backdrop.Target);
                 Assert.AreEqual(UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32, menu.Backdrop.Target.graphicsFormat);
+                // ... and with a depth buffer, although the pipeline resolves into it from targets of its own:
+                // URP's render graph does not render a camera whose output texture has none (it says so in
+                // the log, and the card would show nothing).
+                Assert.AreNotEqual(UnityEngine.Experimental.Rendering.GraphicsFormat.None, menu.Backdrop.Target.depthStencilFormat);
             }
 
             // The card's buttons click; moving the focus ticks.
@@ -856,6 +860,34 @@ namespace Toybox.Tests
                 Assert.IsFalse(ShaderUtil.ShaderHasError(material.shader), pair.Value + " has compile errors");
             }
             Assert.AreEqual("Universal Render Pipeline/Lit", Asset<Material>("Assets/Toybox/Resources/Materials/PlainLit.mat").shader.name, "the ?plain=1 look");
+            // ... and its emission. URP Lit's _EMISSION is a shader_feature: the variant is only in a player
+            // if a material asset of the build has the keyword on. Without this asset every lamp of the plain
+            // look was black in the browser (the keyword was only ever enabled at runtime, on a clone).
+            Material glowing = Asset<Material>(CoreSetup.PlainLitEmissivePath);
+            Assert.AreEqual("Universal Render Pipeline/Lit", glowing.shader.name);
+            Assert.IsTrue(glowing.IsKeywordEnabled(Materials.EmissionKeyword), "PlainLitEmissive.mat keeps the emission variant in the build");
+            CollectionAssert.Contains(glowing.shaderKeywords, Materials.EmissionKeyword, "serialised with the asset");
+            Assert.AreSame(glowing, Resources.Load<Material>(Materials.PlainEmissiveTemplatePath), "what the plain look clones for whatever glows");
+            Assert.IsFalse(Asset<Material>("Assets/Toybox/Resources/Materials/PlainLit.mat").IsKeywordEnabled(Materials.EmissionKeyword), "what does not glow has no use for it");
+            bool wasPlain = Materials.Plain;
+            try
+            {
+                Materials.Plain = true;
+                // A signal lamp of the plain look: an Ink base that only emits. Its keywords are the template's -
+                // nothing is switched on at runtime that the build does not have.
+                Material lamp = Materials.Gadget(Palette.Go);
+                Assert.AreEqual("Universal Render Pipeline/Lit", lamp.shader.name);
+                Assert.IsTrue(lamp.IsKeywordEnabled(Materials.EmissionKeyword), "the lamp emits");
+                CollectionAssert.AreEquivalent(glowing.shaderKeywords, lamp.shaderKeywords, "with exactly the variant the template pins");
+                Assert.Greater(lamp.GetColor("_EmissionColor").maxColorComponent, 0.5f);
+                Material body = Materials.Gadget(GadgetPart.Body);
+                Assert.IsFalse(body.IsKeywordEnabled(Materials.EmissionKeyword), "a body that does not glow is a clone of PlainLit.mat");
+                CollectionAssert.AreEquivalent(Asset<Material>("Assets/Toybox/Resources/Materials/PlainLit.mat").shaderKeywords, body.shaderKeywords);
+            }
+            finally
+            {
+                Materials.Plain = wasPlain;
+            }
 
             // 3.8 (2) / 7.5 (4): three URP assets on three Quality levels, all enabled for WebGL; each keeps
             // main-light shadows with two or three cascades and soft shadows, so the shaders' shadow
