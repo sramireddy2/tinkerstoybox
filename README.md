@@ -6,16 +6,16 @@
 
 ![The game's seven candy colours](docs/media/candy-ribbon.png)
 
-[![Play it in your browser](https://img.shields.io/badge/%E2%96%B6%20%20Play%20it%20in%20your%20browser-FF2E55?style=for-the-badge)](https://sramireddy2.github.io/tinkerstoybox/)
+[![Play it in your browser](docs/media/badges/play.svg)](https://sramireddy2.github.io/tinkerstoybox/)
 
-[![Unity 6](https://img.shields.io/badge/Unity-6000.6.4f1-2B2140?style=flat-square&logo=unity&logoColor=white)](https://unity.com/)
-![C#](https://img.shields.io/badge/C%23-9.0-8A4BFF?style=flat-square)
-![URP 17.6](https://img.shields.io/badge/URP-17.6-18A8FF?style=flat-square)
-![WebGL 2](https://img.shields.io/badge/WebGL%202-WebAssembly-FF7A1A?style=flat-square&logo=webassembly&logoColor=white)
-![PhysX](https://img.shields.io/badge/physics-PhysX-7FDB2E?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-2139%20passing-7FDB2E?style=flat-square)
-![60 fps](https://img.shields.io/badge/browser-60%20fps-FF5FB0?style=flat-square)
-[![MIT licence](https://img.shields.io/badge/licence-MIT-FFCE1F?style=flat-square)](LICENSE)
+![Unity 6000.6.4f1](docs/media/badges/unity.svg)
+![C# 9.0](docs/media/badges/csharp.svg)
+![URP 17.6](docs/media/badges/urp.svg)
+![WebGL 2 and WebAssembly](docs/media/badges/webgl.svg)
+![Physics: PhysX](docs/media/badges/physics.svg)
+![More than 2100 tests passing](docs/media/badges/tests.svg)
+![60 frames a second in the browser](docs/media/badges/fps.svg)
+[![Licence: MIT](docs/media/badges/licence.svg)](LICENSE)
 
 ![Level 1, played by the built-in bot: a crumb of cheese is picked up, held against the far wall, let go as a hillside, and climbed](docs/media/gameplay.gif)
 

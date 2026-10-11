@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="129" height="24" viewBox="0 0 129 24" role="img" aria-label="physics: PhysX">
+  <title>physics: PhysX</title>
+  <clipPath id="pill"><rect width="129" height="24" rx="12"/></clipPath>
+  <g clip-path="url(#pill)">
+    <rect width="69.0" height="24" fill="#2B2140"/>
+    <rect x="69.0" width="61.0" height="24" fill="#7FDB2E"/>
+  </g>
+  <g font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11" font-weight="bold" text-anchor="middle">
+    <text x="34.5" y="16" fill="#FFFDF7" textLength="47.0" lengthAdjust="spacingAndGlyphs">physics</text>
+    <text x="99.0" y="16" fill="#2B2140" textLength="38.0" lengthAdjust="spacingAndGlyphs">PhysX</text>
+  </g>
+</svg>
