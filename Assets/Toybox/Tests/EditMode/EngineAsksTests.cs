@@ -416,6 +416,122 @@ namespace Toybox.Tests
         }
 
         // ------------------------------------------------------------------------------------------
+        // PropOptions.SquareOnGrab (Level 11): the heading eases to the nearest quarter turn of the view
+        // ------------------------------------------------------------------------------------------
+
+        Prop FloatingSlab(Quaternion rotation, GrabPose pose, bool square, Vector3 from)
+        {
+            Prop slab = null;
+            Build(ctx =>
+            {
+                TestHelpers.Floor(ctx);
+                slab = ctx.AddProp(BasicToys.Block(new Vector3(0.7f, 0.1f, 1f)), new Vector3(0f, 1.2f, 4f), rotation,
+                    new PropOptions { Name = "Slab", Body = PropBody.Fixed, GrabPose = pose, SquareOnGrab = square });
+                ctx.SetSpawn(from, 0f);
+            });
+            LookAt(slab.Center);
+            return slab;
+        }
+
+        // How far the slab's long side is from pointing along the view (or straight across it), in degrees.
+        float OffSquare(Prop prop)
+        {
+            Vector3 heading = prop.Transform.forward;
+            if (Mathf.Abs(heading.y) > 0.7f) heading = prop.Transform.up;
+            heading.y = 0f;
+            float off = Mathf.DeltaAngle(Game.Player.Yaw, Mathf.Atan2(heading.x, heading.z) * Mathf.Rad2Deg);
+            return Mathf.Abs(Mathf.DeltaAngle(0f, Mathf.Repeat(off + 45f, 90f) - 45f));
+        }
+
+        [Test]
+        public void SquareOnGrab_EasesTheHeadingToTheNearestQuarterTurnOfTheView()
+        {
+            // Twenty degrees askew, seen from straight in front: its long side ends up along the view.
+            Prop slab = FloatingSlab(Quaternion.Euler(0f, 20f, 0f), GrabPose.Keep, true, Vector3.zero);
+            Assert.IsTrue(slab.SquareOnGrab);
+            Assert.AreEqual(20f, OffSquare(slab), 0.01f, "setup");
+            Click();
+            Assert.Less(OffSquare(slab), 20f, "the ease has begun");
+            Assert.Greater(OffSquare(slab), 10f, "but it is an ease, not a snap");
+            Run(PerspectiveGrabber.PoseTicks);
+            Assert.AreEqual(0f, OffSquare(slab), 0.05f);
+            Assert.Less(Vector3.Angle(slab.Transform.forward, Vector3.forward), 0.05f, "nearest: along the view, not across it");
+            Assert.AreEqual(0f, Tilt(slab), 0.01f);
+            // Turning the view turns it along, and Q still turns it in steps from there.
+            Game.Player.Yaw = 30f;
+            Game.Tick();
+            Assert.AreEqual(0f, OffSquare(slab), 0.05f);
+            Input.Once.RotateYaw = 1;
+            Game.Tick();
+            Assert.AreEqual(PerspectiveGrabber.YawStepDegrees, OffSquare(slab), 0.05f);
+            Game.Dispose();
+            Game = null;
+
+            // Seventy degrees askew: the nearest quarter turn is across the view.
+            slab = FloatingSlab(Quaternion.Euler(0f, 70f, 0f), GrabPose.Keep, true, Vector3.zero);
+            Click();
+            Run(PerspectiveGrabber.PoseTicks);
+            Assert.Less(Vector3.Angle(slab.Transform.forward, Vector3.right), 0.05f);
+            Game.Dispose();
+            Game = null;
+
+            // Lying square to the room, picked up from off to one side: square to the view, not to the room.
+            slab = FloatingSlab(Quaternion.identity, GrabPose.Keep, true, new Vector3(3f, 0f, 0f));
+            Assert.AreEqual(36.87f, OffSquare(slab), 0.05f, "setup: the view comes in at 37 degrees");
+            Click();
+            Run(PerspectiveGrabber.PoseTicks);
+            Assert.AreEqual(0f, OffSquare(slab), 0.05f);
+            Game.Dispose();
+            Game = null;
+
+            // Without the option the heading is kept, as it always was.
+            slab = FloatingSlab(Quaternion.Euler(0f, 20f, 0f), GrabPose.Keep, false, Vector3.zero);
+            Assert.IsFalse(slab.SquareOnGrab);
+            Click();
+            Run(PerspectiveGrabber.PoseTicks);
+            Assert.AreEqual(20f, OffSquare(slab), 0.01f);
+        }
+
+        [Test]
+        public void SquareOnGrab_WorksOnATumbledProp_AndOnOneLetGoEarly()
+        {
+            // Tilted and askew, with Snap90: stood flat and squared in the same 0.15 s.
+            Prop slab = FloatingSlab(Quaternion.Euler(25f, 28f, 0f), GrabPose.Snap90, true, Vector3.zero);
+            Click();
+            Run(PerspectiveGrabber.PoseTicks);
+            Assert.AreEqual(0f, Tilt(slab), 0.05f);
+            Assert.AreEqual(0f, OffSquare(slab), 0.05f);
+            Game.Dispose();
+            Game = null;
+
+            // Upside down and askew: it stays face down (Keep), and is squared all the same.
+            slab = FloatingSlab(Quaternion.Euler(0f, 20f, 180f), GrabPose.Keep, true, Vector3.zero);
+            Click();
+            Run(PerspectiveGrabber.PoseTicks);
+            Assert.AreEqual(180f, Tilt(slab), 0.05f);
+            Assert.AreEqual(0f, OffSquare(slab), 0.05f);
+            Game.Dispose();
+            Game = null;
+
+            // On its long edge (its right axis up): the two level axes are a quarter turn apart, and it is square.
+            slab = FloatingSlab(Quaternion.Euler(0f, 33f, 90f), GrabPose.Snap90, true, Vector3.zero);
+            Click();
+            Run(PerspectiveGrabber.PoseTicks);
+            Assert.AreEqual(90f, Tilt(slab), 0.05f);
+            Assert.AreEqual(0f, OffSquare(slab), 0.05f);
+            Game.Dispose();
+            Game = null;
+
+            // Let go before the ease is over: put down square.
+            slab = FloatingSlab(Quaternion.Euler(0f, 20f, 0f), GrabPose.Keep, true, Vector3.zero);
+            Click();
+            Assert.Greater(OffSquare(slab), 10f);
+            Click();
+            Assert.IsNull(Game.Grabber.Held);
+            Assert.AreEqual(0f, OffSquare(slab), 0.05f);
+        }
+
+        // ------------------------------------------------------------------------------------------
         // LEVELS 0.4, request 4 and 5: AllowPitch, KeepUpright
         // ------------------------------------------------------------------------------------------
 

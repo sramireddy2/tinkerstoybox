@@ -535,6 +535,7 @@ namespace Toybox.Tests
             }
             Dictionary<string, int> before = CountObjects();
 
+            int endings = 0;
             for (int round = 0; round < 4; round++)
             {
                 // By the debug key, with a prop in hand.
@@ -545,11 +546,22 @@ namespace Toybox.Tests
                 GrabBlock();
                 devices.State.RestartPressed = true;
                 runner.Frame(Sim.Dt);
-                // By completing the level and waiting for the runner to move on.
+                // By completing the level and waiting for the runner to move on - to the next level, or, after
+                // the last one, to the ending (from where turning autoplay on plays the last level again).
                 int id = runner.LevelId;
                 game.CompleteLevel();
-                for (int i = 0; i < 400 && runner.LevelId == id; i++) runner.Frame(Sim.Dt);
-                Assert.AreNotEqual(id, runner.LevelId, "the runner moves on after a completion");
+                for (int i = 0; i < 400 && runner.LevelId == id && runner.Flow.State != FlowState.Ending; i++) runner.Frame(Sim.Dt);
+                if (id == runner.Levels.Last)
+                {
+                    Assert.AreEqual(FlowState.Ending, runner.Flow.State, "after the last level the runner shows the ending");
+                    Assert.AreEqual(id, runner.LevelId, "and loads nothing");
+                    endings++;
+                    for (int i = 0; i < 120; i++) runner.Frame(Sim.Dt);
+                }
+                else
+                {
+                    Assert.AreNotEqual(id, runner.LevelId, "the runner moves on after a completion");
+                }
                 // By turning autoplay on and off again.
                 devices.State.AutoplayPressed = true;
                 runner.Frame(Sim.Dt);
@@ -558,6 +570,7 @@ namespace Toybox.Tests
                 Assert.IsFalse(runner.Autoplay);
             }
 
+            Assert.Greater(endings, 0, "the walk came by the end of the game too");
             Assert.AreEqual("", Differences(before, CountObjects()), "objects left behind by level changes");
 
             Dictionary<string, int> running = CountObjects();

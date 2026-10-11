@@ -241,6 +241,7 @@ namespace Toybox.Engine
             stepRotation = Quaternion.identity;
             poseFrom = baseRotation;
             poseTo = PoseTarget(baseRotation, prop.GrabPose);
+            if (prop.SquareOnGrab) poseTo = Squared(poseTo);
             poseTick = Quaternion.Angle(poseFrom, poseTo) < 0.01f ? PoseTicks : 0;
             placedCenter = prop.Center;
             placedRotation = prop.Rotation;
@@ -415,6 +416,22 @@ namespace Toybox.Engine
             // Upside down there is no smallest turn: roll it over about its own forward axis.
             if (dot < -0.9999f) return Quaternion.AngleAxis(180f, rotation * Vector3.forward) * rotation;
             return Quaternion.FromToRotation(current, Vector3.up) * rotation;
+        }
+
+        // PropOptions.SquareOnGrab: the same rotation (given in the yaw frame) turned about the vertical so
+        // that the prop's heading is the nearest quarter turn - in that frame, square to the view. The
+        // heading is read off the most level of the prop's own axes (with one axis upright the other two
+        // are level and a quarter turn apart: either gives the same answer).
+        static Quaternion Squared(Quaternion rotation)
+        {
+            Vector3 level = rotation * Vector3.forward;
+            Vector3 other = rotation * Vector3.right;
+            if (Mathf.Abs(other.y) < Mathf.Abs(level.y)) level = other;
+            other = rotation * Vector3.up;
+            if (Mathf.Abs(other.y) < Mathf.Abs(level.y)) level = other;
+            float heading = Mathf.Atan2(level.x, level.z) * Mathf.Rad2Deg;
+            float square = Mathf.Round(heading / 90f) * 90f;
+            return Quaternion.AngleAxis(square - heading, Vector3.up) * rotation;
         }
 
         PropHoldEvent HoldEvent(Prop prop, float distance) => new PropHoldEvent

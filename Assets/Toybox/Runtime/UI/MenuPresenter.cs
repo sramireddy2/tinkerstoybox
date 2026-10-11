@@ -11,7 +11,7 @@ namespace Toybox.UI
 {
     /// <summary>
     /// The game's menus (ART_BIBLE 10.5, 9.7): the title, the pause card with its settings, the catalogue
-    /// of levels and the level-complete card, on one canvas above the HUD. Which of them is up follows the
+    /// of levels, the level-complete card and the ending, on one canvas above the HUD. Which of them is up follows the
     /// <see cref="GameFlow"/>; their buttons call the flow, and nothing else.
     ///
     /// What a button does is not done on the spot but queued and run in <see cref="Frame"/>, which the
@@ -51,13 +51,14 @@ namespace Toybox.UI
         public SettingsMenu SettingsCard { get; private set; }
         public CatalogueMenu Catalogue { get; private set; }
         public CompleteMenu Complete { get; private set; }
+        public EndingMenu Ending { get; private set; }
 
         public Game Game => game;
         public PresentationContext Context => context;
         /// <summary>The flow the buttons call, or null where there is none (the screenshot tool).</summary>
         public GameFlow Flow => flow;
         public LevelList Levels => flow != null ? flow.Levels : ownLevels ??= capture == "catalogue" ? UiCapture.DemoLevels() : LevelList.FromRegistry();
-        public Progress Progress => flow != null ? flow.Progress : ownProgress ??= capture == "catalogue" ? UiCapture.DemoProgress() : new Progress(new MemoryStore());
+        public Progress Progress => flow != null ? flow.Progress : ownProgress ??= capture == "catalogue" ? UiCapture.DemoProgress() : capture == "ending" ? UiCapture.FullProgress(Levels) : new Progress(new MemoryStore());
         /// <summary>The menu that is up, or null while the game is being played.</summary>
         public MenuScreen Current => current;
         /// <summary>The screen the keyboard talks to.</summary>
@@ -98,6 +99,7 @@ namespace Toybox.UI
             SettingsCard = Add(new SettingsMenu(this));
             Catalogue = Add(new CatalogueMenu(this));
             Complete = Add(new CompleteMenu(this));
+            Ending = Add(new EndingMenu(this));
             Confetti.Prewarm();
             settingsOpen = capture == "settings";
             built = true;
@@ -203,6 +205,7 @@ namespace Toybox.UI
                 case FlowState.Paused: return settingsOpen ? (MenuScreen)SettingsCard : Pause;
                 case FlowState.LevelSelect: return Catalogue;
                 case FlowState.LevelComplete: return Complete;
+                case FlowState.Ending: return Ending;
                 default: return null;
             }
         }
@@ -233,6 +236,7 @@ namespace Toybox.UI
                     Backdrop.Set(BackdropMode.Frozen, UiTheme.Paper);
                     break;
                 case FlowState.LevelSelect:
+                case FlowState.Ending:
                     Backdrop.Set(BackdropMode.Surface, UiTheme.Paper);
                     break;
                 case FlowState.LevelComplete:
@@ -303,8 +307,9 @@ namespace Toybox.UI
             if (!go) return;
             if (flow.State == FlowState.Title) flow.StartLevel(flow.LevelId);
             else if (flow.State == FlowState.Paused) flow.Resume();
-            else if (flow.State == FlowState.LevelComplete) flow.NextLevel();
+            else if (flow.State == FlowState.LevelComplete) flow.Advance();
             else if (flow.State == FlowState.LevelSelect) flow.CloseLevelSelect();
+            else if (flow.State == FlowState.Ending) flow.ReturnToTitle();
         }
 
         void OnLevelLoaded(LevelEvent e)

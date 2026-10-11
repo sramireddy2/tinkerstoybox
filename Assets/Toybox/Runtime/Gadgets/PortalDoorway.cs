@@ -42,7 +42,22 @@ namespace Toybox.Gadgets
     /// </summary>
     public sealed class PortalDoorway : Gadget
     {
+        /// <summary>
+        /// A door is walked into feet first: the player's feet may be this far under its threshold (per unit
+        /// of their size) and no farther. A door that stands a floor above them - up on a ledge, reaching out
+        /// over its edge - is not entered from below, however tall they are or however high their head gets
+        /// in a hop. (Less than what a jump adds to a ledge they cannot climb: Level 14's gate is 1.36 sizes.)
+        /// </summary>
+        public const float FootSlack = 0.1f;
+        /// <summary>
+        /// Where the player comes out there has to be a floor, under the spot and under the step after it,
+        /// no farther down than this (per unit of their new size): a drop they can jump back up. A door on
+        /// the edge of a ledge does not put them in the air beyond it; they come back out of the near side.
+        /// </summary>
+        public const float MaxDrop = 1f;
+
         static readonly RaycastHit[] CastHits = new RaycastHit[32];
+        static readonly Collider[] Solids = new Collider[8];
 
         readonly PortalDoorwayOptions options;
         readonly Prop prop;
@@ -183,7 +198,8 @@ namespace Toybox.Gadgets
             Vector3 local = Quaternion.Inverse(prop.Rotation) * (player.Position - prop.Position);
             float halfWidth = options.Opening.x * scale * 0.5f;
             if (Mathf.Abs(local.x) > halfWidth + player.Radius) return;
-            if (local.y > options.Opening.y * scale || local.y + player.Height < 0f) return;
+            // Feet first: over the threshold (a step's worth under it at most) and under the lintel.
+            if (local.y > options.Opening.y * scale || local.y < -FootSlack * player.Scale) return;
 
             float target = TargetScale;
             float from = player.Scale;
@@ -201,12 +217,13 @@ namespace Toybox.Gadgets
             // Out of the far side; failing that, back out of the near side, turned round.
             Vector3 far = prop.Position + prop.Rotation * new Vector3(lateral, 0f, now * beyond);
             Vector3 near = prop.Position + prop.Rotation * new Vector3(lateral, 0f, -now * beyond);
-            if (TryPlace(player, far, target, velocity * ratio, player.Yaw))
+            Vector3 onward = prop.Rotation * new Vector3(0f, 0f, now);
+            if (TryPlace(player, far, onward, target, Carried(velocity, ratio, false), player.Yaw))
             {
                 Finish(PortalResult.Through, from, target);
                 side = now;
             }
-            else if (TryPlace(player, near, target, -velocity * ratio, player.Yaw + 180f))
+            else if (TryPlace(player, near, -onward, target, Carried(velocity, ratio, true), player.Yaw + 180f))
             {
                 Finish(PortalResult.TurnedBack, from, target);
                 side = -now;
@@ -220,9 +237,27 @@ namespace Toybox.Gadgets
             }
         }
 
-        bool TryPlace(Player player, Vector3 feet, float scale, Vector3 velocity, float yaw)
+        /// <summary>
+        /// What the player's velocity becomes at the new size. Along the floor it goes with the size: a walk
+        /// is a walk at either size (5 sizes a second). Up and down it goes with the square root of the
+        /// ratio: gravity is the same for everybody, so a jump at one size is the same jump at another when
+        /// its speed goes with the root (Player: jump speed 7.6 x the root of the size). They come out with
+        /// their feet on the threshold, so a jump into the door is at most their new size's own jump.
+        /// (Multiplied by the ratio itself, the hop of a mouse into a door of 1.5 came out as a leap of
+        /// seven units: up Level 14's ledge at a size that fits its way out - two trips instead of three.)
+        /// `back`: turned round, out of the near side - the way along the floor is reversed, up stays up.
+        /// </summary>
+        public static Vector3 Carried(Vector3 velocity, float ratio, bool back)
+        {
+            float along = back ? -ratio : ratio;
+            return new Vector3(velocity.x * along, velocity.y * Mathf.Sqrt(Mathf.Max(0f, ratio)), velocity.z * along);
+        }
+
+        // `onward`: the way the player walks on from there, away from the door.
+        bool TryPlace(Player player, Vector3 feet, Vector3 onward, float scale, Vector3 velocity, float yaw)
         {
             if (!GadgetKit.CapsuleFree(Game, feet, Player.BaseRadius * scale, Player.BaseHeight * scale, prop)) return false;
+            if (!HasFloor(feet, scale) || !HasFloor(feet + onward * (Player.BaseRadius * scale), scale)) return false;
             Vector3 old = player.Position;
             float oldScale = player.Scale;
             // Shrink before the move, grow after it: the capsule is never bigger than the room it is in.
@@ -235,6 +270,20 @@ namespace Toybox.Gadgets
             }
             player.SetVelocity(velocity);
             return true;
+        }
+
+        // Is there something to stand on under a spot, no farther down than a player of this size jumps back up?
+        // (A spot inside something solid has: whether the player fits there is the capsule's business.)
+        bool HasFloor(Vector3 feet, float scale)
+        {
+            Vector3 from = feet + Vector3.up * (0.3f * scale);
+            int count = Game.PhysicsScene.OverlapSphere(from, 0.01f * scale, Solids, Layers.SolidMask, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < count; i++)
+                if (PropRef.Of(Solids[i]) != prop) return true;
+            count = Game.PhysicsScene.Raycast(from, Vector3.down, CastHits, (0.3f + MaxDrop) * scale, Layers.SolidMask, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < count; i++)
+                if (PropRef.Of(CastHits[i].collider) != prop) return true;
+            return false;
         }
 
         void Finish(PortalResult result, float from, float to)

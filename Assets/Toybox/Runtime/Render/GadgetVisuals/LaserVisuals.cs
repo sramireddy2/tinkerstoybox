@@ -18,10 +18,13 @@ namespace Toybox.Render
     ///   the same light round it - a floor the beams reach is speckled and pink;
     /// - under every beam that something roofs over, a cell of shade on the ground the beam would have
     ///   reached: a deeper tint of the room's own hue, cut to the lattice. The lane behind a card is the
-    ///   patch with no dots in it and a hard-edged shadow over it.
+    ///   patch with no dots in it and a hard-edged shadow over it;
+    /// - on the underside of whatever roofs a beam over, where the beam meets it from above, a pinpoint of
+    ///   the same light: seen from underneath a roof is paper, and every beam it keeps off is a glow in it
+    ///   (LEVELS, Level 11: "every beam is a red pinpoint seen through the paper").
     ///
     /// A held toy stops nothing in the simulation, so beams are drawn straight through it and no dot
-    /// ever lies on it. Three draws per emitter, rebuilt only when a beam's length changes.
+    /// ever lies on it. Four draws per emitter, rebuilt only when a beam's length changes.
     /// </summary>
     [Presenter(232, ProvidesLook = true)]
     public sealed class LaserVisuals : GadgetVisual
@@ -35,18 +38,20 @@ namespace Toybox.Render
         public const float WashShare = 0.95f, WashGain = 0.1f;
         /// <summary>How strongly the shade tints (the multiply blend's alpha).</summary>
         public const float ShadeAlpha = 0.42f;
+        /// <summary>The pinpoint under a roof: this share of a dot's radius, this share of the beam's light.</summary>
+        public const float GlowShare = 0.5f, GlowGain = 0.8f;
         const float Lift = 0.02f;
 
         sealed class Rig
         {
             public LaserRain Rain;
             public float[] Lengths;
-            public FxMesh Beams, Dots, Shade;
-            public MeshRenderer BeamRenderer, DotRenderer, ShadeRenderer;
+            public FxMesh Beams, Dots, Shade, Glow;
+            public MeshRenderer BeamRenderer, DotRenderer, ShadeRenderer, GlowRenderer;
             public Renderer Own;
             public Vector3 Right, Up;
             public float Pitch;
-            public int Shaded;
+            public int Shaded, Glowing;
             public float Height;
         }
 
@@ -58,12 +63,16 @@ namespace Toybox.Render
         public int DotCount(int index) => rigs[index].Lengths.Length;
         /// <summary>Beams of the i-th emitter that are roofed over (their ground is shaded).</summary>
         public int ShadedCount(int index) => rigs[index].Shaded;
+        /// <summary>Roofed beams of the i-th emitter whose roof has an underside in the open: it glows there.</summary>
+        public int GlowCount(int index) => rigs[index].Glowing;
         public Renderer BeamRendererOf(int index) => rigs[index].BeamRenderer;
         public Renderer DotRendererOf(int index) => rigs[index].DotRenderer;
         public Renderer ShadeRendererOf(int index) => rigs[index].ShadeRenderer;
+        public Renderer GlowRendererOf(int index) => rigs[index].GlowRenderer;
         public Mesh BeamMeshOf(int index) => rigs[index].Beams.Mesh;
         public Mesh DotMeshOf(int index) => rigs[index].Dots.Mesh;
         public Mesh ShadeMeshOf(int index) => rigs[index].Shade.Mesh;
+        public Mesh GlowMeshOf(int index) => rigs[index].Glow.Mesh;
 
         protected override void Adopt(Gadget gadget)
         {
@@ -71,10 +80,12 @@ namespace Toybox.Render
             var rig = new Rig
             {
                 Rain = rain, Lengths = new float[rain.BeamCount], Beams = new FxMesh("Laser Beams"), Dots = new FxMesh("Laser Dots"), Shade = new FxMesh("Laser Shade"),
+                Glow = new FxMesh("Laser Glow"),
             };
             Keep(rig.Beams.Mesh);
             Keep(rig.Dots.Mesh);
             Keep(rig.Shade.Mesh);
+            Keep(rig.Glow.Mesh);
 
             // The lattice's own frame, read off its first two beams (rows run along "right").
             Vector3 direction = rain.Direction;
@@ -101,6 +112,7 @@ namespace Toybox.Render
                 Materials.Flat(new FlatRecipe { Name = "Laser Shade " + Materials.Dip.Name, Color = shade, Blend = FlatBlend.Multiply, QueueOffset = -3 }));
             rig.BeamRenderer = Visual("Laser Beams " + rain.Name, rig.Beams.Mesh, GadgetFx.Flat("Laser Beam Soft", FlatBlend.Alpha, FlatShape.SoftDisc, 0.8f, 0));
             rig.DotRenderer = Visual("Laser Dots " + rain.Name, rig.Dots.Mesh, GadgetFx.Flat("Laser Dot", FlatBlend.Additive, FlatShape.SoftDisc, 0.75f, 1));
+            rig.GlowRenderer = Visual("Laser Glow " + rain.Name, rig.Glow.Mesh, GadgetFx.Flat("Laser Dot", FlatBlend.Additive, FlatShape.SoftDisc, 0.75f, 1));
             for (int i = 0; i < rig.Lengths.Length; i++) rig.Lengths[i] = -1f;
 
             // The gadget's own beams stand in where nobody draws better ones.
@@ -130,6 +142,8 @@ namespace Toybox.Render
             Color beam = light;
             beam.a = BeamAlpha;
             Color wash = new Color(light.r * WashGain, light.g * WashGain, light.b * WashGain, 1f);
+            Color glow = new Color(light.r * GlowGain, light.g * GlowGain, light.b * GlowGain, 1f);
+            PhysicsScene physics = Game.PhysicsScene;
             float half = Mathf.Clamp(rig.Pitch * BeamShare, BeamMin, BeamMax);
             float dot = Mathf.Clamp(rig.Pitch * DotShare, DotMin, DotMax);
             float washRadius = rig.Pitch * WashShare;
@@ -144,9 +158,11 @@ namespace Toybox.Render
 
             rig.Height = playerHeight;
             rig.Shaded = 0;
+            rig.Glowing = 0;
             rig.Beams.Clear();
             rig.Dots.Clear();
             rig.Shade.Clear();
+            rig.Glow.Clear();
             for (int i = 0; i < rig.Lengths.Length; i++)
             {
                 float length = rain.BeamLength(i);
@@ -162,11 +178,23 @@ namespace Toybox.Render
                 if (length > needed) continue;
                 rig.Shaded++;
                 rig.Shade.Polygon(origin + direction * (rain.Range - Lift * 1.5f), rig.Right, rig.Up, cell, 6, 30f, Color.white);
+
+                // The underside of the roof, found from the ground the beam would have reached: looking back
+                // up the beam, the first thing in the way (never a held toy; a block that stands on that
+                // ground has no underside, and the look starts inside it and meets nothing).
+                float room = rain.Range - length - Lift;
+                if (room < 0.1f) continue;
+                Vector3 ground = origin + direction * (rain.Range - Lift);
+                if (!physics.Raycast(ground, -direction, out RaycastHit under, room, Layers.SolidMask, QueryTriggerInteraction.Ignore) || under.distance < 0.1f) continue;
+                rig.Glowing++;
+                rig.Glow.Square(under.point + direction * Lift, rig.Right, rig.Up, dot * GlowShare, glow);
             }
             rig.Beams.Apply();
             rig.Dots.Apply();
             rig.Shade.Apply();
+            rig.Glow.Apply();
             rig.ShadeRenderer.enabled = rig.Shaded > 0;
+            rig.GlowRenderer.enabled = rig.Glowing > 0;
         }
 
         protected override void Forget()

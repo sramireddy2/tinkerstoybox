@@ -29,6 +29,12 @@ namespace Toybox.Gadgets
         public Action OnSwept;
         /// <summary>Draws the surface: one flat mesh in the water material.</summary>
         public bool Visual = true;
+        /// <summary>
+        /// The dip the water is drawn in. Null: the room's own, which is right wherever the water is set
+        /// dressing. Where the water is what the level is about and the room's dip would make it the colour of
+        /// the room (Level 13: peach water in a peach den), give it another.
+        /// </summary>
+        public Dip Dip;
     }
 
     /// <summary>
@@ -61,6 +67,8 @@ namespace Toybox.Gadgets
         public Zone Footprint => options.Footprint;
         /// <summary>The surface this volume draws (for presentation), or null when it draws none (Visual off).</summary>
         public Transform Surface => surface;
+        /// <summary>The dip this water is drawn in, if the level gave it one of its own (null: the room's).</summary>
+        public Dip Dip => options.Dip;
         public float FloorY => options.FloorY;
         public float Area => options.Area;
         public float Volume => (float)volume;
@@ -180,7 +188,7 @@ namespace Toybox.Gadgets
             surface.SetParent(Ctx.Root, false);
             surface.SetPositionAndRotation(SurfacePoint(), rotation);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = Materials.Water(Ctx.Dip);
+            go.AddComponent<MeshRenderer>().sharedMaterial = Materials.Water(options.Dip ?? Ctx.Dip);
             go.SetActive(Depth > 1e-3f);
         }
     }

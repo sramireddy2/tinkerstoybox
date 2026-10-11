@@ -13,6 +13,8 @@ namespace Toybox.Audio
     {
         Hover,
         Click,
+        /// <summary>The ending's stamp: the level-complete flourish once more, in the key of the level behind it.</summary>
+        Fanfare,
     }
 
     /// <summary>
@@ -267,6 +269,7 @@ namespace Toybox.Audio
         {
             if (!Sounding) return;
             if (sound == UiSound.Hover) output.Play(SoundId.UiHover);
+            else if (sound == UiSound.Fanfare) output.Play(SoundId.LevelComplete);
             else output.Play(SoundId.UiClick, 1f, Synth.Ratio(key.Transpose));
         }
 

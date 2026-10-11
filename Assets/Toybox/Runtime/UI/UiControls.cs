@@ -36,6 +36,9 @@ namespace Toybox.UI
 
         /// <summary>A button was pressed, a switch thrown, an option taken.</summary>
         public static void Click() => Toybox.Audio.AudioPresenter.Active?.PlayUi(Toybox.Audio.UiSound.Click);
+
+        /// <summary>The ending's "COLLECTED" stamp came down.</summary>
+        public static void Fanfare() => Toybox.Audio.AudioPresenter.Active?.PlayUi(Toybox.Audio.UiSound.Fanfare);
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using Toybox.Art;
 using Toybox.Engine;
+using Toybox.Gadgets;
 using Toybox.Platform;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -102,6 +103,51 @@ namespace Toybox.Render
             return v;
         }
 
+        /// <summary>
+        /// The morning a night room wakes to (LEVELS, Level 15: "the night preset turns to dawn; every seated
+        /// toy, which has been glowing as a night-light, hands its light back"). The night-light room is
+        /// the sunny-rug's layout after dark, so its morning is the sunny-rug's light through the same
+        /// window: that sun and window patch, the day's ambient on the room's own tones, the day's glint,
+        /// and the toys' own glow back to what it is by day. Geometry, haze and the room's colours stay.
+        /// </summary>
+        public static LightingValues Dawn(EnvironmentDescriptor env)
+        {
+            LightingValues v = For(env);
+            EnvironmentPreset day = EnvironmentPreset.SunnyRug;
+            Dip dip = env.Preset.Dip;
+            Color white = Color.white;
+            Color light = Palette.Lin(dip.Light), deep = Palette.Lin(dip.Deep);
+            v.SunColor = day.SunColor;
+            v.SunIntensity = day.SunIntensity;
+            v.AmbSky = Rgb(white, AmbientSky);
+            v.AmbEquator = Rgb(Color.LerpUnclamped(white, light, 0.5f), AmbientEquator);
+            v.AmbGround = Rgb(deep, AmbientGround);
+            v.GlintColor = Rgb(Palette.Lin(Palette.GlintDay), 1f);
+            v.ToyGlowGain = day.ToyGlowGain;
+            v.PatchColor = env.HasRoom ? Rgb(Palette.Lin(day.PatchColor), day.PatchGain) : Vector4.zero;
+            return v;
+        }
+
+        /// <summary>
+        /// Part of the way from one time of day to another in the same room: the sun's colour and strength,
+        /// the ambient, the glint, the window patch and the toys' glow are blended; everything else is
+        /// <paramref name="from"/>'s.
+        /// </summary>
+        public static LightingValues Blend(LightingValues from, LightingValues to, float t)
+        {
+            t = Mathf.Clamp01(t);
+            LightingValues v = from;
+            v.SunColor = Color.LerpUnclamped(from.SunColor, to.SunColor, t);
+            v.SunIntensity = Mathf.LerpUnclamped(from.SunIntensity, to.SunIntensity, t);
+            v.AmbSky = Vector4.LerpUnclamped(from.AmbSky, to.AmbSky, t);
+            v.AmbEquator = Vector4.LerpUnclamped(from.AmbEquator, to.AmbEquator, t);
+            v.AmbGround = Vector4.LerpUnclamped(from.AmbGround, to.AmbGround, t);
+            v.GlintColor = Vector4.LerpUnclamped(from.GlintColor, to.GlintColor, t);
+            v.PatchColor = Vector4.LerpUnclamped(from.PatchColor, to.PatchColor, t);
+            v.ToyGlowGain = Mathf.LerpUnclamped(from.ToyGlowGain, to.ToyGlowGain, t);
+            return v;
+        }
+
         static Vector4 Rgb(Color linear, float gain) => new Vector4(linear.r * gain, linear.g * gain, linear.b * gain, 1f);
         static Vector4 Point(Vector3 p) => new Vector4(p.x, p.y, p.z, 1f);
     }
@@ -113,6 +159,11 @@ namespace Toybox.Render
     /// colours, the glint basis and StudioEnv bands the toys reflect, the haze, the window patch and the
     /// shell's box; it mirrors the ambient into RenderSettings for anything stock, switches skybox and
     /// fog off, and clears the camera to the haze colour.
+    ///
+    /// One thing moves after the load: **in a night room the night turns to dawn when the room's machine is
+    /// done** (`MachineDone` - Level 15's alarm, the last thing that happens in the game). Over
+    /// <see cref="DawnSeconds"/> the rig goes from the night's values to <see cref="LightingValues.Dawn"/>;
+    /// the next level load is night again. Day rooms take no notice.
     ///
     /// These globals are this presenter's and nobody else sets them: _AmbSky, _AmbEquator, _AmbGround,
     /// _KickDir, _KickColor, _WinDir, _WinRight, _WinUp, _GlintColor, _EnvCeil, _EnvWall, _EnvFloor,
@@ -148,6 +199,8 @@ namespace Toybox.Render
 
         /// <summary>light.shadowNearPlane (ART_BIBLE 5.3).</summary>
         public const float ShadowNearPlane = 0.2f;
+        /// <summary>Seconds the night takes to turn to dawn once a night room's machine is done.</summary>
+        public const float DawnSeconds = 4f;
 
         Game game;
         PresentationContext context;
@@ -155,12 +208,15 @@ namespace Toybox.Render
         SceneLighting previous;
         CameraClearFlags previousClear;
         Color previousBackground;
-        bool attached;
+        bool attached, dawning;
+        float dawn;
 
         /// <summary>The one Light of the game.</summary>
         public Light Sun { get; private set; }
         /// <summary>What was applied last.</summary>
         public LightingValues Values { get; private set; }
+        /// <summary>0 by night and in every day room; on its way to 1 once a night room's machine is done.</summary>
+        public float Dawn => dawn;
 
         public void Attach(Game game, PresentationContext context)
         {
@@ -185,16 +241,23 @@ namespace Toybox.Render
             attached = true;
 
             game.Events.LevelLoaded += OnLevelLoaded;
+            game.Events.MachineDone += OnMachineDone;
             Apply();
         }
 
-        public void Frame(float dt, float alpha) { }
+        public void Frame(float dt, float alpha)
+        {
+            if (!dawning || dawn >= 1f || !(dt > 0f)) return;
+            dawn = Mathf.Min(1f, dawn + dt / DawnSeconds);
+            Apply();
+        }
 
         public void Dispose()
         {
             if (!attached) return;
             attached = false;
             game.Events.LevelLoaded -= OnLevelLoaded;
+            game.Events.MachineDone -= OnMachineDone;
             previous.Restore();
             if (context.Camera != null)
             {
@@ -208,13 +271,30 @@ namespace Toybox.Render
             Sun = null;
         }
 
-        void OnLevelLoaded(LevelEvent e) => Apply();
+        void OnLevelLoaded(LevelEvent e)
+        {
+            dawning = false;
+            dawn = 0f;
+            Apply();
+        }
+
+        // The alarm rings: a night room wakes. (A day room has nothing to wake to.)
+        void OnMachineDone(GadgetEvent e)
+        {
+            EnvironmentDescriptor env = game.Environment;
+            if (env != null && env.Preset.Night) dawning = true;
+        }
 
         /// <summary>Reads the loaded level's room and sets the rig. Without a level: the sunny-rug light and no room.</summary>
         public void Apply()
         {
             EnvironmentDescriptor env = game.Environment ?? EnvironmentSolver.Solve(EnvironmentPreset.None, new Bounds(Vector3.zero, Vector3.zero), 0f);
             LightingValues v = LightingValues.For(env);
+            if (dawn > 0f && env.Preset.Night)
+            {
+                float t = dawn * dawn * (3f - 2f * dawn);
+                v = LightingValues.Blend(v, LightingValues.Dawn(env), t);
+            }
             Values = v;
 
             if (Sun != null)

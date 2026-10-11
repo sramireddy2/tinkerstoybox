@@ -585,11 +585,43 @@ namespace Toybox.Tests
         }
 
         [Test]
-        public void AfterTheLastLevelComesTheFirst()
+        public void AfterTheLastLevelComesTheEnding_NotTheFirstLevel()
         {
             Begin("?level=2");
             runner.Game.CompleteLevel();
             Frames(GameRunner.AdvanceDelay + 0.2f);
+            Assert.AreEqual(FlowState.Ending, runner.Flow.State);
+            Assert.AreEqual(2, Number, "the last level stays where it is");
+            Assert.AreEqual(0, loads);
+            int ticks = runner.Game.TickCount;
+            Frames(1f);
+            Assert.AreEqual(ticks, runner.Game.TickCount, "nothing ticks behind the ending");
+            Assert.AreEqual(FlowState.Ending, runner.Flow.State, "and it does not move on by itself");
+            Assert.IsFalse(runner.AdvancePending);
+
+            // Without menus a click goes back to the title, which stands over the first level.
+            devices.State.ClickPressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.AreEqual(FlowState.Title, runner.Flow.State);
+            Assert.AreEqual(0, Number);
+            Assert.AreEqual(1, loads);
+            devices.State.ClickPressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.AreEqual(FlowState.Playing, runner.Flow.State);
+            Assert.AreEqual(0, Number, "a fresh game starts at the beginning");
+            Assert.AreEqual(1, loads);
+        }
+
+        [Test]
+        public void TheLevelKeys_StillStepRoundTheList_FromTheEndingToo()
+        {
+            Begin("?level=2");
+            runner.Game.CompleteLevel();
+            Frames(GameRunner.AdvanceDelay + 0.2f);
+            Assert.AreEqual(FlowState.Ending, runner.Flow.State);
+            devices.State.NextLevelPressed = true;
+            runner.Frame(Sim.Dt);
+            Assert.AreEqual(FlowState.Playing, runner.Flow.State);
             Assert.AreEqual(0, Number);
         }
 

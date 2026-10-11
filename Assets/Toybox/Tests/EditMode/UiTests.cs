@@ -2204,6 +2204,336 @@ namespace Toybox.Tests
             Assert.AreEqual(0, store.Count, "and the bot leaves nothing in the player's store - no progress, no pill counts");
         }
 
+        // ---- The ending (FlowState.Ending): what the last level's card leads to -------------------------
+
+        // Plays the level that is up for a moment, picks its block up and puts it down, completes it and
+        // waits for the card's buttons.
+        void PlayAndComplete(float seconds, bool pickUp)
+        {
+            Game g = runner.Game;
+            Seconds(seconds);
+            if (pickUp)
+            {
+                TestHelpers.LookAt(g.Player, ((UiLevel)g.Level).Block.Center);
+                devices.State.GrabKeyPressed = true;
+                Frames(2);
+                Assert.IsNotNull(g.Grabber.Held);
+                devices.State.GrabKeyPressed = true;
+                Frames(2);
+            }
+            g.CompleteLevel();
+            Frames();
+            Assert.AreEqual(FlowState.LevelComplete, State);
+            Seconds(0.8f);
+            Assert.IsTrue(menu.Complete.Info.Tween.IsShown);
+        }
+
+        [Test]
+        public void TheLastLevelsCard_SaysFinish_AndLeadsToTheEnding_WithTheCatalogueFull()
+        {
+            Begin("");
+            Assert.AreEqual(3, runner.Levels.Last);
+            Press(menu.Title.Play);
+            float total = 0f;
+            for (int id = 1; id <= 3; id++)
+            {
+                Assert.AreEqual(id, runner.LevelId);
+                PlayAndComplete(0.5f * id, id != 2);
+                total += runner.Flow.LastCompletion.Time;
+                CompleteMenu card = menu.Complete;
+                Assert.AreEqual(id < 3 ? CompleteMenu.NextLabel : CompleteMenu.FinishLabel, card.Next.Label.text, "level " + id);
+                Assert.IsTrue(Palette.Same(Palette.Cherry, card.Next.Sticker.FaceColor));
+                if (id < 3) Press(card.Next);
+            }
+            Assert.AreEqual(FlowState.LevelComplete, State);
+            Assert.AreEqual(3, runner.Flow.Progress.LastPlayed);
+
+            // "Finish": the ending, not level 1.
+            int loads = 0;
+            runner.Game.Events.LevelLoaded += e => loads++;
+            Press(menu.Complete.Next);
+            Assert.AreEqual(FlowState.Ending, State);
+            Assert.AreEqual(3, runner.LevelId, "the last level stays loaded behind it");
+            Assert.AreEqual(0, loads, "nothing wraps round");
+            EndingMenu ending = menu.Ending;
+            Assert.AreSame(ending, menu.Current);
+            Assert.IsFalse(hud.Visible);
+            Assert.AreEqual(BackdropMode.Surface, menu.Backdrop.Mode, "a Paper surface, like the catalogue's");
+            Assert.IsFalse(devices.PointerLocked, "the pointer is free for its buttons");
+            int ticks = runner.Game.TickCount;
+
+            // The timeline: the heading, then the cards one by one, the stamp, the result card.
+            Assert.AreEqual("THE END", ending.HeadingText);
+            Assert.IsTrue(ending.Head.Tween.IsShown);
+            Assert.AreEqual("3 OF 3 COLLECTED", ending.CountText);
+            Assert.AreEqual(3, ending.Entries.Count, "one card for each level of the campaign");
+            Assert.AreEqual(0, ending.CardsShown);
+            Assert.IsFalse(ending.Stamp.Tween.IsShown);
+            Assert.IsFalse(ending.Info.Tween.IsShown);
+            Seconds(EndingMenu.CardsAt + 0.02f);
+            Assert.AreEqual(1, ending.CardsShown, "250 ms: the first card");
+            Assert.IsTrue(ending.Entries[0].Card.Tween.IsShown);
+            Assert.IsFalse(ending.Entries[1].Card.Tween.IsShown);
+            Seconds(2 * EndingMenu.CardEvery);
+            Assert.AreEqual(3, ending.CardsShown, "one every 60 ms");
+            Assert.IsFalse(ending.Stamp.Tween.IsShown, "the stamp waits for the last card");
+            // A key pressed before the result card is up does not skip the ending.
+            menu.Submit();
+            Frames();
+            Assert.AreEqual(FlowState.Ending, State);
+            Assert.IsFalse(ending.Again.Interactable);
+            Seconds(EndingMenu.StampAfter + 0.03f);
+            Assert.IsTrue(ending.Stamp.Tween.IsShown, "every level collected: COLLECTED stamps on");
+            Assert.Greater(ending.Stamp.Rect.localScale.x, 1f, "from 1.4");
+            Assert.AreEqual(-CatalogueMenu.StampAngle, UiTestKit.Angle(ending.Stamp.Rect), 1e-3f);
+            Assert.IsTrue(ending.ConfettiFalling, "with paper confetti");
+            Assert.IsFalse(ending.Informed);
+            Seconds(EndingMenu.InfoAfter + 0.02f);
+            Assert.AreEqual(1f, ending.Stamp.Rect.localScale.x, 1e-4f, "to 1 in 90 ms");
+            Assert.IsTrue(ending.Informed);
+            Assert.IsTrue(ending.Info.Tween.IsShown, "the result card");
+            Assert.AreEqual(ending.InfoAt, EndingMenu.CardsAt + 3 * EndingMenu.CardEvery + EndingMenu.StampAfter + EndingMenu.InfoAfter, 1e-4f);
+
+            // The cards: the level's room, its number, its hero toy in the room's hero colour.
+            for (int id = 1; id <= 3; id++)
+            {
+                EndingMenu.Entry card = ending.Find(id);
+                Assert.IsTrue(card.Collected, "level " + id);
+                Dip dip = Palette.DipOf(EnvironmentPreset.KeyForLevel(id, true));
+                Assert.AreSame(dip, card.Dip);
+                Assert.IsTrue(Palette.Same(dip.Mid, card.Card.FaceColor), "the card is the colour of the level's room");
+                Assert.AreEqual(id.ToString("00"), card.Number.text);
+                Assert.IsTrue(card.Number.gameObject.activeSelf);
+                Assert.AreSame(UiAtlas.Sprite(UiAtlas.GlyphFor(null, id)), card.Glyph.sprite, "its hero toy");
+                Assert.IsTrue(Palette.Same(dip.Hero, card.Glyph.color));
+                Assert.IsFalse(card.Question.gameObject.activeSelf);
+                Assert.IsNotNull(card.Card.Slot, "a blister card, with its hang-tab hole");
+            }
+
+            // The words: a thank-you, the total time and the pick-ups of the campaign.
+            Assert.AreEqual(EndingMenu.Thanks, ending.ThanksText);
+            Assert.AreEqual(EndingMenu.FullLine, ending.LineText);
+            Assert.AreEqual(0.5f + 1f + 1.5f, total, 0.2f, "setup: about three seconds of play");
+            StringAssert.Contains(UiKit.Time(total), ending.StatsText, "the levels' times added up");
+            StringAssert.Contains("2 pick-ups", ending.StatsText);
+            CampaignReport report = ending.Report;
+            Assert.IsTrue(report.Full && !report.Watched);
+            Assert.AreEqual(2, report.PickUps);
+
+            // Three ways on, the primary one in Cherry; the focus is on it.
+            Assert.AreEqual("Play again", ending.Again.Label.text);
+            Assert.AreEqual("Levels", ending.LevelsButton.Label.text);
+            Assert.AreEqual("Title", ending.TitleButton.Label.text);
+            Assert.IsTrue(Palette.Same(Palette.Cherry, ending.Again.Sticker.FaceColor));
+            Assert.IsTrue(Palette.Same(Palette.Paper, ending.LevelsButton.Sticker.FaceColor));
+            Assert.AreSame(ending.Again, menu.Active.Focused);
+
+            // It waits: nothing ticks, nothing moves on, the confetti settles.
+            Seconds(8f);
+            Assert.AreEqual(FlowState.Ending, State);
+            Assert.AreEqual(ticks, runner.Game.TickCount);
+            Assert.IsFalse(ending.ConfettiFalling);
+
+            // What is kept: all three collected, the ending counted, the bookmark back at the start.
+            Progress progress = runner.Flow.Progress;
+            for (int id = 1; id <= 3; id++) Assert.IsTrue(progress.IsCompleted(id));
+            Assert.AreEqual(1, progress.Endings);
+            Assert.AreEqual(1, progress.LastPlayed);
+            Assert.Greater(store.Saves, 3);
+        }
+
+        [Test]
+        public void TheEnding_WorksFromTheKeyboardAlone_Levels_Title_AndPlayAgain()
+        {
+            // The whole campaign collected in an earlier session; this one plays the last level again.
+            var earlier = new Progress(store);
+            for (int id = 1; id <= 3; id++) earlier.RecordCompletion(id, 10f * id, id);
+            Begin("?level=3");
+            PlayAndComplete(0.3f, false);
+            Assert.AreEqual(CompleteMenu.FinishLabel, menu.Complete.Next.Label.text);
+            Assert.AreSame(menu.Complete.Next, menu.Active.Focused);
+            menu.Submit();
+            Frames();
+            Assert.AreEqual(FlowState.Ending, State);
+            EndingMenu ending = menu.Ending;
+            Seconds(ending.InfoAt + 0.1f);
+            Assert.AreSame(ending.Again, menu.Active.Focused);
+            // The best runs: 10 s and 20 s from before, and the 0.3 s of just now with nothing picked up.
+            StringAssert.Contains(UiKit.Time(10f + 20f + runner.Flow.Progress.BestTime(3)), ending.StatsText);
+            StringAssert.Contains("3 pick-ups", ending.StatsText);
+
+            // Left of Play again: Levels, then Title.
+            menu.Move(MoveDirection.Left);
+            Assert.AreSame(ending.LevelsButton, menu.Active.Focused);
+            menu.Submit();
+            Frames();
+            Assert.AreEqual(FlowState.LevelSelect, State);
+            Assert.AreEqual("3 of 3 collected", menu.Catalogue.CountText);
+            menu.Cancel();
+            Frames();
+            Assert.AreEqual(FlowState.Ending, State, "Back returns to the ending");
+            Assert.AreSame(ending, menu.Current);
+            Seconds(ending.InfoAt + 0.1f);
+            Assert.IsTrue(ending.Info.Tween.IsShown);
+            Assert.AreEqual(1, runner.Flow.Progress.Endings, "coming back from the catalogue is not another ending");
+
+            menu.Move(MoveDirection.Left);
+            menu.Move(MoveDirection.Left);
+            Assert.AreSame(ending.TitleButton, menu.Active.Focused);
+            menu.Submit();
+            Frames();
+            Assert.AreEqual(FlowState.Title, State);
+            Assert.AreSame(menu.Title, menu.Current);
+            Assert.AreEqual(1, runner.LevelId, "the title stands over the first level again");
+            Assert.AreEqual(BackdropMode.None, menu.Backdrop.Mode);
+            if (runner.Presentation.Context.HasGraphics) Assert.IsTrue(Camera.enabled);
+
+            // A fresh game starts at level 1, with the catalogue kept.
+            menu.Submit();
+            Frames();
+            Assert.AreEqual(FlowState.Playing, State);
+            Assert.AreEqual(1, runner.LevelId);
+            Assert.IsTrue(hud.Visible);
+            for (int id = 1; id <= 3; id++) Assert.IsTrue(runner.Flow.Progress.IsCompleted(id));
+
+            // Once more to the ending: Esc is the way back to the title, Play again starts level 1 at once.
+            runner.Flow.StartLevel(3);
+            PlayAndComplete(0.2f, false);
+            Press(menu.Complete.Next);
+            Assert.AreEqual(FlowState.Ending, State);
+            menu.Cancel();
+            Frames();
+            Assert.AreEqual(FlowState.Title, State);
+            Assert.AreEqual(1, runner.LevelId);
+
+            runner.Flow.StartLevel(3);
+            PlayAndComplete(0.2f, false);
+            Press(menu.Complete.Next);
+            Seconds(menu.Ending.InfoAt + 0.1f);
+            Press(menu.Ending.Again);
+            Assert.AreEqual(FlowState.Playing, State);
+            Assert.AreEqual(1, runner.LevelId);
+            Assert.Less(runner.Game.LevelTicks, 5);
+            Assert.IsNull(menu.Current);
+            Assert.AreEqual(3, runner.Flow.Progress.Endings);
+        }
+
+        [Test]
+        public void TheEnding_WithLevelsMissing_SaysSo_AndStampsNothing_AndReduceMotionDropsTheConfetti()
+        {
+            // Straight to the last level by its address: one toy of three.
+            Begin("?level=3");
+            PlayAndComplete(0.3f, true);
+            Press(menu.Complete.Next);
+            EndingMenu ending = menu.Ending;
+            Assert.AreSame(ending, menu.Current);
+            Seconds(ending.InfoAt + 0.3f);
+            Assert.AreEqual("1 OF 3 COLLECTED", ending.CountText);
+            Assert.IsFalse(ending.Stamp.Tween.IsShown, "nothing to stamp yet");
+            Assert.IsFalse(ending.ConfettiFalling);
+            Assert.AreEqual(EndingMenu.Thanks, ending.ThanksText);
+            Assert.AreEqual("2 toys are still waiting in the catalogue.", ending.LineText);
+            StringAssert.Contains("1 pick-up", ending.StatsText);
+            Assert.IsFalse(ending.StatsText.Contains("pick-ups"));
+            EndingMenu.Entry missing = ending.Find(1);
+            Assert.IsFalse(missing.Collected);
+            Assert.IsTrue(Palette.Same(UiTheme.Locked, missing.Card.FaceColor), "a Kraft card with a question mark, as in the catalogue");
+            Assert.IsTrue(missing.Question.gameObject.activeSelf);
+            Assert.IsFalse(missing.Circle.gameObject.activeSelf);
+            Assert.IsTrue(missing.Card.Tween.IsShown);
+            Assert.IsTrue(ending.Find(3).Collected);
+            Assert.IsTrue(ending.Info.Tween.IsShown);
+            Shutdown();
+
+            // Everything collected, with "Reduce motion": the stamp without its punch, and no confetti.
+            NewStores();
+            Settings.ReduceMotion = true;
+            var earlier = new Progress(store);
+            earlier.RecordCompletion(1, 5f, 1);
+            earlier.RecordCompletion(2, 5f, 1);
+            Begin("?level=3");
+            PlayAndComplete(0.3f, false);
+            Press(menu.Complete.Next);
+            ending = menu.Ending;
+            Seconds(EndingMenu.CardsAt + 3 * EndingMenu.CardEvery + EndingMenu.StampAfter + 0.03f);
+            Assert.IsTrue(ending.Stamp.Tween.IsShown);
+            Assert.AreEqual(1f, ending.Stamp.Rect.localScale.x, "no punch");
+            Assert.IsFalse(ending.ConfettiFalling, "no confetti");
+            Assert.AreEqual("3 OF 3 COLLECTED", ending.CountText);
+        }
+
+        [Test]
+        public void WhileABotPlays_TheEndingIsTheBots_AndNothingIsKept()
+        {
+            Begin("?level=3&autoplay=1");
+            for (int i = 0; i < TestHelpers.Ticks(40f) && State != FlowState.Ending; i++) runner.Frame(Sim.Dt);
+            Assert.AreEqual(FlowState.Ending, State, "the bot's run ends the campaign without anybody pressing Finish");
+            Assert.AreEqual(3, runner.LevelId);
+            Frames();
+            EndingMenu ending = menu.Ending;
+            Assert.AreSame(ending, menu.Current);
+            Seconds(ending.InfoAt + 0.3f);
+            Assert.AreEqual("1 OF 3 PLAYED", ending.CountText);
+            Assert.AreEqual(EndingMenu.WatchedThanks, ending.ThanksText);
+            Assert.AreEqual(EndingMenu.WatchedLine, ending.LineText);
+            Assert.IsFalse(ending.Stamp.Tween.IsShown);
+            Assert.IsTrue(ending.Report.Watched);
+            Assert.IsTrue(ending.Find(3).Collected);
+            Assert.IsFalse(ending.Find(1).Collected);
+            Seconds(10f);
+            Assert.AreEqual(FlowState.Ending, State, "and there it stays");
+            Assert.AreEqual(0, store.Count, "the bot leaves nothing in the player's store");
+        }
+
+        // The ending is one fixed block round the canvas's middle: it has to fit the reference frame, with
+        // nothing on anything else, at 16:9 and on the taller canvas of a narrower screen alike.
+        [Test]
+        public void TheEnding_FitsTheReferenceFrame_AndNothingLiesOnAnythingElse()
+        {
+            var earlier = new Progress(store);
+            for (int id = 1; id <= 15; id++) earlier.RecordCompletion(id, 12f, 2);
+            Begin("?level=15", levels: 15);
+            PlayAndComplete(0.2f, false);
+            Press(menu.Complete.Next);
+            EndingMenu ending = menu.Ending;
+            Seconds(ending.InfoAt + 0.5f);
+            Assert.AreEqual(15, ending.Entries.Count);
+            Assert.AreEqual("15 OF 15 COLLECTED", ending.CountText);
+            Assert.IsTrue(ending.Stamp.Tween.IsShown);
+
+            UiRoot root = menu.Root;
+            Rect grid = UiTestKit.OnCanvas(root, ending.Grid);
+            Rect info = UiTestKit.Footprint(root, ending.Info);
+            Rect head = UiTestKit.OnCanvas(root, ending.Head.Rect);
+            float halfWidth = UiTheme.ReferenceWidth * 0.5f, halfHeight = UiTheme.ReferenceHeight * 0.5f;
+            foreach (Rect part in new[] { grid, info, head })
+            {
+                Assert.GreaterOrEqual(part.xMin, -halfWidth + 40f, "inside the frame (left)");
+                Assert.LessOrEqual(part.xMax, halfWidth - 40f, "inside the frame (right)");
+                Assert.GreaterOrEqual(part.yMin, -halfHeight + 40f, "inside the frame (bottom)");
+                Assert.LessOrEqual(part.yMax, halfHeight - 40f, "inside the frame (top)");
+            }
+            Assert.Greater(head.yMin, grid.yMax, "the heading is above the cards");
+            Assert.Greater(grid.yMin, info.yMax, "the result card is below them");
+            // Five to a row, three rows, every card on the screen and none on another.
+            var cards = new List<Rect>();
+            foreach (EndingMenu.Entry entry in ending.Entries) cards.Add(UiTestKit.OnCanvas(root, entry.Card.Rect));
+            Assert.AreEqual(cards[0].yMin, cards[4].yMin, 1e-2f, "five to a row");
+            Assert.Less(cards[5].yMax, cards[0].yMin, "the sixth starts the second row");
+            for (int a = 0; a < cards.Count; a++)
+                for (int b = a + 1; b < cards.Count; b++)
+                    Assert.IsFalse(cards[a].Overlaps(cards[b]), "cards " + (a + 1) + " and " + (b + 1) + " overlap");
+            // The buttons are on the result card and apart from each other.
+            Rect again = UiTestKit.Footprint(root, ending.Again.Sticker), levels = UiTestKit.Footprint(root, ending.LevelsButton.Sticker),
+                title = UiTestKit.Footprint(root, ending.TitleButton.Sticker);
+            Assert.IsFalse(again.Overlaps(levels) || levels.Overlaps(title) || again.Overlaps(title));
+            Assert.Greater(again.xMin, levels.xMax, "the primary button sits at the right");
+            // The stamp lies across the top of the cards, not on a hero toy or on the heading's words.
+            Rect stamp = UiTestKit.OnCanvas(root, ending.Stamp.Rect);
+            foreach (EndingMenu.Entry entry in ending.Entries)
+                Assert.IsFalse(stamp.Overlaps(UiTestKit.OnCanvas(root, entry.Circle.rectTransform)), "the stamp covers the toy of level " + entry.Id);
+        }
+
         // The middle of the bottom edge is the scale readout's and nothing goes over the toy (HudLayoutTests):
         // what the HUD says about the game itself - the mouse is not captured, a bot is playing - hangs from
         // the middle of the top edge. One place for the two, because they are never up together.
@@ -2425,6 +2755,38 @@ namespace Toybox.Tests
             }
         }
 
+        // The same loss of words with a player made small (Level 14: a third of their size). The camera rig
+        // brings the near plane in with the player, and the canvas used to follow it there: scaled by 3e-5,
+        // every card and pill of the pictures of that level was blank. It keeps its place and its scale now.
+        [Test]
+        public void ACapturedPicture_HasItsWords_WhenThePlayerIsSmall()
+        {
+            Present("hud", 16f / 9f);
+            for (int i = 0; i < 30; i++) presentation.Frame(1f / 60f, 1f);
+            HudPresenter hud = presentation.Get<HudPresenter>();
+            Assert.IsTrue(hud.LevelCard.Shown, "test setup: the level card is up");
+            Camera camera = presentation.Camera;
+            RectTransform rect = hud.Root.Rect;
+            float reference = rect.lossyScale.y;
+
+            Assert.IsTrue(game.Player.SetScale(0.3f));
+            for (int i = 0; i < 3; i++) presentation.Frame(1f / 60f, 1f);
+            Assert.AreEqual(Toybox.Render.CameraRig.NearPlane * 0.3f, camera.nearClipPlane, 1e-5f, "test setup: the near plane goes with the player");
+            Assert.AreEqual(reference, rect.lossyScale.y, reference * 1e-3f, "the canvas is scaled as it is for a player of 1");
+            float distance = Vector3.Dot(rect.position - camera.transform.position, camera.transform.forward);
+            float viewHeight = 2f * distance * Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            Assert.AreEqual(viewHeight, rect.sizeDelta.y * rect.lossyScale.y, viewHeight * 1e-3f, "and fills the picture's height");
+            Assert.Greater(distance, camera.nearClipPlane);
+            Assert.Less(distance, camera.farClipPlane);
+
+            const int height = 720, width = 1280;
+            int with = InkInTheLevelCard(hud, width, height);
+            TMPro.TextMeshProUGUI[] labels = hud.LevelCard.Card.GetComponentsInChildren<TMPro.TextMeshProUGUI>(true);
+            foreach (TMPro.TextMeshProUGUI label in labels) label.enabled = false;
+            int without = InkInTheLevelCard(hud, width, height);
+            Assert.Greater(with - without, 100, "the level card has no words on it for a small player (" + with + " dark pixels with its labels, " + without + " without)");
+        }
+
         // Dark pixels where the level card is: the top left of the canvas, 48 to 740 by 48 to 260 reference pixels.
         int InkInTheLevelCard(HudPresenter hud, int width, int height)
         {
@@ -2468,6 +2830,17 @@ namespace Toybox.Tests
             Assert.AreSame(menu.Complete, menu.Current);
             presentation.Frame(Sim.Dt, 1f);
             Assert.IsTrue(menu.Complete.Info.Tween.IsShown, "the finished card");
+            End();
+
+            // The end of the game: every campaign level that is registered, collected.
+            Present("ending", 16f / 9f);
+            menu = presentation.Get<MenuPresenter>();
+            Assert.AreSame(menu.Ending, menu.Current);
+            presentation.Frame(Sim.Dt, 1f);
+            Assert.IsTrue(menu.Ending.Info.Tween.IsShown, "the finished screen");
+            Assert.AreEqual(menu.Ending.Entries.Count, menu.Ending.CardsShown);
+            Assert.IsTrue(menu.Ending.Report.Full);
+            Assert.IsTrue(menu.Ending.Stamp.Tween.IsShown);
             End();
 
             // The catalogue as it will be: the fifteen levels of the plan, some of them collected.

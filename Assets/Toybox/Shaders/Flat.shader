@@ -8,7 +8,9 @@
 //   opaque   (One, Zero)                   colour as it is; a shape other than the quad is cut out
 //   alpha    (SrcAlpha, OneMinusSrcAlpha)  alpha = colour alpha * mask
 //   additive (One, One)                    colour * alpha * mask
-//   multiply (DstColor, Zero)              lerp(white, colour, alpha * mask)
+//   multiply (Zero, SrcColor)              lerp(white, colour, alpha * mask)
+//            (not the equivalent DstColor, Zero: that has come out brighter instead of darker on
+//             Direct3D 12 with MSAA on Intel Arc; a material that still asks for it is read the same way)
 Shader "Toybox/Flat"
 {
     Properties
@@ -108,7 +110,8 @@ Shader "Toybox/Flat"
                 if (_Shape > 3.5) c.rgb *= 1.0 + 1.2 * (1.0 - smoothstep(0.0, 0.45, distance(p, float2(-0.35, 0.4))));
 
                 half a = saturate(c.a) * mask;
-                if (abs(_SrcBlend - 2.0) < 0.5) return half4(lerp(half3(1, 1, 1), c.rgb, a), 1.0);        // multiply
+                if ((_SrcBlend < 0.5 && abs(_DstBlend - 3.0) < 0.5) || abs(_SrcBlend - 2.0) < 0.5)            // multiply
+                    return half4(lerp(half3(1, 1, 1), c.rgb, a), 1.0);
                 if (abs(_SrcBlend - 1.0) < 0.5 && abs(_DstBlend - 1.0) < 0.5) return half4(c.rgb * a, a);     // additive
                 if (abs(_SrcBlend - 1.0) < 0.5 && _DstBlend < 0.5)                                            // opaque
                 {

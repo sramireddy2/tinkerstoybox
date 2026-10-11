@@ -777,6 +777,41 @@ namespace Toybox.Tests
             Assert.AreEqual(2.5f + 0.125f, block.Position.y, 0.03f, "the block rests on top of the frame");
         }
 
+        // The frame never touches the player - so it is no kerb to their foot and no ground under it either,
+        // however low it stands beside them. (Level 14: a door for a mouse at the feet of a player of 1, and
+        // doors of 0.2 to 0.4 at the feet of a giant of 3.2, stopped them like a wall: the foot's own
+        // queries took the lintel for a steep face. Player.PassesThrough.)
+        [TestCase(1f, 0.1f)]
+        [TestCase(1f, 0.12f)]
+        [TestCase(3.2f, 0.2f)]
+        [TestCase(3.2f, 0.3f)]
+        [TestCase(3.2f, 0.4f)]
+        public void ADoorwayFarSmallerThanThePlayer_IsNoKerbToTheirFoot(float playerScale, float doorScale)
+        {
+            Prop door = null;
+            Build(ctx =>
+            {
+                TestHelpers.Floor(ctx);
+                door = ToyCatalog.Add(ctx, ToyId.Doorway, new Vector3(0f, 0f, 3f * playerScale), doorScale);
+                ctx.SetSpawn(Vector3.zero, 0f);
+            });
+            Assert.IsTrue(Game.Player.SetScale(playerScale));
+            Run(2);
+            Input.Hold.MoveZ = 1f;
+            bool over = false, stoodOnIt = false;
+            for (int i = 0; i < TestHelpers.Ticks(1.2f); i++)
+            {
+                Game.Tick();
+                if (Mathf.Abs(Game.Player.Position.z - door.Position.z) < 0.1f * playerScale) over = true;
+                stoodOnIt |= Game.Player.GroundProp == door;
+            }
+            Assert.Greater(Game.Player.Position.z, 5f * playerScale, "walked on over the little frame as if it were not there (stopped at " + Game.Player.Position + ")");
+            Assert.IsTrue(over);
+            Assert.IsFalse(stoodOnIt, "and never stood on it: it is not ground");
+            Assert.AreEqual(0f, Game.Player.Position.y, 0.02f * playerScale);
+            Assert.Less((door.Position - new Vector3(0f, 0f, 3f * playerScale)).magnitude, 1e-4f, "the frame stayed where it stood");
+        }
+
         // ---- The showroom ----------------------------------------------------------------------------------------
 
         [Test]

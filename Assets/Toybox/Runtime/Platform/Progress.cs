@@ -5,8 +5,9 @@ using UnityEngine;
 namespace Toybox.Platform
 {
     /// <summary>
-    /// What the player has achieved: which levels are completed, the best time of each, and the level
-    /// they played last. Kept in a store (PlayerPrefs in the game) and written through on every change.
+    /// What the player has achieved: which levels are completed, the best time of each (and how many
+    /// pick-ups that run took), the level they played last, and how often they reached the ending. Kept
+    /// in a store (PlayerPrefs in the game) and written through on every change.
     /// </summary>
     public sealed class Progress
     {
@@ -14,7 +15,7 @@ namespace Toybox.Platform
 
         readonly IPrefStore store;
 
-        /// <summary>Raised with the level id after a completion was recorded or the progress was reset (-1).</summary>
+        /// <summary>Raised with the level id after a completion was recorded, or with -1 after the progress was reset or an ending was counted.</summary>
         public event Action<int> Changed;
 
         public Progress(IPrefStore store = null)
@@ -49,8 +50,17 @@ namespace Toybox.Platform
             }
         }
 
-        /// <summary>Notes a completion. Returns true if the time is a new best (the first completion always is).</summary>
-        public bool RecordCompletion(int levelId, float seconds)
+        /// <summary>How many toys were picked up in the level's best run, or a negative number if that is not known.</summary>
+        public int PickUps(int levelId) => IsCompleted(levelId) ? store.GetInt(Prefix + "picks." + levelId, -1) : -1;
+
+        /// <summary>How often the campaign was played to its ending.</summary>
+        public int Endings => Mathf.Max(0, store.GetInt(Prefix + "ended", 0));
+
+        /// <summary>
+        /// Notes a completion. Returns true if the time is a new best (the first completion always is).
+        /// The pick-ups of the run are kept with a best time (negative: not counted).
+        /// </summary>
+        public bool RecordCompletion(int levelId, float seconds, int pickUps = -1)
         {
             if (levelId < 0) return false;
             if (float.IsNaN(seconds) || seconds < 0f) seconds = 0f;
@@ -58,10 +68,43 @@ namespace Toybox.Platform
             float best = BestTime(levelId);
             bool isBest = count == 0 || best < 0f || seconds < best;
             store.SetInt(Prefix + "done." + levelId, count + 1);
-            if (isBest) store.SetFloat(Prefix + "best." + levelId, seconds);
+            if (isBest)
+            {
+                store.SetFloat(Prefix + "best." + levelId, seconds);
+                if (pickUps >= 0) store.SetInt(Prefix + "picks." + levelId, pickUps);
+                else store.Delete(Prefix + "picks." + levelId);
+            }
             store.Save();
             Raise(levelId);
             return isBest;
+        }
+
+        /// <summary>Notes that the campaign was played to its ending.</summary>
+        public void RecordEnding()
+        {
+            store.SetInt(Prefix + "ended", Endings + 1);
+            store.Save();
+            Raise(-1);
+        }
+
+        /// <summary>The best times of these levels added up (levels that are not completed count nothing).</summary>
+        public float TotalTime(IEnumerable<int> levelIds)
+        {
+            float total = 0f;
+            foreach (int id in levelIds)
+            {
+                float best = BestTime(id);
+                if (best > 0f) total += best;
+            }
+            return total;
+        }
+
+        /// <summary>The pick-ups of these levels' best runs added up (levels without a count add nothing).</summary>
+        public int TotalPickUps(IEnumerable<int> levelIds)
+        {
+            int total = 0;
+            foreach (int id in levelIds) total += Mathf.Max(0, PickUps(id));
+            return total;
         }
 
         /// <summary>How many of these levels are completed.</summary>
@@ -91,8 +134,10 @@ namespace Toybox.Platform
             {
                 store.Delete(Prefix + "done." + id);
                 store.Delete(Prefix + "best." + id);
+                store.Delete(Prefix + "picks." + id);
             }
             store.Delete(Prefix + "last");
+            store.Delete(Prefix + "ended");
             store.Save();
             Raise(-1);
         }

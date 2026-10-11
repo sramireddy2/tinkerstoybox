@@ -258,8 +258,8 @@ namespace Toybox.Tests
 
             Material shadow = Materials.Flat(new FlatRecipe { Name = "Test Shadow", Color = new Color(0.2f, 0.6f, 0.45f, 1f), Blend = FlatBlend.Multiply });
             Assert.AreEqual(RoomSetup.FlatShader, shadow.shader.name);
-            Assert.AreEqual((float)BlendMode.DstColor, shadow.GetFloat("_SrcBlend"));
-            Assert.AreEqual((float)BlendMode.Zero, shadow.GetFloat("_DstBlend"));
+            Assert.AreEqual((float)BlendMode.Zero, shadow.GetFloat("_SrcBlend"));
+            Assert.AreEqual((float)BlendMode.SrcColor, shadow.GetFloat("_DstBlend"));
             Assert.AreEqual(0f, shadow.GetFloat("_ZWrite"));
             Assert.AreEqual(3000, shadow.renderQueue);
 
@@ -472,6 +472,88 @@ namespace Toybox.Tests
 
             Game.LoadLevel(new AdHocLevel(ctx => TestHelpers.Floor(ctx)));
             Assert.AreEqual(Vector4.zero, Shader.GetGlobalVector("_PatchColor"), "a level without a room has no window patch");
+        }
+
+        // LEVELS, Level 15: "The bell rings and the night preset turns to dawn; every seated toy, which has
+        // been glowing as a night-light, hands its light back."
+        [Test]
+        public void InANightRoom_TheNightTurnsToDawn_WhenTheMachineIsDone_AndTheNextLoadIsNightAgain()
+        {
+            Load("night-light");
+            Present(QualityTier.Medium, typeof(LightingRig));
+            var rig = Presentation.Get<LightingRig>();
+            LightingValues night = LightingValues.For(Game.Environment), morning = LightingValues.Dawn(Game.Environment);
+
+            // What a morning is: the sunny-rug's sun and patch, the day's ambient on the room's own tones, no night-light glow.
+            Assert.IsTrue(Palette.Same(EnvironmentPreset.SunnyRug.SunColor, morning.SunColor));
+            Assert.AreEqual(EnvironmentPreset.SunnyRug.SunIntensity, morning.SunIntensity, 1e-6f);
+            Assert.AreEqual(1f, morning.ToyGlowGain, 1e-6f);
+            AssertVector(new Vector4(LightingValues.AmbientSky, LightingValues.AmbientSky, LightingValues.AmbientSky, 1f), morning.AmbSky, 1e-6f, "the day's sky");
+            AssertVector(Lin(Palette.Plum.Deep, LightingValues.AmbientGround), morning.AmbGround, 1e-6f, "on the Plum room's own floor tone");
+            AssertVector(Lin(Palette.GlintDay), morning.GlintColor, 1e-6f, "the day's glint");
+            AssertVector(Lin(EnvironmentPreset.SunnyRug.PatchColor, EnvironmentPreset.SunnyRug.PatchGain), morning.PatchColor, 1e-6f, "the day's window patch");
+            Assert.Greater(morning.AmbSky.x + morning.AmbSky.y + morning.AmbSky.z, 1.5f * (night.AmbSky.x + night.AmbSky.y + night.AmbSky.z), "it is lighter");
+            Assert.AreEqual(night.SunRotation, morning.SunRotation, "through the same window");
+            Assert.AreEqual(night.HazeColor, morning.HazeColor);
+            Assert.AreEqual(night.ShellMax, morning.ShellMax);
+            Assert.AreEqual(night.Background, morning.Background);
+            // A blend of nothing is the night, of everything the morning.
+            Assert.AreEqual(night.AmbSky, LightingValues.Blend(night, morning, 0f).AmbSky);
+            Assert.AreEqual(morning.AmbSky, LightingValues.Blend(night, morning, 1f).AmbSky);
+            Assert.AreEqual(morning.SunIntensity, LightingValues.Blend(night, morning, 7f).SunIntensity, "clamped");
+
+            // Night until something says otherwise, however long it lasts.
+            Assert.AreEqual(0f, rig.Dawn);
+            for (int i = 0; i < 600; i++) rig.Frame(Sim.Dt, 1f);
+            Assert.AreEqual(0f, rig.Dawn);
+            Assert.AreEqual(6f, Shader.GetGlobalFloat("_ToyGlowGain"));
+            Assert.IsTrue(Palette.Same(Palette.Moon, rig.Sun.color));
+
+            // The alarm rings.
+            Game.Events.RaiseMachineDone(new Toybox.Gadgets.GadgetEvent());
+            rig.Frame(0f, 1f);
+            Assert.AreEqual(0f, rig.Dawn, "no time, no dawn");
+            for (int i = 0; i < TestHelpers.Ticks(LightingRig.DawnSeconds * 0.5f); i++) rig.Frame(Sim.Dt, 1f);
+            Assert.AreEqual(0.5f, rig.Dawn, 0.02f, "half way after two seconds");
+            float glow = Shader.GetGlobalFloat("_ToyGlowGain");
+            Assert.That(glow, Is.InRange(3f, 4f), "the toys are handing their light back");
+            Assert.That(rig.Sun.intensity, Is.InRange(0.55f, 0.57f));
+            for (int i = 0; i < TestHelpers.Ticks(LightingRig.DawnSeconds); i++) rig.Frame(Sim.Dt, 1f);
+            Assert.AreEqual(1f, rig.Dawn);
+            Assert.AreEqual(1f, Shader.GetGlobalFloat("_ToyGlowGain"), 1e-5f);
+            Assert.AreEqual(0.62f, rig.Sun.intensity, 1e-5f);
+            Assert.IsTrue(Palette.Same(EnvironmentPreset.SunnyRug.SunColor, rig.Sun.color), "a warm sun where the moon was");
+            AssertVector(morning.AmbSky, Shader.GetGlobalVector("_AmbSky"), 1e-5f, "_AmbSky");
+            AssertVector(morning.PatchColor, Shader.GetGlobalVector("_PatchColor"), 1e-5f, "_PatchColor");
+            AssertVector(morning.GlintColor, Shader.GetGlobalVector("_GlintColor"), 1e-5f, "_GlintColor");
+            AssertVector(Lin(Palette.Plum.Haze), Shader.GetGlobalVector("_HazeColor"), 1e-5f, "the room is still the Plum room");
+            Assert.AreEqual(morning.AmbSky, rig.Values.AmbSky);
+            // It stays morning, and costs nothing more.
+            Assert.That(() => rig.Frame(Sim.Dt, 1f), UnityEngine.TestTools.Constraints.Is.Not.AllocatingGCMemory());
+            Assert.AreEqual(1f, rig.Dawn);
+
+            // The level starts over (or another night level loads): night again.
+            Game.RestartLevel();
+            Assert.AreEqual(0f, rig.Dawn);
+            Assert.AreEqual(6f, Shader.GetGlobalFloat("_ToyGlowGain"));
+            Assert.AreEqual(0.50f, rig.Sun.intensity, 1e-5f);
+            for (int i = 0; i < 120; i++) rig.Frame(Sim.Dt, 1f);
+            Assert.AreEqual(0f, rig.Dawn, "and it does not dawn again by itself");
+        }
+
+        [Test]
+        public void ADayRoom_TakesNoNoticeOfAMachine()
+        {
+            Load("block-hall");
+            Present(QualityTier.Medium, typeof(LightingRig));
+            var rig = Presentation.Get<LightingRig>();
+            LightingValues before = rig.Values;
+            Game.Events.RaiseMachineDone(new Toybox.Gadgets.GadgetEvent());
+            for (int i = 0; i < 300; i++) rig.Frame(Sim.Dt, 1f);
+            Assert.AreEqual(0f, rig.Dawn);
+            Assert.AreEqual(before.AmbSky, rig.Values.AmbSky);
+            Assert.AreEqual(0.66f, rig.Sun.intensity, 1e-5f);
+            Assert.AreEqual(1f, Shader.GetGlobalFloat("_ToyGlowGain"));
         }
 
         [Test]
@@ -1042,7 +1124,7 @@ namespace Toybox.Tests
             Assert.AreEqual((float)RoomPattern.Corrugated, cardboard.GetFloat("_Pattern"));
 
             Material hull = Find(room, "Hull Shadows").sharedMaterial;
-            Assert.AreEqual((float)BlendMode.DstColor, hull.GetFloat("_SrcBlend"), "hull shadows multiply");
+            Assert.AreEqual((float)BlendMode.SrcColor, hull.GetFloat("_DstBlend"), "hull shadows multiply");
             AssertVector(Lin(pool.Deep), hull.GetVector("_Color"), 1e-4f, "toward the deep tone");
             Material shaft = Find(room, "Light Shaft").sharedMaterial;
             Assert.AreEqual((float)BlendMode.One, shaft.GetFloat("_DstBlend"), "the shaft is additive");
@@ -1766,6 +1848,50 @@ namespace Toybox.Tests
                 AssertColour(Vector3.Scale(g, Vector3.Lerp(Vector3.one, c, 0.5f)), At(image, new Vector3(3f, 1.95f, 6f), feet, 0f, 0f), "multiply: toward the colour by alpha");
                 AssertColour(new Vector3(0.1f, 0.1f, 0.9f), At(image, new Vector3(0f, 3.6f, 6f), feet, 0f, 0f), "the middle of a disc");
                 AssertColour(g, At(image, new Vector3(0.68f, 4.28f, 6f), feet, 0f, 0f), "the corner of a disc's quad is cut away");
+            }
+            finally
+            {
+                Object.DestroyImmediate(image);
+            }
+        }
+
+        // The multiply preset on the anti-aliased tiers, drawn as the game draws it: the product, as on Low.
+        // (Why it is written Zero, SrcColor and not DstColor, Zero: over Level 11's floor the latter came out
+        // BRIGHTER than what was behind it on Direct3D 12 with MSAA - the lane under the roof was a pale
+        // patch on Medium, in some sessions. This small scene never showed that with either spelling; it
+        // holds the preset to the product on the tiers the trouble was seen on.)
+        [TestCase(QualityTier.Medium)]
+        [TestCase(QualityTier.High)]
+        public void FlatMultiplyDarkens_OnTheAntiAliasedTiers(QualityTier tier)
+        {
+            RequireGraphics();
+            Assert.Greater(TierSpec.Of(tier).Msaa, 1, "setup: this tier is drawn with MSAA");
+            var feet = new Vector3(0f, 0.4f, 0f);
+            var grey = new Color(0.5f, 0.5f, 0.5f, 1f);
+            var ink = new Color(0.2f, 0.6f, 0.4f, 0.5f);
+            var level = new RoomLevel("none", ctx =>
+            {
+                ctx.AddStatic(BasicToys.Slab(new Vector3(8f, 0.4f, 8f)), new Vector3(0f, 0.2f, 0f));
+                ctx.SetSpawn(feet, 0f, 0f);
+                Card(ctx, new Vector3(0f, 1.95f, 8f), new Vector2(14f, 8f), Materials.Flat(new FlatRecipe { Name = "Test Backdrop", Color = grey }));
+                Card(ctx, new Vector3(3f, 1.95f, 6f), new Vector2(1.5f, 1.5f), Materials.Flat(new FlatRecipe { Name = "Test Multiply", Color = ink, Blend = FlatBlend.Multiply }));
+            });
+
+            // With every presenter of the game, and the tier's own sample count.
+            string directory = Path.Combine(Path.GetDirectoryName(Application.dataPath), "Temp", "ToyboxRoomTests");
+            List<string> files = Shots.Run(new ShotRequest { Level = 0, Definition = level, Width = Width, Height = Height, OutputDirectory = directory, Quality = tier });
+            var image = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            try
+            {
+                Assert.IsTrue(image.LoadImage(File.ReadAllBytes(files[0])));
+                // Beside the card and through it. The product is grey x lerp(white, ink, 0.5) = grey x (0.6, 0.8, 0.7);
+                // the tier's grade moves both a little, so the two are compared with each other.
+                Color beside = Palette.Lin(At(image, new Vector3(1.6f, 1.95f, 8f), feet, 0f, 0f));
+                Color through = Palette.Lin(At(image, new Vector3(3f, 1.95f, 6f), feet, 0f, 0f));
+                string message = tier + ": beside the card " + beside + ", through it " + through;
+                Assert.AreEqual(0.6f, through.r / beside.r, 0.1f, message);
+                Assert.AreEqual(0.8f, through.g / beside.g, 0.1f, message);
+                Assert.AreEqual(0.7f, through.b / beside.b, 0.1f, message);
             }
             finally
             {

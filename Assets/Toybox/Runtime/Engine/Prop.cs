@@ -54,6 +54,13 @@ namespace Toybox.Engine
         public bool AllowPitch = true;
         /// <summary>The prop cannot tip over: rotation about X and Z is frozen while it is dynamic.</summary>
         public bool KeepUpright;
+        /// <summary>
+        /// On a grab the prop's heading eases (with its GrabPose, over the same 0.15 s) to the nearest
+        /// quarter turn of the view: it is held square to the way the player looks, however askew it lay
+        /// and wherever on it the click landed. For a toy whose heading decides where it fits (Level 11's
+        /// card between the box's sides).
+        /// </summary>
+        public bool SquareOnGrab;
     }
 
     /// <summary>
@@ -135,6 +142,8 @@ namespace Toybox.Engine
         public bool AllowPitch { get; set; }
         /// <summary>Rotation about X and Z is frozen while the prop is dynamic.</summary>
         public bool KeepUpright { get; }
+        /// <summary>A grab turns the prop's heading to the nearest quarter turn of the view.</summary>
+        public bool SquareOnGrab { get; set; }
         /// <summary>True while a FrozenUntilGrabbed prop waits for its first grab (it is kinematic meanwhile).</summary>
         public bool Frozen { get; private set; }
         /// <summary>True between BeginDrive and EndDrive: a gadget moves the prop through <see cref="Mover"/>.</summary>
@@ -202,6 +211,7 @@ namespace Toybox.Engine
             GrabPose = options.GrabPose;
             AllowPitch = options.AllowPitch;
             KeepUpright = options.KeepUpright;
+            SquareOnGrab = options.SquareOnGrab;
             BodyKind = options.Body;
             if (options.Tags != null)
                 foreach (string tag in options.Tags) tags.Add(tag);

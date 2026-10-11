@@ -139,7 +139,11 @@ namespace Toybox.Art
         Alpha,
         /// <summary>One, One; queue 3000 (laser cores, the light shaft).</summary>
         Additive,
-        /// <summary>DstColor, Zero; queue 3000 (hull shadows).</summary>
+        /// <summary>
+        /// Zero, SrcColor; queue 3000 (hull shadows, the shade under a roofed laser). The same product as
+        /// DstColor, Zero - which has come out brighter instead of darker on Direct3D 12 with MSAA (Intel
+        /// Arc): Sticker.shader met it first, Level 11's shade met it again (not on every run).
+        /// </summary>
         Multiply,
     }
 
@@ -184,7 +188,7 @@ namespace Toybox.Art
                 switch (Blend)
                 {
                     case FlatBlend.Alpha: return BlendMode.SrcAlpha;
-                    case FlatBlend.Multiply: return BlendMode.DstColor;
+                    case FlatBlend.Multiply: return BlendMode.Zero;
                     default: return BlendMode.One;
                 }
             }
@@ -198,6 +202,7 @@ namespace Toybox.Art
                 {
                     case FlatBlend.Alpha: return BlendMode.OneMinusSrcAlpha;
                     case FlatBlend.Additive: return BlendMode.One;
+                    case FlatBlend.Multiply: return BlendMode.SrcColor;
                     default: return BlendMode.Zero;
                 }
             }

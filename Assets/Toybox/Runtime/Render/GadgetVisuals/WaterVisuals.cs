@@ -79,6 +79,8 @@ namespace Toybox.Render
         /// <summary>Ripples on show right now.</summary>
         public int Ripples => ripples != null ? ripples.Alive : 0;
         public int RipplesStarted => ripples != null ? ripples.Started : 0;
+        /// <summary>What the ripples on show cover, their die-cut edges included (nothing: a default Bounds).</summary>
+        public Bounds RippleBounds => ripples != null && ripples.Alive > 0 ? ripples.RingMesh.bounds : default;
 
         /// <summary>The colour a soaked toy of this (linear) colour has.</summary>
         public static Vector4 Wet(Vector4 dry) =>
@@ -100,7 +102,8 @@ namespace Toybox.Render
             // A volume that draws no surface is plumbing (a drain, a reservoir out of sight): nothing to show.
             if (!(gadget is WaterVolume water) || water.Surface == null || !water.Footprint.IsValid) return;
 
-            Dip dip = Materials.Dip;
+            // (A volume may have a dip of its own: its body is of the same water as its surface.)
+            Dip dip = water.Dip ?? Materials.Dip;
             Zone footprint = water.Footprint;
             Color bottom = GadgetFx.Lin(Palette.Mix(dip.Deep, Palette.Ink, dip.Night ? 0f : 0.25f), 1f, BodyAlphaBottom);
             Color top = GadgetFx.Lin(dip.Night ? dip.Light : dip.Deep, 1f, BodyAlphaTop);
@@ -257,8 +260,44 @@ namespace Toybox.Render
             var at = new Vector3(centre.x, over.SurfaceY + 0.012f, centre.z);
             float radius = Mathf.Max(0.3f, sponge.Prop.Radius);
             Color paper = GadgetFx.Lin(Palette.Paper, 1f, 0.75f);
-            if (sponge.Activity == SpongeActivity.Soaking) ripples.Ring(at, Vector3.up, radius * 1.7f, radius * 0.9f, paper, 0.6f, true);
-            else ripples.Ring(at, Vector3.up, radius * 0.9f, radius * 1.9f, paper, 0.7f, true);
+            bool soaking = sponge.Activity == SpongeActivity.Soaking;
+            float from = radius * (soaking ? 1.7f : 0.9f), to = radius * (soaking ? 0.9f : 1.9f);
+            // A ripple lies on the water it is a ripple of. (Sized by the toy alone it was drawn out through the
+            // glass, in mid-air: Level 13's tower is 3 across and the brick of a sponge in it spread rings 4.6
+            // across; its bowl is 20 across and the sponge that drinks it drew them in from 21.)
+            float fit = RippleFit(over.Footprint, at, Mathf.Max(from, to));
+            if (fit <= 0f) return;
+            ripples.Ring(at, Vector3.up, from * fit, to * fit, paper, soaking ? 0.6f : 0.7f, true);
+        }
+
+        /// <summary>A ripple with less room than this is not drawn at all.</summary>
+        public const float LeastRipple = 0.2f;
+
+        /// <summary>
+        /// How far a ring round a point can spread, seen from above, before it leaves a volume's footprint;
+        /// 0 for a point outside it.
+        /// </summary>
+        public static float Reach(Zone footprint, Vector3 at)
+        {
+            if (!footprint.IsValid) return 0f;
+            if (footprint.Shape == ZoneShape.Box)
+            {
+                Vector3 local = Quaternion.Inverse(footprint.Rotation) * (at - footprint.Center);
+                return Mathf.Max(0f, Mathf.Min(footprint.Size.x * 0.5f - Mathf.Abs(local.x), footprint.Size.z * 0.5f - Mathf.Abs(local.z)));
+            }
+            float dx = at.x - footprint.Center.x, dz = at.z - footprint.Center.z;
+            return Mathf.Max(0f, footprint.Radius - Mathf.Sqrt(dx * dx + dz * dz));
+        }
+
+        /// <summary>
+        /// What a ripple of this radius round this point is scaled by so that it stays on the water, its
+        /// die-cut edge included: 1 where there is room for it, 0 where there is no room for a ripple at all.
+        /// </summary>
+        public static float RippleFit(Zone footprint, Vector3 at, float radius)
+        {
+            float reach = Reach(footprint, at) * Inset;
+            if (reach < LeastRipple || radius <= 0f) return 0f;
+            return Mathf.Min(1f, reach / (radius * CuePool.RingEdge));
         }
 
         Pool Find(WaterVolume water)

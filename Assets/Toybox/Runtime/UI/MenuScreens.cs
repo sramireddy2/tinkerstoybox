@@ -548,6 +548,7 @@ namespace Toybox.UI
     ///   100     confetti in the level's toy colours
     ///   400     a "COLLECTED" sticker stamps on (scale 1.4 to 1 in 90 ms)
     ///   600     the card shows title, time and grab count, and a Cherry "Next" pill
+    ///           (on the campaign's last level the pill says "Finish" and leads to the ending)
     ///
     /// "Reduce motion" drops the flash, the tilt and the stamp's punch.
     ///
@@ -561,6 +562,8 @@ namespace Toybox.UI
         public const float FlashTime = 0.3f, ConfettiAt = 0.1f, StampAt = 0.4f, StampTime = 0.09f, StampFrom = 1.4f, InfoAt = 0.6f;
         /// <summary>Seconds the finished card waits untouched before it presses Next itself; 0 to wait for ever.</summary>
         public const float AutoNextSeconds = 5f;
+        /// <summary>What the Cherry pill says: on to the next level, or - on the campaign's last - on to the ending.</summary>
+        public const string NextLabel = "Next", FinishLabel = "Finish";
         const float BarWidth = 150f;
 
         readonly Image flash;
@@ -633,10 +636,11 @@ namespace Toybox.UI
             flash.gameObject.SetActive(false);
         }
 
+        // The next level - or, after the campaign's last, the ending (the campaign does not wrap round).
         void GoOn()
         {
             advanced = true;
-            Menu.Flow?.NextLevel();
+            Menu.Flow?.Advance();
         }
 
         protected override void Opening()
@@ -659,6 +663,9 @@ namespace Toybox.UI
             LevelDefinition level = flow != null && flow.LastCompletion.Level != null ? flow.LastCompletion.Level : game.Level;
             float seconds = flow != null && flow.LastCompletion.Level != null ? flow.LastCompletion.Time : game.Time;
             title.text = level != null ? (level.Title ?? "").ToUpperInvariant() : "";
+            // (Without a flow - a capture - the level itself says whether it is the campaign's last.)
+            bool last = flow != null ? flow.AtLastLevel : level != null && Menu.Levels.InCampaign(level.Id) && level.Id == Menu.Levels.Last;
+            Next.Label.text = last ? FinishLabel : NextLabel;
             int grabs = Menu.Grabs;
             // (The levels' word: toys are picked up and let go.)
             stats.text = UiKit.Time(seconds) + "  ·  " + grabs + (grabs == 1 ? " pick-up" : " pick-ups");

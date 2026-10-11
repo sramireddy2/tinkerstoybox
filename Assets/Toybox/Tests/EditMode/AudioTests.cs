@@ -2155,6 +2155,11 @@ namespace Toybox.Tests
             audio.PlayUi(UiSound.Hover);
             Assert.AreEqual(open.Pitch, Last(SoundId.UiClick).Pitch, 1e-6f);
             Assert.AreEqual(1f, Last(SoundId.UiHover).Pitch);
+            // The ending's stamp is the level-complete flourish once more (rendered in the level's key by the bank).
+            int flourishes = audio.Output.Count(SoundId.LevelComplete);
+            audio.PlayUi(UiSound.Fanfare);
+            Assert.AreEqual(flourishes + 1, audio.Output.Count(SoundId.LevelComplete));
+            Assert.IsFalse(Last(SoundId.LevelComplete).Spatial);
             Assert.AreEqual(1f, audio.KeyPitch(9), 1e-6f, "the button is written with do on A: at home in A minor");
 
             // Gadget events are found by name on whatever carries them.

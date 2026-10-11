@@ -13,7 +13,7 @@ using Object = UnityEngine.Object;
 namespace Toybox.Tests
 {
     /// <summary>
-    /// The game flow: the state machine (Title, Playing, Paused, LevelSelect, LevelComplete), progress kept
+    /// The game flow: the state machine (Title, Playing, Paused, LevelSelect, LevelComplete, Ending), progress kept
     /// through an injectable store, and what GameRunner makes of it - the title unless the launch names a
     /// level, no ticks and a free pointer while not playing, and who gets the clicks.
     /// </summary>
@@ -180,11 +180,220 @@ namespace Toybox.Tests
             Assert.AreEqual(2, Number);
             Assert.IsFalse(flow.AdvancePending);
 
-            // After the last level comes the first again.
+            // After the last level comes the ending - not the first level again.
+            Assert.IsTrue(flow.AtLastLevel);
             game.CompleteLevel();
             flow.Update(GameFlow.DefaultAdvanceDelay);
-            Assert.AreEqual(0, Number);
-            CollectionAssert.AreEqual(new[] { "Title>Playing", "Playing>LevelComplete", "LevelComplete>Playing", "Playing>LevelComplete", "LevelComplete>Playing" }, changes);
+            Assert.AreEqual(FlowState.Ending, flow.State);
+            Assert.AreEqual(2, Number, "the last level stays loaded behind the ending");
+            Assert.IsFalse(flow.AdvancePending);
+            flow.Update(60f);
+            Assert.AreEqual(FlowState.Ending, flow.State, "the ending waits");
+            CollectionAssert.AreEqual(new[] { "Title>Playing", "Playing>LevelComplete", "LevelComplete>Playing", "Playing>LevelComplete", "LevelComplete>Ending" }, changes);
+        }
+
+        void PickUp(int times = 1)
+        {
+            for (int i = 0; i < times; i++) game.Events.RaisePropGrabbed(new PropHoldEvent());
+        }
+
+        // The campaign is 1, 2, 3; 0 is a sandbox and 99 a showroom.
+        static LevelList Campaign() => new LevelList(new[] { 0, 1, 2, 3, 99 }, id => new StepLevel(id), null, id => id >= 1 && id <= 3);
+
+        [Test]
+        public void AfterTheLastLevel_ComesTheEnding_AndAFreshGameStartsAtTheBeginning_WithEverythingKept()
+        {
+            Create(Campaign());
+            flow.AutoAdvance = false;
+            flow.ShowTitle();
+            flow.StartLevel(flow.LevelId);
+            Assert.AreEqual(1, Number);
+            Assert.IsFalse(flow.AtLastLevel);
+
+            // Level 1: a second of play and two pick-ups. Advance is the card's "Next".
+            for (int i = 0; i < 60; i++) game.Tick();
+            PickUp(2);
+            Assert.AreEqual(2, flow.PickUps);
+            game.CompleteLevel();
+            Assert.AreEqual(2, flow.Progress.PickUps(1), "the pick-ups of a best run are kept with its time");
+            Assert.IsTrue(flow.Advance());
+            Assert.AreEqual(FlowState.Playing, flow.State);
+            Assert.AreEqual(2, Number);
+            Assert.AreEqual(0, flow.PickUps, "a new level, a new count");
+
+            // Level 2: half a second, nothing picked up. Then again, slower, with a pick-up: the best run stands.
+            for (int i = 0; i < 30; i++) game.Tick();
+            game.CompleteLevel();
+            Assert.IsTrue(flow.Restart());
+            for (int i = 0; i < 90; i++) game.Tick();
+            PickUp();
+            game.CompleteLevel();
+            Assert.IsFalse(flow.LastCompletionWasBest);
+            Assert.AreEqual(0.5f, flow.Progress.BestTime(2), 1e-4f);
+            Assert.AreEqual(0, flow.Progress.PickUps(2));
+            Assert.IsTrue(flow.Advance());
+            Assert.AreEqual(3, Number);
+            Assert.IsTrue(flow.AtLastLevel);
+            Assert.AreEqual(0, flow.Progress.Endings);
+
+            // Level 3 is the last. While it is played "Advance" is still the step to the next level ...
+            for (int i = 0; i < 90; i++) game.Tick();
+            PickUp();
+            int loadsBefore = loads;
+            game.CompleteLevel();
+            Assert.AreEqual(FlowState.LevelComplete, flow.State);
+            Assert.AreEqual(3, flow.Progress.LastPlayed);
+            // ... and from its complete card it is the ending.
+            Assert.IsTrue(flow.Advance());
+            Assert.AreEqual(FlowState.Ending, flow.State);
+            Assert.AreEqual("LevelComplete>Ending", changes[changes.Count - 1]);
+            Assert.AreEqual(3, Number, "the last level stays loaded behind the ending");
+            Assert.AreEqual(loadsBefore, loads, "nothing was loaded: the campaign does not wrap round");
+            Assert.IsFalse(flow.Playing);
+            Assert.IsFalse(flow.AdvancePending);
+            Assert.AreEqual(1, flow.Progress.Endings, "the ending is remembered");
+            Assert.AreEqual(1, flow.Progress.LastPlayed, "and the bookmark is back on the first level");
+            Assert.AreEqual(1, flow.ContinueLevel);
+
+            // What the ending tells: all three, the best runs added up.
+            CampaignReport report = flow.Report();
+            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, report.Levels);
+            CollectionAssert.AreEqual(new[] { true, true, true }, report.Collected);
+            Assert.IsTrue(report.Full);
+            Assert.IsFalse(report.Watched);
+            Assert.AreEqual(3, report.CollectedCount);
+            Assert.AreEqual(1f + 0.5f + 1.5f, report.Seconds, 1e-3f);
+            Assert.AreEqual(2 + 0 + 1, report.PickUps);
+            Assert.AreEqual(report.Seconds, flow.Progress.TotalTime(flow.Levels.Campaign), 1e-4f);
+            Assert.AreEqual(report.PickUps, flow.Progress.TotalPickUps(flow.Levels.Campaign));
+
+            // The ending is a place to rest: it cannot be paused or resumed, and nothing moves on by itself.
+            Assert.IsFalse(flow.Pause());
+            Assert.IsFalse(flow.Resume());
+            Assert.IsFalse(flow.ShowEnding(), "already there");
+            flow.ForceAutoAdvance = true;
+            flow.Update(60f);
+            flow.ForceAutoAdvance = false;
+            Assert.AreEqual(FlowState.Ending, flow.State);
+            Assert.AreEqual(1, flow.Progress.Endings);
+            // The catalogue opens from it, and closes back to it.
+            Assert.IsTrue(flow.OpenLevelSelect());
+            Assert.AreEqual(FlowState.LevelSelect, flow.State);
+            Assert.IsTrue(flow.CloseLevelSelect());
+            Assert.AreEqual(FlowState.Ending, flow.State);
+
+            // Back to the title: it stands over the first level, and "Click to play" is a fresh game.
+            Assert.IsTrue(flow.ReturnToTitle());
+            Assert.AreEqual(FlowState.Title, flow.State);
+            Assert.AreEqual(1, Number);
+            Assert.AreEqual(1, flow.LevelId);
+            Assert.AreEqual(0, game.LevelTicks);
+            int before = loads;
+            Assert.IsTrue(flow.StartLevel(flow.LevelId));
+            Assert.AreEqual(before, loads, "the level that stands behind the title is the one that is played");
+            Assert.AreEqual(FlowState.Playing, flow.State);
+            for (int id = 1; id <= 3; id++) Assert.IsTrue(flow.Progress.IsCompleted(id), "level " + id + " is still collected");
+            flow.Dispose();
+            game.Dispose();
+
+            // Another session with the same store: the title opens over level 1, and the catalogue is as it was left.
+            Create(Campaign());
+            Assert.AreEqual(1, flow.ContinueLevel);
+            flow.ShowTitle();
+            Assert.AreEqual(1, Number);
+            Assert.AreEqual(1, flow.Progress.Endings);
+            Assert.IsTrue(flow.Report().Full);
+            for (int id = 1; id <= 3; id++) Assert.IsTrue(flow.Progress.IsUnlocked(id, flow.Levels));
+            Assert.AreEqual(0.5f, flow.Progress.BestTime(2), 1e-4f);
+
+            // Playing the campaign through again ends it again; forgetting everything forgets that too.
+            flow.AutoAdvance = false;
+            flow.StartLevel(3);
+            game.CompleteLevel();
+            flow.Advance();
+            Assert.AreEqual(2, flow.Progress.Endings);
+            flow.Progress.Reset(flow.Levels.Ids);
+            Assert.AreEqual(0, flow.Progress.Endings);
+            Assert.AreEqual(-1, flow.Progress.PickUps(1));
+            Assert.IsFalse(flow.Report().Full);
+            Assert.AreEqual(0, flow.Report().CollectedCount);
+        }
+
+        [Test]
+        public void TheEnding_IsOnlyForTheCampaignsLastLevel_AndCountsWhatIsCollected()
+        {
+            Create(Campaign());
+            flow.AutoAdvance = false;
+
+            // The showroom lies after the last level in the list, but it is no part of the campaign.
+            flow.StartLevel(99);
+            Assert.IsFalse(flow.AtLastLevel);
+            game.CompleteLevel();
+            Assert.IsTrue(flow.Advance());
+            Assert.AreEqual(FlowState.Playing, flow.State);
+            Assert.AreEqual(1, Number, "from the showroom play goes into the campaign");
+
+            // The level keys still step round the list (they are for looking at levels, not for playing the game).
+            flow.StartLevel(3);
+            Assert.IsTrue(flow.NextLevel());
+            Assert.AreEqual(1, Number);
+            flow.StartLevel(3);
+            Assert.IsTrue(flow.Advance(), "the last level is not completed: Advance is the next level");
+            Assert.AreEqual(1, Number);
+
+            // Somebody who went straight to the last level (by address) reaches the ending with one toy collected.
+            flow.StartLevel(3);
+            for (int i = 0; i < 120; i++) game.Tick();
+            game.CompleteLevel();
+            Assert.IsTrue(flow.Advance());
+            Assert.AreEqual(FlowState.Ending, flow.State);
+            CampaignReport report = flow.Report();
+            Assert.IsFalse(report.Full);
+            Assert.AreEqual(1, report.CollectedCount);
+            Assert.AreEqual(3, report.Total);
+            CollectionAssert.AreEqual(new[] { false, false, true }, report.Collected);
+            Assert.AreEqual(2f, report.Seconds, 1e-3f);
+
+            // From the ending the level keys and the catalogue's cards start a level as from anywhere else.
+            Assert.IsTrue(flow.StartLevel(2));
+            Assert.AreEqual(FlowState.Playing, flow.State);
+            Assert.AreEqual(2, Number);
+            Assert.AreEqual(2, flow.Progress.LastPlayed);
+        }
+
+        [Test]
+        public void ABotsRunToTheEnding_IsItsOwn_AndLeavesNothingInTheStore()
+        {
+            Create(Campaign());
+            // What the runner sets while a bot plays.
+            flow.RecordProgress = false;
+            flow.ForceAutoAdvance = true;
+            flow.StartLevel(2);
+            for (int i = 0; i < 60; i++) game.Tick();
+            PickUp(3);
+            game.CompleteLevel();
+            flow.Update(GameFlow.DefaultAdvanceDelay);
+            Assert.AreEqual(3, Number);
+            for (int i = 0; i < 30; i++) game.Tick();
+            PickUp();
+            game.CompleteLevel();
+            flow.Update(GameFlow.DefaultAdvanceDelay);
+            Assert.AreEqual(FlowState.Ending, flow.State, "the countdown ends the campaign too");
+            Assert.AreEqual(3, Number);
+
+            Assert.AreEqual(0, store.Count, "nothing of it is the player's");
+            Assert.AreEqual(0, flow.Progress.Endings);
+            Assert.AreEqual(-1, flow.Progress.LastPlayed);
+            CampaignReport report = flow.Report();
+            Assert.IsTrue(report.Watched);
+            CollectionAssert.AreEqual(new[] { false, true, true }, report.Collected, "what the bot played since the game began");
+            Assert.AreEqual(1.5f, report.Seconds, 1e-3f);
+            Assert.AreEqual(4, report.PickUps);
+
+            // The player takes over: the report is their own progress again.
+            flow.RecordProgress = true;
+            Assert.IsFalse(flow.Report().Watched);
+            Assert.AreEqual(0, flow.Report().CollectedCount);
         }
 
         [Test]

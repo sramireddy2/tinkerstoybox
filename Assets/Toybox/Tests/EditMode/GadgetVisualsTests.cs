@@ -237,6 +237,51 @@ namespace Toybox.Tests
             Assert.AreEqual(0, RootOf<LaserVisuals>().childCount, "nothing of the level is left");
         }
 
+        // Seen from underneath, a roof is paper: where a beam meets it from above there is a pinpoint of
+        // light on its underside (LEVELS, Level 11: the walk under the card). A block that stands on the
+        // ground keeps the beams off it just as well and has no underside to glow.
+        [Test]
+        public void Lasers_GlowOnTheUndersideOfARoof_AndNotInABlock()
+        {
+            LaserRain rain = null;
+            Build(ctx =>
+            {
+                TestHelpers.Floor(ctx, 40f);
+                // A roof over the left of the emitter, a block from the floor up under its right.
+                TestHelpers.Box(ctx, new Vector3(-1.5f, 2.5f, 8f), new Vector3(2f, 0.3f, 6f));
+                TestHelpers.Box(ctx, new Vector3(1.5f, 1.25f, 8f), new Vector3(2f, 2.5f, 6f));
+                rain = new LaserRain(ctx, new LaserRainOptions { Center = new Vector3(0f, 5f, 8f), Size = new Vector2(5f, 4f), Range = 5f, OnZapped = () => { } });
+                ctx.SetSpawn(new Vector3(0f, 0f, -4f), 0f);
+            });
+            LaserVisuals lasers = Present<LaserVisuals>();
+            Frames(8);
+
+            int underRoof = 0, onBlock = 0;
+            for (int i = 0; i < rain.BeamCount; i++)
+            {
+                if (rain.BeamLength(i) > rain.Range - game.Player.Height) continue;
+                if (rain.BeamOrigin(i).x < 0f) underRoof++;
+                else onBlock++;
+            }
+            Assert.Greater(underRoof, 10);
+            Assert.Greater(onBlock, 10);
+            Assert.AreEqual(underRoof + onBlock, lasers.ShadedCount(0), "both keep the beams off the ground");
+            Assert.AreEqual(underRoof, lasers.GlowCount(0), "a pinpoint per beam on the roof, none for the block");
+            Assert.AreEqual(underRoof * 4, lasers.GlowMeshOf(0).vertexCount);
+            Bounds glow = lasers.GlowMeshOf(0).bounds;
+            Assert.AreEqual(2.33f, glow.center.y, 0.03f, "on the underside of the roof (2.35), a hair below it");
+            Assert.Less(glow.size.y, 1e-3f, "flat");
+            Assert.Less(glow.max.x, -0.3f, "under the roof only");
+            Assert.IsTrue(lasers.GlowRendererOf(0).enabled);
+            AssertEffect(lasers.GlowRendererOf(0), "the glow");
+            Assert.AreEqual(rain.BeamCount * 8, lasers.DotMeshOf(0).vertexCount, "the dots are as they were: one and its wash per beam");
+
+            Unload();
+            Assert.AreEqual(0, lasers.Count);
+            Assert.AreEqual(0, lasers.KeptCount);
+            Assert.AreEqual(0, RootOf<LaserVisuals>().childCount, "nothing of the level is left");
+        }
+
         [Test]
         public void WithoutThePresenter_TheGadgetsOwnBeamsAreBack()
         {
@@ -575,6 +620,42 @@ namespace Toybox.Tests
             Assert.AreEqual(0, water.Ripples);
         }
 
+        // Level 13: peach water in a peach den read as a sheet of glass. A volume may be drawn in a dip of
+        // its own, and then its body is of the same water as its surface.
+        [Test]
+        public void Water_WithADipOfItsOwn_IsDrawnInIt_SurfaceAndBody()
+        {
+            WaterVolume plain = null, pool = null;
+            Build(ctx =>
+            {
+                TestHelpers.Floor(ctx, 60f);
+                plain = new WaterVolume(ctx, new WaterVolumeOptions { Name = "Plain", Footprint = Zone.Cylinder(-6f, 8f, 2f, 0f, 4f), Area = 12f, Volume = 12f });
+                pool = new WaterVolume(ctx, new WaterVolumeOptions { Name = "Pool", Footprint = Zone.Cylinder(6f, 8f, 2f, 0f, 4f), Area = 12f, Volume = 12f, Dip = Palette.Pool });
+                ctx.SetSpawn(new Vector3(0f, 0f, -3f), 0f);
+            });
+            Dip room = game.Context.Dip;
+            Assert.AreNotSame(Palette.Pool, room, "the test's room is not the pool dip");
+            Assert.IsNull(plain.Dip);
+            Assert.AreSame(Palette.Pool, pool.Dip);
+            Assert.AreSame(Materials.Water(room), plain.Surface.GetComponent<MeshRenderer>().sharedMaterial, "by default: the room's water");
+            Assert.AreSame(Materials.Water(Palette.Pool), pool.Surface.GetComponent<MeshRenderer>().sharedMaterial, "with a dip of its own: that dip's water");
+
+            WaterVisuals water = Present<WaterVisuals>();
+            Frames(3);
+            Color roomTop = GadgetFx.Lin(room.Deep, 1f, WaterVisuals.BodyAlphaTop), poolTop = GadgetFx.Lin(Palette.Pool.Deep, 1f, WaterVisuals.BodyAlphaTop);
+            Assert.IsTrue(HasColor(water.BodyOf(plain), roomTop), "the body of the room's water is the room's deep tone");
+            Assert.IsFalse(HasColor(water.BodyOf(plain), poolTop));
+            Assert.IsTrue(HasColor(water.BodyOf(pool), poolTop), "the body of the pool's water is the pool's");
+            Assert.IsFalse(HasColor(water.BodyOf(pool), roomTop));
+        }
+
+        static bool HasColor(Renderer renderer, Color color)
+        {
+            foreach (Color c in renderer.GetComponent<MeshFilter>().sharedMesh.colors)
+                if (Mathf.Abs(c.r - color.r) < 0.004f && Mathf.Abs(c.g - color.g) < 0.004f && Mathf.Abs(c.b - color.b) < 0.004f && Mathf.Abs(c.a - color.a) < 0.004f) return true;
+            return false;
+        }
+
         [Test]
         public void ASponge_LooksAsSoakedAsItIs()
         {
@@ -626,6 +707,68 @@ namespace Toybox.Tests
             Unload();
             Assert.AreEqual(0, water.SpongeCount);
             Assert.AreEqual(0, water.RipplesStarted);
+        }
+
+        // Level 13: a ripple lies on the water it is a ripple of. Sized by the toy alone, the rings of a
+        // sponge wrung out in a glass tower 3 across were 4.6 across: out through the glass, in mid-air.
+        [Test]
+        public void Ripples_StayOnTheWaterTheyAreOn()
+        {
+            Zone tower = Zone.MinMax(new Vector3(-1.5f, 0f, 6.7f), new Vector3(1.5f, 10f, 10f));
+            Zone bowl = Zone.Cylinder(0f, 0f, 10f, 0f, 8f);
+            Assert.AreEqual(1.1f, WaterVisuals.Reach(tower, new Vector3(0f, 3f, 7.8f)), 1e-4f, "as far as the nearest side");
+            Assert.AreEqual(1.5f, WaterVisuals.Reach(tower, new Vector3(0f, 3f, 8.35f)), 1e-4f);
+            Assert.AreEqual(0f, WaterVisuals.Reach(tower, new Vector3(2f, 3f, 8f)), "outside it");
+            Assert.AreEqual(8.8f, WaterVisuals.Reach(bowl, new Vector3(0f, 1f, 1.2f)), 1e-4f);
+            Assert.AreEqual(0f, WaterVisuals.Reach(default, Vector3.zero));
+            Assert.AreEqual(1f, WaterVisuals.RippleFit(bowl, Vector3.zero, 3f), "where there is room a ripple is as big as it was");
+            float fit = WaterVisuals.RippleFit(tower, new Vector3(0f, 3f, 7.8f), 2.3f);
+            Assert.LessOrEqual(fit * 2.3f * CuePool.RingEdge, 1.1f, "in the tower it is made to fit, edge and all");
+            Assert.Greater(fit, 0.3f);
+            Assert.AreEqual(0f, WaterVisuals.RippleFit(tower, new Vector3(1.45f, 3f, 8f), 2.3f), "and against the glass there is no room for one");
+
+            // On show: a sponge that drinks in a narrow tower, and then - made small - wrings itself out there.
+            WaterVolume narrow = null;
+            Sponge sponge = null;
+            Build(ctx =>
+            {
+                TestHelpers.Floor(ctx, 60f);
+                narrow = new WaterVolume(ctx, new WaterVolumeOptions { Name = "Tower", Footprint = tower, Area = 9f, Volume = 27f });
+                float rest = ToyCatalog.Get(ToyId.Sponge).RestHeight;
+                Prop prop = ToyCatalog.Add(ctx, ToyId.Sponge, new Vector3(0f, rest * 2f + 0.01f, 7.8f), 2f, Palette.Lemon);
+                sponge = new Sponge(ctx, new SpongeOptions { Name = "Brick", Prop = prop, Volumes = new[] { narrow }, CapacityPerScale3 = 2f, AbsorbRate = 16f, SqueezeRate = 4f });
+                ctx.SetSpawn(new Vector3(0f, 0f, -3f), 0f);
+            });
+            WaterVisuals water = Present<WaterVisuals>();
+            Assert.Greater(sponge.Prop.Radius * 1.7f, 1.5f, "the test's sponge is bigger than the tower is wide: its rings would not fit");
+            int seen = 0;
+            void Watch(float seconds)
+            {
+                for (int i = 0; i < Mathf.RoundToInt(seconds * 60f); i++)
+                {
+                    Frames();
+                    if (water.Ripples == 0) continue;
+                    seen++;
+                    Bounds rings = water.RippleBounds;
+                    Assert.GreaterOrEqual(rings.min.x, -1.5f - 1e-3f, "a ripple is out through the tower's -X side");
+                    Assert.LessOrEqual(rings.max.x, 1.5f + 1e-3f, "a ripple is out through the tower's +X side");
+                    Assert.GreaterOrEqual(rings.min.z, 6.7f - 1e-3f, "a ripple is out through the tower's front");
+                    Assert.LessOrEqual(rings.max.z, 10f + 1e-3f, "a ripple is out through the tower's back");
+                    Assert.Greater(rings.size.x, 0.3f, "and it is a ripple, not a dot");
+                }
+            }
+            Watch(0.8f);
+            Assert.AreEqual(SpongeActivity.Soaking, sponge.Activity);
+            Assert.Greater(seen, 20, "ripples while it drinks");
+            int drinking = water.RipplesStarted;
+            TestHelpers.RunUntil(game, () => sponge.Activity == SpongeActivity.Idle, 5f);
+            // (A test fixture's shortcut for a pick-up and a let-go: the full sponge is a brick again.)
+            sponge.Prop.SetScale(1f);
+            seen = 0;
+            Watch(1.5f);
+            Assert.AreEqual(SpongeActivity.Wringing, sponge.Activity);
+            Assert.Greater(water.RipplesStarted, drinking + 2, "ripples while it wrings itself out");
+            Assert.Greater(seen, 40);
         }
 
         // ------------------------------------------------------------------------------------------

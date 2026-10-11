@@ -86,6 +86,7 @@ namespace Toybox.Render
             Build();
             game.Events.PropDropped += OnDropped;
             game.Events.PropGrabbed += OnGrabbed;
+            game.Events.PropRespawned += OnRespawned;
             game.Events.LevelUnloading += OnLevelUnloading;
         }
 
@@ -115,6 +116,7 @@ namespace Toybox.Render
             active = false;
             game.Events.PropDropped -= OnDropped;
             game.Events.PropGrabbed -= OnGrabbed;
+            game.Events.PropRespawned -= OnRespawned;
             game.Events.LevelUnloading -= OnLevelUnloading;
             if (root != null) Sim.Destroy(root);
             if (line != null) Sim.Destroy(line);
@@ -144,6 +146,16 @@ namespace Toybox.Render
         }
 
         void OnGrabbed(PropHoldEvent e) => Hide();
+
+        // A toy that is sent back to where it started has its first size again: the factor of the hold
+        // that ended is no longer true of it. (Level 11 sends a card that was in the hand of a zapped
+        // player back to its table: the release and the respawn are one tick, and the drawing stood beside
+        // the little card on its table, sized for the roof it had been and for a camera that was still in
+        // the lane - letters a fifth of the picture tall.)
+        void OnRespawned(PropEvent e)
+        {
+            if (e.Prop == prop) Hide();
+        }
 
         void OnLevelUnloading(LevelEvent e) => Hide();
 

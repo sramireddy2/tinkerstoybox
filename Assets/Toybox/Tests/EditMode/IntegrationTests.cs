@@ -328,6 +328,67 @@ namespace Toybox.Tests
             Assert.AreEqual(0f, callout.Opacity);
         }
 
+        // A toy that is sent back to where it started - by a leash, by the kill plane, by a level that takes
+        // it out of a zapped player's hand (Level 11) - has its first size again: the drawing of the hold that
+        // ended goes with it. (Out of the hand the release and the respawn are one tick: the drawing stood
+        // beside the little toy on its pedestal, sized for what it had been.)
+        [Test]
+        public void AToySentBackToItsStart_LosesItsDimensionCallout()
+        {
+            Prop block = null;
+            Load("sunny-rug", ctx =>
+            {
+                Ground(ctx);
+                ctx.AddStatic(BasicToys.Slab(new Vector3(30f, 12f, 1f)), new Vector3(0f, 6f, 20f));
+                block = ctx.AddProp(BasicToys.Block(1f, Palette.Cherry), new Vector3(0f, 0.5f, 4f));
+            });
+            Present(QualityTier.Medium, typeof(DimensionCallout));
+            DimensionCallout callout = Presentation.Get<DimensionCallout>();
+            if (!Presentation.Context.HasGraphics) Assert.Ignore("no graphics device: nothing is drawn");
+
+            // Let go at the far wall, several times the size: called out. Sent back while the drawing is up: gone.
+            TestHelpers.LookAt(Game.Player, block.Center);
+            Input.Once.GrabPressed = true;
+            Frames(5);
+            TestHelpers.LookAt(Game.Player, new Vector3(0f, 4f, 19f));
+            Frames(5);
+            Input.Once.GrabPressed = true;
+            Frames(3);
+            Assert.AreSame(block, callout.Shown, "setup: the drawing is up");
+            block.Respawn();
+            Frames(2);
+            Assert.AreEqual(1f, block.Scale, "setup: back at its first size");
+            Assert.IsNull(callout.Shown, "the factor is no longer true of it");
+            Assert.AreEqual(0f, callout.Opacity);
+
+            // Sent back out of the hand: never shown at all.
+            Frames(TestHelpers.Ticks(0.5f));
+            TestHelpers.LookAt(Game.Player, block.Center);
+            Input.Once.GrabPressed = true;
+            Frames(5);
+            TestHelpers.LookAt(Game.Player, new Vector3(0f, 4f, 19f));
+            Frames(5);
+            Assert.AreSame(block, Game.Grabber.Held, "setup: in the hand");
+            Assert.Greater(block.Scale, 1.5f, "setup: held far out, several times its size");
+            block.Respawn();
+            Frames(1);
+            Assert.IsNull(Game.Grabber.Held);
+            Assert.AreEqual(1f, block.Scale);
+            Assert.IsNull(callout.Shown, "nothing to call out beside a toy that is as it was");
+            Frames(TestHelpers.Ticks(0.3f));
+            Assert.IsNull(callout.Shown);
+
+            // And the next hold is called out as ever.
+            TestHelpers.LookAt(Game.Player, block.Center);
+            Input.Once.GrabPressed = true;
+            Frames(5);
+            TestHelpers.LookAt(Game.Player, new Vector3(0f, 4f, 19f));
+            Frames(5);
+            Input.Once.GrabPressed = true;
+            Frames(3);
+            Assert.AreSame(block, callout.Shown);
+        }
+
         // Level 3 makes an 11.4 apple a 0.45 marble: a factor of 0.04, which one decimal wrote as "×0.0".
         [Test]
         public void TheDimensionCallout_WritesAVerySmallFactor_WithADigitInIt()

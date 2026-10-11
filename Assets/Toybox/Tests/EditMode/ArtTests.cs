@@ -672,8 +672,10 @@ namespace Toybox.Tests
             Assert.AreEqual(7, (int)RoomPattern.Corrugated, "the enum value is the shader's _Pattern");
 
             var hull = new FlatRecipe { Blend = FlatBlend.Multiply };
-            Assert.AreEqual(BlendMode.DstColor, hull.SrcBlend);
-            Assert.AreEqual(BlendMode.Zero, hull.DstBlend);
+            // Zero x source + destination x source: the product, written the way that also darkens on
+            // Direct3D 12 with MSAA (DstColor, Zero brightened there; RoomTests has the picture).
+            Assert.AreEqual(BlendMode.Zero, hull.SrcBlend);
+            Assert.AreEqual(BlendMode.SrcColor, hull.DstBlend);
             Assert.IsFalse(hull.WritesDepth);
             Assert.AreEqual(3000, hull.RenderQueue);
             var sky = new FlatRecipe();

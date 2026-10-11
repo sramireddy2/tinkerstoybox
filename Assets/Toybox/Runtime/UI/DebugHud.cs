@@ -39,11 +39,11 @@ namespace Toybox.UI
             FlowState state = context.State;
             // The prompt also goes away while the right-button fallback is in use.
             bool pointerFree = !context.Autoplay && !context.PointerLocked && !context.LookHeld;
-            Hud.ClickToPlay = state == FlowState.Title || state == FlowState.Paused || (state == FlowState.Playing && pointerFree);
-            Hud.Prompt = state == FlowState.Paused ? "Paused - click to resume" : "Click to play";
+            Hud.ClickToPlay = state == FlowState.Title || state == FlowState.Paused || state == FlowState.Ending || (state == FlowState.Playing && pointerFree);
+            Hud.Prompt = state == FlowState.Paused ? "Paused - click to resume" : state == FlowState.Ending ? "The end - click for the title" : "Click to play";
             GameFlow flow = context.Flow;
             if (flow != null && state == FlowState.LevelComplete)
-                Hud.BannerNote = flow.Levels.After(flow.LevelId) == flow.LevelId ? "once more from the top" : "next level coming up";
+                Hud.BannerNote = flow.AtLastLevel ? "that was the last one" : flow.Levels.After(flow.LevelId) == flow.LevelId ? "once more from the top" : "next level coming up";
         }
 
         public void Dispose()

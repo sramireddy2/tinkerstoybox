@@ -1226,6 +1226,24 @@ at any aspect ratio. It has two docks, both hung on the frame's edges:
 
 Setting "Reduce motion" disables the exposure flashes, camera shake and the card tilt.
 
+### 9.8 The end of the game (added when the campaign was complete)
+
+The complete card of the last level says "Finish" on its Cherry pill. It leads to the ending, which is
+the catalogue, full: a Paper surface with the world camera off (as for the catalogue), everything on it
+a sticker.
+
+| Time | Event |
+|---|---|
+| 0 ms | "THE END" (Unbounded 96, sticker text style) and the count in Unbounded 24 ("15 OF 15 COLLECTED") stick on |
+| 250 ms | The campaign's blister cards stick on in order, one every 60 ms: 240 x 150, five to a row, backing in the level's dip `mid`, the number in Unbounded 40, a Paper circle with the hero toy in the preset's hero candy. A level that is not collected is a Kraft card with "?" |
+| +200 ms | Every level collected: a "COLLECTED" sticker stamps on beside the heading (Ink, turned 6 degrees, scale 1.4 -> 1 in 90 ms) with the level-complete flourish, and 54 paper pieces in the seven candy colours fall across the screen for 2.6 s (UGUI rounded rectangles: the particle confetti of 9.7 needs the world camera) |
+| +300 ms | The result card (Paper, 1000 x 200, a faint border on the Paper surface): "THANK YOU FOR PLAYING" in Unbounded 24, one line of Figtree 20, the total time and the pick-ups of the campaign, and three pills - Title, Levels, and the one primary action in Cherry, "Play again" |
+
+- Nothing can be pressed before the result card is up, and the screen never moves on by itself.
+- "Reduce motion" drops the stamp's punch and the confetti.
+- It tells the truth: with levels missing there is no stamp and the line says how many toys are still
+  waiting; while a bot plays the count reads "PLAYED" and the heading line says the bot played it.
+
 
 ---
 
@@ -1344,6 +1362,9 @@ reduce motion, high-visibility toys.
   four-pane mark.
 - A pulsing "Click to play" pill. The click also unlocks audio in the browser.
 - On start the logo peels off and the camera drops into first person.
+
+**Ending**: section 9.8. Built from the catalogue's cards and the complete card's stamp and pills; no
+new shapes, sizes or colours.
 
 **Loading screen** (WebGL template): Paper background, the four-pane mark as a spinner in Ink, a Cherry
 progress bar. No other imagery.

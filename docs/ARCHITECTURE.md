@@ -458,6 +458,7 @@ public sealed class PropOptions {
     public bool FrozenUntilGrabbed;     // Dynamic only: stays put (kinematic) at its authored pose until the first grab
     public bool AllowPitch = true;      // false: the pitch key (F) does nothing while it is held
     public bool KeepUpright;            // rotation about X and Z frozen while it is dynamic
+    public bool SquareOnGrab;           // on a grab the heading eases to the nearest quarter turn of the view
 }
 
 [Level(1, "cheese-wedge", "The Cheese Wedge", Phase = 1)]
@@ -485,7 +486,13 @@ public sealed class Level01CheeseWedge : LevelDefinition {
 - `FrozenUntilGrabbed`: `prop.Frozen` until the first grab thaws it (or `prop.Unfreeze()` does); a
   `Respawn` freezes it again at its authored pose. Frozen it is kinematic: it neither falls nor is pushed.
 - `KeepUpright` freezes rotation about X and Z (`Rigidbody.constraints`), so a toy that was put down
-  upright slides but never tips. Combine it with `GrabPose.Upright`.
+  upright slides but never tips. Combine it with `GrabPose.Upright`. **A toy that cannot tip hangs by
+  its rim from any ledge, however small:** Level 12's spool stayed on a sill 0.015 deep and became a
+  way across. Next to a pit or a door, give the level a rule for a toy at rest over the drop.
+- `SquareOnGrab` (`prop.SquareOnGrab`): on a pick-up the toy's heading eases, with its `GrabPose` and
+  over the same 0.15 s, to the nearest quarter turn of the view, so it is held square to the eye
+  wherever the click landed. For toys whose heading decides the outcome: Level 11's card (four degrees
+  askew misses a wall), Level 10's boxes, Level 14's door.
 
 A toy is a GameObject hierarchy (renderers + colliders, authored at scale 1, no Rigidbody) returned by
 a factory in `Toybox.Toys`. `ctx.AddProp(toy, position, rotation, options)` turns it into a `Prop`.
@@ -848,11 +855,12 @@ HingeChain { Prop, Pieces, PiecesChild, PieceFactory, StartAngle, ContactSin, Re
       -> Start(), Reset(), ResetNow(), State, Fallen, Struck, Reaches(), Angle(i), PieceMover(i) [ChainPieceFell, ChainTargetStruck, ChainFellShort]
 NestedSet { Props (outermost first) } -> RevealedCount, IsRevealed(i) [NestRevealed]
 LaserRain { Center, Size, Direction, Up, Range, LatticePitch 0.45, ZapDelay 0.1, Lane, OnZapped, Visual, BeamWidth } -> Exposed, Zaps, Coverage01, BeamCount [LaserZapped, LaserAllClear]
-WaterVolume { Footprint, FloorY, Area, Volume, MaxSurfaceY, OverflowTo, LeakTo, LeakRate, WadeDepth 0.8, SweepDelay 0.3, OnSwept, Visual }
-      -> Add, Take, Set, Volume, Depth, SurfaceY, Capacity, Over(point) [WaterLevelChanged, WaterOverflowing, WaterSwept]
+WaterVolume { Footprint, FloorY, Area, Volume, MaxSurfaceY, OverflowTo, LeakTo, LeakRate, WadeDepth 0.8, SweepDelay 0.3, OnSwept, Visual, Dip (null: the room's) }
+      -> Add, Take, Set, Volume, Depth, SurfaceY, Capacity, Over(point), Dip [WaterLevelChanged, WaterOverflowing, WaterSwept]
 Sponge { Prop, Volumes, CapacityPerScale3 0.315, AbsorbRate 150, SqueezeRate 24 } -> Stored, Capacity, Saturation01, EmptyInto(volume) [SpongeSoaking, SpongeWringing, SpongeFull, SpongeDry]
 PortalDoorway { Prop, MinPlayerScale 0.3, MaxPlayerScale 3.2, Cooldown 0.5, SettleSpeed 30, Opening, FrameWidth, FrameDepth }
-      -> Settled, Active, TargetScale, ViewRatio, Threshold, OpeningSize, ViewEye(eye), Crossings [PortalSettled, PortalCrossed, PortalBlocked]
+      -> Settled, Active, TargetScale, ViewRatio, Threshold, OpeningSize, ViewEye(eye), Crossings; static Carried(velocity, ratio, back), FootSlack 0.1, MaxDrop 1
+         [PortalSettled, PortalCrossed, PortalBlocked]
 RecallPad { Position, Radius 0.6, Prop, HoldSeconds 0.5, Clearance } -> PlayerOn, Progress01, Recalls [Recalled]
 MachineDirector { Start (plate), Toys, Links (names, chain order), Resets (gadgets), FizzleTimeout 2.5, ResetSeconds 1.5, Messages }
       -> Begin(), Report(link), Fail(message), State (Idle|Running|Resetting|Done) [MachineStarted, MachineFizzled, MachineReset, MachineDone]
@@ -886,6 +894,21 @@ Names in brackets are the mirrors on `game.Events`. What a level author has to k
 - `Funnel`'s chamber floor is a sheet without thickness: a marble under about 0.35 coming down the tube
   at 11 units·s⁻¹ goes through it. Level 8 stands solid boxes under its lid and chamber floors and a
   net under those; anything else that drops small balls through a `Funnel` needs the same.
+- **`PortalDoorway` carries a walk with the size and a jump with its root** (`Carried`): the velocity
+  through the door is × `r` along the floor and × √`r` up and down, and a crossing that is turned back
+  reverses only the horizontal part. Gravity does not scale with the player, so × `r` throughout made
+  a hop into a growing door a leap of four to eight units (Level 14 was done in two trips that way). A
+  door is entered feet first (`FootSlack`: not from the floor below it) and never out onto a spot with
+  no floor within `MaxDrop` (the player is turned back, `PortalBlocked`).
+- `WaterVolumeOptions.Dip` draws a volume's body and surface in a dip of its own (Level 13's bowl is
+  pool blue in a peach room); `WaterVisuals` keeps ripple rings inside the footprint of the water they
+  are on. `LaserVisuals` draws a fourth mesh per emitter, "Laser Glow": a pinpoint of beam light on the
+  underside of whatever roofs a beam over.
+- `LaserRain`'s hazard test looks at five points on top of the capsule, 0.24 apart, each only while it
+  is inside the emitter's rectangle: a cover that begins less than 0.24 behind the rain's edge leaves
+  exposures too short to zap at a walk (Level 11's lean-to rests on that).
+- `Sponge`'s `CapacityPerScale3` and rates are the level's to set: Level 13 uses 0.48 and 200 (the
+  defaults are the text's 0.315 and 150).
 - Not built (LEVELS lists them as fallbacks only): HingeChain's single-piece mode, `LaunchSeat`, `FunnelCapture`.
 - Gadget sounds are bound by name (`Audio/GadgetSounds.Named`): add a line there for a new mirror.
 
@@ -967,7 +990,7 @@ rates other than 60 Hz they move in tick-sized steps against an interpolated cam
 | −1000 | `Render/PlainLook` | look, fallback | One directional light with soft shadows, gradient ambient and a solid background, for stock URP Lit materials. Runs with `?plain=1`, or while nobody else provides look |
 | 10 | `Render/QualityPresenter` | — | The tier (§7.3, §7.4): Quality level, URP asset and render scale from the pixel budget; the starting tier and the governor (Play Mode and the build only); `Settings.Quality`; the §12 counters. **Sets** `context.Quality` |
 | 20 | `Render/PostLook` | look | The post chain (§7.2): camera post flags, the global Volume (an instance of `Resources/Volumes/ToyboxPost`), bloom and exposure per room and tier, the MacroBand lens blur (`Settings.LensBlur`), the pause's full-screen blur (`FullBlur`, `FullBlurReached`), the release flash (+0.12 EV, 90 ms) and the level-complete flash (+1.5 EV, 300 ms) |
-| 100 | `Render/LightingRig` | look | The one Light (the sun) and every preset-load global of §3.7: ambient, kicker, glint basis, StudioEnv bands, toy glow, haze, window patch, shell box; ambient mirrored into `RenderSettings`; the camera cleared to the haze colour |
+| 100 | `Render/LightingRig` | look | The one Light (the sun) and every preset-load global of §3.7: ambient, kicker, glint basis, StudioEnv bands, toy glow, haze, window patch, shell box; ambient mirrored into `RenderSettings`; the camera cleared to the haze colour In a night room the night turns to dawn when the room's machine is done (`Dawn`, `DawnSeconds`; Level 15) |
 | 110 | `Render/Environment/RoomVisuals` | look | The room from `game.Environment`: shell, island, trim, window and sky card, the 21 furniture kinds filling their collider boxes, hull shadows, light shaft and dust motes (Medium / High), the player's shadow figure |
 | 210 | `Render/PoolSystem` | look | Colour pools (§9.4): the per-frame globals `_PoolPos` / `_PoolTint` / `_PoolCount` / `_PoolGain`, grab drain, release flood, the splash ring (`_Splash`, `_SplashTint`), first-impact dust |
 | 215 | `Render/DimensionCallout` | — | §9.4: after a release at another size (more than 15% off), a dimension line of the toy's true height, the factor and a 1.7-unit figure stand beside it for 1.5 s, in Ink, in the world. Nearer than 2.1 figure heights from the camera the figure is left out (it fades in up to 2.6) and the factor is written for that distance (`FigureAt`, `LabelSizeFor`): a toy made small is let go at arm's length |
@@ -1029,8 +1052,8 @@ TMP default as a fallback). `UiControls` has `UiButton`, `UiSlider`, `UiToggle`,
 
 - `HudPresenter`: `Reticle`, `Readout` (the scale pill of §9.6; `Readout.Jumps` counts surface jumps),
   `Hints` (toasts from `Message` events, for the message's own seconds), `LevelCard`, `Controls`.
-- `MenuPresenter`: `Title`, `Pause`, `SettingsCard`, `Catalogue`, `Complete`, `Backdrop`, `Stage` (the
-  title's turntable toy). Button actions are queued and run in `Frame` (after the runner read the frame's
+- `MenuPresenter`: `Title`, `Pause`, `SettingsCard`, `Catalogue`, `Complete`, `Ending`, `Backdrop`, `Stage`
+  (the title's turntable toy). Button actions are queued and run in `Frame` (after the runner read the frame's
   keys). Tests drive it without an EventSystem: `Move`, `Submit`, `Cancel`, `control.Activate()`.
 - **`MenuBackdrop`** owns the camera while a menu is up. Pause: the frame as it was goes onto a card; the
   camera keeps running under the wash until `PostLook.FullBlurReached`, then one blurred picture becomes
@@ -1042,9 +1065,21 @@ TMP default as a fallback). `UiControls` has `UiButton`, `UiSlider`, `UiToggle`,
 - The level-complete card presses Next itself after `CompleteMenu.AutoNextSeconds` (5 s) unless the
   player moves the focus; the flow's own `AutoAdvance` is off while the menus exist. The white flash of
   §9.7 is `PostLook`'s exposure flash; the card's Paper overlay only stands in where there is no `PostLook`.
+- **The ending** (`UI/EndingScreen.cs`, `EndingMenu`; `FlowState.Ending`; `ART_BIBLE.md` §9.8) is what the last level's
+  complete card leads to: that card's Cherry pill says "Finish" (`CompleteMenu.FinishLabel`) and calls
+  `flow.Advance()` like every other. On the catalogue's Paper surface (camera off): "THE END", the
+  count ("15 OF 15 COLLECTED"), the campaign's blister cards sticking on one every 60 ms (`Entries`,
+  `CardsShown`; a level that is not collected is a Kraft "?"), a "COLLECTED" stamp with the
+  level-complete flourish and paper confetti when all are collected (UGUI pieces made up front; none
+  with Reduce Motion), then the result card (`Info`): a thank-you line, `flow.Report()`'s total time
+  and pick-ups, and `Again` ("Play again", the first level), `LevelsButton` (the catalogue; Back
+  returns here), `TitleButton` (also Esc). The buttons are not interactable until the result card is
+  up (`InfoAt`), so a key held over from the last card cannot skip the ending, and nothing moves on by
+  itself. While a bot plays it reads "15 OF 15 PLAYED" / "THE BOT PLAYED IT THROUGH" and nothing is
+  stamped. `-toyboxUi ending` captures it with every registered campaign level collected.
 - Esc on the settings card goes back to the pause card (`context.EscapeClaimed`), not on to the game.
 - Menus are heard: `UiSounds.Hover()` when the focus moves or a slider steps, `UiSounds.Click()` when a
-  control is activated (through `AudioPresenter.Active.PlayUi`).
+  control is activated, `UiSounds.Fanfare()` at the ending's stamp (through `AudioPresenter.Active.PlayUi`).
 - **Not seen on a real screen yet**: the batch editor has no Game view. Pause, catalogue and level
   complete (the stand-in screen camera, the camera redirect), mouse and keyboard through the EventSystem
   and pointer lock after a menu button are the first things to check in a WebGL build.
@@ -1055,7 +1090,7 @@ Every sound is synthesised into float arrays (`Synth`, `SoundRecipes`) and wrapp
 in `SoundBank` (time-sliced, 4 ms a frame; 43 clips, about 7.7 MB). `AudioPresenter`:
 
 - `static AudioPresenter Active`; `Unlocked` / `Unlock()` - nothing sounds before the first gesture (it
-  unlocks itself on the first click, key or touch); `PlayUi(UiSound.Hover | Click)`; `Play(SoundId, volume,
+  unlocks itself on the first click, key or touch); `PlayUi(UiSound.Hover | Click | Fanfare)`; `Play(SoundId, volume,
   pitch)`, `PlayAt(SoundId, position, volume, pitch)`; `KeyPitch(writtenTonic)`; `Output`, `Bank`, `Music`,
   `Score`, `Key`.
 - Size-to-pitch (`PitchLaw`): `-6 × log2(true diameter)` semitones, clamped to ±24, snapped to the room's
@@ -1071,32 +1106,52 @@ in `SoundBank` (time-sliced, 4 ms a frame; 43 clips, about 7.7 MB). `AudioPresen
 ### Game flow, progress and settings (`Platform`)
 
 **`GameFlow`** is where the player is in the game: `FlowState` `Title`, `Playing`, `Paused`,
-`LevelSelect`, `LevelComplete`. It owns which level is loaded and keeps the player's progress; it
+`LevelSelect`, `LevelComplete`, `Ending`. It owns which level is loaded and keeps the player's progress; it
 decides nothing about input or pictures. Every method is safe in any state and returns false where it
 makes no sense.
 
 ```csharp
 bool ShowTitle(int backdropLevel = -1);   // Title, with a level standing still behind it
 bool StartLevel(int id);                  // any state -> Playing (loads; a level that fails to build is reported)
-bool Restart();   bool NextLevel();   bool PreviousLevel();          // any state -> Playing
+bool Restart();   bool NextLevel();   bool PreviousLevel();          // any state -> Playing; these two wrap round the campaign
+bool Advance();                           // what follows a completion: the next level - or, after the last, ShowEnding()
+bool ShowEnding();                        // any state -> Ending; the level stays loaded behind it
 bool Pause();     bool Resume();                                     // Playing <-> Paused
 bool ReturnToTitle();   bool OpenLevelSelect();   bool CloseLevelSelect();
-void Update(float dt);                    // the LevelComplete countdown
+void Update(float dt);                    // the LevelComplete countdown (calls Advance)
 event Action<FlowChange> StateChanged;    // { From, To }, after the change
 FlowState State;  int LevelId;  LevelList Levels;  Progress Progress;  int ContinueLevel;
 bool AutoAdvance = true;  float AdvanceDelay = 2.5f;  bool AdvancePending;  float AdvanceIn;
 LevelEvent LastCompletion;  bool LastCompletionWasBest;  bool RecordProgress;  bool ForceAutoAdvance;
+int PickUps;  bool AtLastLevel;           // pick-ups since the load; the loaded level is the campaign's last
+CampaignReport Report();                  // what the ending tells; static ReportOf(levels, progress)
 ```
 
-- `LevelCompleted` puts the flow into `LevelComplete` and records the completion. After `AdvanceDelay`
-  it starts the next level by itself — unless a menu turned `AutoAdvance` off to wait for its "Next"
-  button (`flow.NextLevel()`). While a bot plays, the runner forces the countdown and turns
+- `LevelCompleted` puts the flow into `LevelComplete` and records the completion (time and pick-ups).
+  After `AdvanceDelay` it moves on by itself — unless a menu turned `AutoAdvance` off to wait for its
+  "Next" button (`flow.Advance()`). While a bot plays, the runner forces the countdown and turns
   `RecordProgress` off: a bot's completion is not the player's.
-- **`Progress`** (completed levels, best times, the level played last) is kept in an `IPrefStore`:
-  `PlayerPrefsStore` in the game, a `MemoryStore` in tests and editor tools (`PrefStores.Default` picks
-  by `Application.isPlaying`; `RunnerOptions.Store` injects one). `IsCompleted(id)`, `BestTime(id)`,
-  `Completions(id)`, `LastPlayed`, `RecordCompletion(id, seconds)`, `IsUnlocked(id, levels)` (completed,
-  the first of the campaign, or the level after a completed one), `Reset(ids)`, `Changed`.
+- **The campaign ends; it does not wrap round.** `Advance()` from the complete card of the campaign's
+  last level is `ShowEnding()`: the state becomes `Ending`, nothing is loaded (the level stays behind
+  it, standing still), and - when the player's progress is being recorded - the ending is counted
+  (`Progress.Endings`) and the bookmark goes back to the first level, so a fresh game after the ending
+  starts at the beginning with everything collected kept. From `Ending`: `StartLevel(Levels.First)`
+  ("Play again"), `OpenLevelSelect()` (closing returns to `Ending`), `ReturnToTitle()` (which loads the
+  first level behind the title); it cannot be paused and nothing moves on by itself. `NextLevel()` and
+  `PreviousLevel()` still wrap: they are the level keys' steps, for looking at levels. A level outside
+  the campaign, or the last level while it is not completed, has no ending: `Advance()` is `NextLevel()`.
+- **`CampaignReport`** (`Levels`, `Collected[]`, `CollectedCount`, `Total`, `Full`, `Seconds`,
+  `PickUps`, `Watched`): for the player, their saved progress - the best run of every completed level
+  added up, over as many sessions as it took; while a bot plays (`Watched`), what was completed since
+  the game began, by anybody, none of it kept.
+- **`Progress`** (completed levels, best times and their pick-ups, the level played last, endings) is
+  kept in an `IPrefStore`: `PlayerPrefsStore` in the game, a `MemoryStore` in tests and editor tools
+  (`PrefStores.Default` picks by `Application.isPlaying`; `RunnerOptions.Store` injects one).
+  `IsCompleted(id)`, `BestTime(id)`, `PickUps(id)` (of the best run; negative if not counted),
+  `Completions(id)`, `LastPlayed`, `Endings`, `RecordCompletion(id, seconds, pickUps = -1)`,
+  `RecordEnding()`, `TotalTime(ids)`, `TotalPickUps(ids)`, `IsUnlocked(id, levels)` (completed, the
+  first of the campaign, or the level after a completed one), `Reset(ids)`, `Changed`. Keys are
+  `toybox.progress.done.N / best.N / picks.N / last / ended`.
 - **`LevelList`** is every level that can be loaded (`Ids`, `Has`, `Resolve(launch)`) and the
   **campaign** play moves through (`Campaign`, `First`, `Last`, `After`, `Before`, `InCampaign`). From
   the registry the campaign is the levels with `Phase > 0`; Phase 0 levels (the sandbox, a showroom) are
@@ -1134,10 +1189,12 @@ fast-forwarding), runs the flow's countdown and presents.
   menus call the flow. While the debug HUD stands in, a click on the title starts the level and a click
   while paused resumes. Either way Esc toggles the pause - except while a menu has set
   `context.EscapeClaimed` (the settings card over the pause card: Esc closes that card) - and R restarts
-  from `Paused` and `LevelComplete`.
+  from `Paused` and `LevelComplete`. On the ending the menus' own buttons do everything; with the
+  debug HUD a click there goes back to the title.
 - Autoplay runs `game.Level.Solve(bot)` through `BotRunner`, paced by the game's own ticks, and carries
-  on from level to level. A script that throws is reported (`runner.AutoplayError`, a HUD message) and
-  stops steering; it never takes the game loop down.
+  on from level to level - and after the last one to the ending, where it stays (`?autoplay=1` plays
+  the whole campaign: 208 s of play and fifteen cards). A script that throws is reported
+  (`runner.AutoplayError`, a HUD message) and stops steering; it never takes the game loop down.
 - Debug keys: `[` / `]` previous / next level, `P` toggles autoplay (turning it on restarts the level and
   plays it from wherever the flow was, turning it off hands the level over as it is).
 
@@ -1337,6 +1394,65 @@ What building them added to phase 1's list:
 
 Known limits the levels live with are listed at the end of `LEVELS.md` Appendix E.
 
+## The campaign complete: phase 3 as built (levels 10–15) and the end of the game
+
+`Levels/Level10MatryoshkaBoxes.cs`, `Level11BlockingLasers.cs`, `Level12Keyhole.cs` (+ `Level12Set.cs`),
+`Level13Fishbowl.cs` (+ `Level13Shapes.cs`), `Level14InfiniteHallway.cs`, `Level15RubeGoldberg.cs`
+(+ `Level15Stage.cs`, `Level15Set.cs`). `LEVELS.md` has an "As built" note at the end of each of these
+levels and Appendix F with the six side by side and the end of the game; the logs are
+`tools/out/notes/level1N-build.md` / `level1N-review.md` and `phase-3-campaign.md`; contact sheets (one
+per level, the fifteen spawn views, the fifteen held toys, the ending) are in `tools/out/shots/phase-3`.
+
+| Level | Room | Solver's let-go | Works | Solve (game s) | Gadgets as built |
+|---|---|---|---|---|---|
+| 10 Matryoshka Boxes | `cardboard-box`, `GroundY` −0.1 | boxes 1.2 / 0.9 / 0.6 → 1.912 / 0.971 / 1.081 | 1.52–2.0 / 0.61–1.15 / 0.69–1.15 | 17.53 | `NestedSet`, `PropLeash` × 2 (shelf, crumb), `SkyCap` |
+| 11 Blocking Lasers | `pegboard-workbench`, `GroundY` −0.1 | card 0.5 → 5.947 | 4.3–7 | 6.10 | `LaserRain`, `PropLeash` × 2 (out of reach, crumb), `SkyCap` |
+| 12 The Keyhole | `high-shelf`, `GroundY` −9.5 | key 8 → 0.582 → 0.341; spool 1 → 9.162 | key 0.06–0.5; spool 8.35–9.9 | 13.97 | `Socket` (lock), `Door`, `HazardZone` × 2, `ReturnPort`, `PropLeash` × 2, `SkyCap` |
+| 13 Escaping the Fishbowl | `cardboard-box`, `GroundY` −0.6 | sponge 2.0 → 9.593 → 1.862 | 6.09–12; 0.5–2.3 | 14.32 | `WaterVolume` × 2, `Sponge`, `FloatPlatform`, `Door` (flap), `PropLeash`, `SkyCap` |
+| 14 The Infinite Hallway | `night-light`, `GroundY` −0.2 | door 1.0 → 0.281 / 3.2 / 1.319 | ≤ 0.47 / ≥ 2.48 / ≤ 2.00 | 9.95 | `PortalDoorway`, `RecallPad` × 2, `SkyCap` |
+| 15 The Rube Goldberg Machine | `night-light` | dominoes 3.103, ball 3.000, ruler 1.012, fan 0.924 | 2.2–3.5 / 2.25–3.0 / 0.8–1.2 / 0.6–1.2 | 40.75 | `Socket` × 6 (four stations, two approaches), `MachineDirector`, `PathDrive` × 3, `Seesaw`, `WindStream`, `HingeChain`, `Breakable`, `PressurePlate`, `Door` × 2, `Funnel` (the bell jar), `FitGauge` × 4, `PropLeash` × 2, `HazardZone`, `ReturnPort`, `SkyCap` |
+
+What building them added to the lists of phases 1 and 2:
+
+- **A clamp is a design tool only against the hop that was measured.** The text designed with a hop of
+  1.15; the capsule gets up 1.30 always and 1.35 sometimes (its round foot rolls over an edge). Level
+  10's two-box routes and Level 14's 3.0 ledge both came from that margin. Gates are set from the
+  measured limit, and a test holds the margin on both sides (Level 14: fits at 2.00, climbs from 2.48).
+- **What the player stands on is part of the puzzle's state.** The engine refuses a click at the prop
+  under the feet only while the feet are on it; in the air, the box one jumped off can be picked up and
+  let go bigger under oneself. A level where growing something underfoot is worth anything (10, 12)
+  keeps its own "last stood on" and says why the click did nothing.
+- **Paint that judges.** Where the size window is narrow and depends on the pick-up (11: 4.3–7 across a
+  six-wide lane; 12: a ratio of 1.19), the dashed outline is the gauge, in Level 2's colours: paint
+  while nothing is judged, red and blinking for "not like this", green and steady for "let go now".
+  Green must never be wrong (Level 11: 1872 tries, green and no roof 0); red may be shy.
+- **Seats take what is nearly right.** A let-go that is square, flat and within reach of the place it
+  was plainly meant for is slid home as it falls (11's card on its walls, 12's spool to the door, 15's
+  approach sockets) - a correct-looking try that fails by a hand's width is the worst thing a level of
+  this game can do. Everything outside the seat falls as it will and is told why.
+- **A toy that changes the player** (14) needs its rule checked against everything else the player can
+  do while crossing: jumping in, walking in from above, crossing onto nothing. The fix belonged in the
+  gadget, with its test next to the gadget's.
+- **A machine keeps what it is running** (15): toys are locked while the director runs or sets itself
+  up, a run that stops still finishes the drive that was under way, and anything handed on by a helper
+  socket is the player's again once the machine is idle.
+- **Check a solution against the fantasy, not only against its window.** Level 13 was solved with the
+  text's numbers and left a third of the bowl; the brief says the sponge soaks up the fishbowl.
+- **Words.** `Phase3CampaignTests` holds the six to the voice of the nine before them, and every hint
+  and blurb of all fifteen to full size on its card.
+
+**The end of the game.** See "HUD and menus" and "Game flow" above: `FlowState.Ending`, `EndingMenu`,
+`GameFlow.Advance / ShowEnding / Report`, `Progress.Endings / PickUps`. `Phase3CampaignTests` plays the
+real game from the title through fifteen cards to "Finish" and the ending, then a new session from the
+same store (title over level 1, catalogue 15 of 15), and plays the whole campaign by `?autoplay=1` in
+one game to the ending. **The dawn** before it is the lighting rig's: in a night room,
+`MachineDone` (Level 15's alarm) starts `LightingRig.Dawn` on its way from 0 to 1 over `DawnSeconds`
+(4 s), and the rig blends the night's values toward `LightingValues.Dawn(env)` - the sunny-rug's sun
+and window patch, the day's ambient on the room's own tones, the day's glint, the toys' glow back to
+1. A level load is night again; day rooms take no notice (`LightingRigTests`).
+
+Known limits the levels live with are listed at the end of `LEVELS.md` Appendix F.
+
 ## Where the game departs from the art bible
 
 Decided while putting the areas together and looking at the pictures; each has its reason next to the
@@ -1358,6 +1474,7 @@ code. (The areas' own deviations are in `tools/out/notes/m2-*.md`.)
 | §7.4 HDR-less devices: clamp the glint gain | Not done | An 8-bit target clamps at 1 by itself; no device to try it on |
 | §9.4 the callout's 1.7-unit figure at the toy's base, always | `DimensionCallout`: no figure nearer than 2.1 figure heights from the camera, and the factor sized for the distance | Level 3 lets its marble go a step and a half from the eye: the figure stood half the picture tall between the player and the flap that falls open |
 | §10.5 held-control pill "click: drop"; the level-complete card's "N grabs" | "click: let go"; "N pick-ups" (`UI/Hud.cs` `ControlPills`, `UI/MenuScreens.cs`) | Every line and hint of the levels says *pick up* and *let go* - one verb for one act, held to by the campaign tests - and the pill is on screen beside them. The pill's stored key is still `drop` |
+| §2.2 candy on toys, dips on the room; a Lagoon toy never stands in the Pool room | Level 13's Lagoon sponge lies on water drawn in the Pool dip (`WaterVolumeOptions.Dip`) inside the Peach room | Water in the room's own peach read as sand, in mint as pond slime. The sponge keeps its rim and its pores against the water; it is the one place the banned pair meets |
 | §2.5 rule 3 as first written: every metal toy is anodised candy | Level 2's thimble is bare `Palette.Silver` (`ToyFactory.Silver`) with an anodised Tangerine band round its rim | The owner's brief says "a tiny silver thimble". Rule 3 now names it as the one exception; the band is the candy that says "you can lift this", and it is what the pool, the tag and a room's banned-colour swap use |
 
 ## Testing and verification
@@ -1409,11 +1526,27 @@ code. (The areas' own deviations are in `tools/out/notes/m2-*.md`.)
   3.68 / 20.50 / 11.75 s, the same to the tick), the hero toy under the crosshair at the start and
   nothing else to pick up, one voice with phase 1, and every hint at the pause card's full size.
   `Level05Tests` to `Level09Tests` are of the same kind as phase 1's, and larger.
+- `Tests/EditMode/Levels/Phase3CampaignTests.cs` — levels 10 to 15 and the campaign as a whole: fifteen
+  levels in order in three phases; title → fifteen completions → "Finish" → the ending (15 OF 15
+  COLLECTED, the cards, the totals) → the catalogue → the title → a new session from the same store
+  that starts at level 1 with the catalogue kept; progress continued in phase 3; straight to
+  `?level=15` gives an honest "1 OF 15"; the bot solving the six in one `Game` forwards and backwards
+  (17.53 / 6.10 / 13.97 / 14.32 / 9.95 / 40.75 s, the same to the tick); **the whole campaign by
+  `?autoplay=1` through the real runner in one game** (every level loaded and completed once, in
+  order, each in its own solver's time; the ending up; the store empty); the hero toy under the
+  crosshair in a candy colour the room allows; the last level ending in the morning (the dawn); one
+  voice; every hint and blurb of all fifteen at full
+  size. `Level10Tests` to `Level15Tests` (with `Level10HintTests` and `Level1NUiTests`) are 70 to 113
+  cases each. The ending screen itself is in `UiTests` (`MenuTests`: the timeline, keyboard only, levels
+  missing, Reduce Motion, a bot's ending, the layout with fifteen cards) and `GameFlowTests`.
 - **Explicit tests run when the filter names them.** The levels' probes and picture tours are
   `[Explicit]`; a run without a filter skips them, but `-Filter "Level09Tests"` matches their names and
   runs them (minutes of pictures and tables). Filter them out:
   `"Level05Tests\."` (the tour is the class `Level05Tour`), `"Level06Tests\.(?!Probe|Tour|Review_)"`,
-  `"Level08Tests\.(?!Probe)"`, `"Level09Tests\.(?!Tour)"`.
+  `"Level08Tests\.(?!Probe)"`, `"Level09Tests\.(?!Tour)"`, and for phase 3
+  `"Level1[0-5](Hint|Ui)?Tests\.(?!Probe_|Tour_)"`. `Phase3CampaignTests.Tour_HoldTimes` writes when every
+  solver picks up and lets go (`tools/out/notes/phase-3-holds.txt`): the times the contact sheets are
+  taken at (`tools/out/shots/phase-3/work/capture.ps1`, `make_sheets.py`).
 - `Tests/EditMode/PresentationTests.cs` — input latching across frames that run zero, one or three ticks,
   pointer lock and focus loss (`HumanInputTests`, through `FakeDevices`), URL parsing and level order
   (`LaunchOptionsTests`), the runner's level flow, autoplay and camera (`GameRunnerTests`, by calling
@@ -1462,8 +1595,10 @@ code. (The areas' own deviations are in `tools/out/notes/m2-*.md`.)
   Mode — the wrapper holds the batch mutex until the result file appears and passes `-toyboxExclusive`.
   `playcheck -UnityArgs '-toyboxUrl','?level=3&autoplay=1'` plays that level: with autoplay already on
   in the address the check waits for one load after the completion (the next level), otherwise for two
-  (its own `SetAutoplay` reloads the level first).
-- **The suite is green as of 2026-10-05.** (The one test that failed through phase 1,
+  (its own `SetAutoplay` reloads the level first). After the campaign's last level nothing is loaded:
+  the check waits for the ending instead and reports "the game showed its ending". It watches for 70 s
+  (Level 15's own solution is 41 s of play).
+- **The suite is green as of 2026-10-11**: 2112 tests, 2047 passed, none failed, 65 skipped (the explicit probes and picture tours), about seven minutes. (The one test that failed through phase 1,
   `ToyShadingTests.HeldToy_IsDrawnByTheStickerPassAlone_WithBorderAndPeelShadow`, passes since the
   `PeelShadow` pass of `Sticker.shader` blends with the destination as the factor, `Blend Zero SrcColor`:
   with MSAA on, the editor's Direct3D 12 device brightened what `Blend DstColor Zero` should have
@@ -1472,7 +1607,7 @@ code. (The areas' own deviations are in `tools/out/notes/m2-*.md`.)
   on its glint, the vignette, the border and the peel shadow) is still to be looked at -, real keyboard
   and mouse, the browser's pointer lock (including the `stickyCursorLock` line, which only the Web player
   compiles), contact modification and the reflection in `GadgetSounds` under IL2CPP, overlay canvases on
-  a real screen (pause, catalogue and level complete with their stand-in camera), how any of the audio
+  a real screen (pause, catalogue, level complete and the ending with their stand-in camera), how any of the audio
   sounds, and the IMGUI drawing of `DebugHud` (a batch-mode editor never calls `OnGUI`). Check `Esc`,
   alt-tab and a quick re-click in a real browser after every change to `Platform/`.
 - `.\tools\unity.ps1 test` must pass before any commit.

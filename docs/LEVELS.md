@@ -17,11 +17,11 @@ have allowed is not counted).
 **Status.** Geometry and arithmetic are checked by script. The numbers are what the level classes
 should be built from, and the scale windows in Appendix B are what the bot tests should assert. Physics
 behaviour that only PhysX can confirm is listed in Appendix C with a fallback per level.
-**Levels 1 to 9 are built** (1 to 4 on 2026-10-04, 5 to 9 on 2026-10-05) and solved by their bots in
-the simulation: each of their sections ends with an "As built" note saying where the level departs from
-the text above and what was measured; Appendix D puts the first four side by side and Appendix E the
-next five. Where a note and the text above it disagree, the note is what the game does. Levels 10 to 15
-have not been run in Unity.
+**All fifteen levels are built** (1 to 4 on 2026-10-04, 5 to 9 on 2026-10-05, 10 to 15 between
+2026-10-05 and 2026-10-11) and solved by their bots in the simulation: each of their sections ends with
+an "As built" note saying where the level departs from the text above and what was measured; Appendix D
+puts the first four side by side, Appendix E the next five and Appendix F the last six, with the end of
+the game. Where a note and the text above it disagree, the note is what the game does.
 
 **Restart marker.** Sections are appended in order. The file is complete only when its last line is
 `END OF LEVELS.md`.
@@ -29,7 +29,7 @@ have not been run in Unity.
 **Contents.** 0 Conventions and rules · 1 Campaign overview · 2 Gadget catalog · 3 Toy catalog ·
 4 Settings and environment presets · 5 Levels 1–15 · Appendix A Design corrections · Appendix B Scale
 windows for the bot tests · Appendix C Risks and fallbacks · Appendix D As built: phase 1 ·
-Appendix E As built: phase 2
+Appendix E As built: phase 2 · Appendix F As built: phase 3 and the end of the game
 
 ---
 
@@ -169,6 +169,14 @@ ignores `MoveTo` while held); what is missing is switching a `Dynamic` prop to d
   where the chain stops".
 - Level 11 is lighter than Level 10 on purpose (one toy, one release after a three-box build). The
   brief's order is kept; neither level depends on the other.
+  *As built:* the roles hold, and so does what phases 1 and 2 found: in all six levels the pick-up
+  distance decides the size, so all six start the player a step from the toy with the crosshair on it,
+  say Level 1's sentence on a pick-up from too far away, and take back a toy that is of no use where it
+  lies. Three of them needed more than the text gave them to keep their one idea: Level 10 a lower limit
+  for its two inner boxes (two boxes were enough), Level 13 a thirstier sponge (the solution left a
+  third of the bowl), Level 14 a door that does not turn a hop into a leap. See Appendix F.
+- **The campaign ends.** After Level 15 the game does not start over: its complete card says "Finish"
+  and leads to an ending screen (Appendix F, "The end of the game").
 
 ---
 
@@ -436,7 +444,9 @@ ease and `SailRaft`'s glide)
   crosses the mid-plane: `newScale = clamp(s, min, max)`, `r = newScale / player.Scale`. Exit point =
   on the far side, `0.3·newScale + 0.15·s + 0.05` beyond the plane, lateral offset scaled by `r` and
   clamped to the opening. If a capsule of the new size is free there (world + props, not the frame):
-  `SetScale(newScale)`, `Teleport(exit)`, velocity × `r`. Otherwise try the mirrored point on the
+  `SetScale(newScale)`, `Teleport(exit)`, velocity × `r` along the floor and × √`r` up and down (as
+  built, `PortalDoorway.Carried`: gravity does not scale, so × `r` made a hop into a growing door a leap
+  `r` times as high as the new size jumps - over Level 14's ledge). Otherwise try the mirrored point on the
   entry side with yaw + 180°. If both are blocked: `Blocked`, nothing happens.
 - State: `Settled`, `TargetScale`. Events: `Settled`, `Crossed(from, to)`, `Blocked`.
 - Deterministic: a pure function of player and prop state; one capsule test per candidate. Level: 14.
@@ -1978,6 +1988,47 @@ yield return bot.WalkTo(new Vector3(4, 3.9f, 14));
 
 **Confidence.** Medium-high. Solid cubes on a flat floor; the one stacked contact is 5.4 on 37.
 
+**As built (2026-10-05, reviewed to 2026-10-11; `Level10MatryoshkaBoxes.cs`, `Level10Tests`,
+`Level10HintTests`; 91 test cases).** Solved by its bot in **17.53 s**: red 1.2 → **1.912** against the
+shelf, yellow 0.9 → **0.971** on the rug, blue 0.6 → **1.081** on the red one; hops of 0.97 / 0.94 /
+1.08 / 0.91; nothing is said. The text's own solver is kept as `SolveAsSpecified` and still completes
+(1.910 / 1.038 / 1.021). Where the game departs from the text:
+
+- **The two inner boxes stop growing at 1.15** (`InnerMaxScale`; the red one keeps 2.0; text: 2.0 for
+  all three). The text counted on a hop of 1.15; the hop measures 1.30 always, 1.33 to 1.35 sometimes,
+  1.40 never. With that, two boxes were enough in two ways (the red box at 2.0 and a step of 1.2 to 1.3
+  pulled up behind one's feet from the red box's edge: 10 of 10; two boxes of 1.25 to 1.35 stacked:
+  4 of 13). With the inner boxes at 1.15 the best two boxes reach is 1.35 + 1.15, which leaves 1.40 to
+  the shelf: 0 of 13 and 0 of 72. 1.15 is the text's own largest rise and the top of its windows, so
+  the intended sizes are untouched.
+- **Nothing is picked up from a box:** the box under the feet, and the one last jumped off, cannot be
+  picked up until the feet are on the rug or the shelf (`FeetLine`). The text's "jump-and-drop climbing
+  is blocked" did not hold: picked up and let go at the top of a jump, the box one jumped off came back
+  under the feet bigger (0.32 → 0.51 → 0.67 a jump).
+- **Start** (0, 0, −2.6), pitch −13, the crosshair on the box (`k` = 0.434, the text's own first
+  pick-up; text: (0, 0, −4)). **One place to pick up from** for all three boxes, the rim of a round mat
+  2.6 before the nest, and **one place to let go from**, shoe prints at (−2, 0, 6.7) (text: 2.6 / 2.3 /
+  1.9 and a second stand for the third box).
+- `GroundY` −0.1: the rug is a slab on the den's floor. The third box is the catalog's blue (text:
+  teal). Boxes are `FrozenUntilGrabbed` and `SquareOnGrab`; a box that is sent back never goes into
+  another box.
+- **Paint:** the red box's outline on the shelf's face (held in it, any aim from 0.95 to 2.8 up the
+  face gives 1.91 to 1.95; at the very foot the box comes down on the rug 1.7 short), the yellow one's
+  footprint on the rug, the blue one's outline at the top of the chart with arrows down to the red box
+  (the eye, 1.55, is below the red box's top, 1.91: held toward that top the blue box catches its front
+  edge; held against the shelf above it, it falls 0.9 onto it and lands flat every time).
+- **Windows from the shoe prints:** red 1.52 to 2.0, step 0.61 to 1.15, top 0.69 to 1.15 (text: 1.6–2.0,
+  0.75–1.15, 0.85–1.15). Standing and aiming a little off: 69 of 72 placements complete; the three that
+  do not stand 0.8 nearer the shelf and are told.
+- A box under 0.45 goes back to the start after 1.5 s; the shelf's leash is the text's. Eleven lines for
+  tries that fail (`FarLine`, `TallLine`, `EdgeLine`, `ClampLine`, `InnerClampLine`, `ShelfLine`,
+  `CrumbLine`, `CloseCrumbLine`, `CloseLine`, `ShortLine`, `FeetLine`). Blurb: "... The shelf is four
+  marks up." Hint 2 names the inner boxes' limit; hint 3 the mat's rim, the shoe prints and the outlines.
+- Still open: a top box picked up from 1.2 to 1.4 before the nest is at its limit over the gap between
+  the step and the red box, tumbles back and knocks the step about a unit (told; the stairs still work);
+  a hop at a 1.15 box that starts more than a step before it comes down in front of it (the next one
+  gets up); the third box put on by hand from up on the red one never works (told why).
+
 
 ---
 
@@ -2088,6 +2139,46 @@ yield return bot.WalkTo(new Vector3(0, 0, 25.5f));
 
 **Confidence.** High. A heavy flat slab falling two units onto two parallel walls is stable; the only
 scripted part is the hazard test.
+
+**As built (2026-10-05, reviewed to 2026-10-11; `Level11BlockingLasers.cs`, `Level11Tests`,
+`Level11UiTests`; 92 test cases).** Solved by its bot in **6.10 s**: the card 0.5 → **5.947** (text 5.9),
+`k` = 0.377 from the start, let go from the same spot; nothing is said. Where the game departs from the
+text:
+
+- **The beams are magenta, not red.** They wear the art bible's Hazard signal (`#FF2BD6`, "Lasers, kill
+  surfaces", `ART_BIBLE.md` §2.3), the one colour every hazard of the game has; red is this level's own
+  "would be no roof" cue and would have sat in front of red beams.
+- **Start** (0, 0, 1.75), pitch −19.4, the crosshair on the card on a table 1.1 high (text: (0, 0, −1)
+  and a 0.8 table: 4.1 from the card, `k` 0.12, a roof of 2.7). `GroundY` −0.1 (the box's own cardboard
+  bottom). The rain begins at Z 14.5 (text 14): a card on both walls and against the far wall is then
+  a roof over all of it.
+- **The outline is on the floor and it is the gauge.** The far wall the card stops against is behind
+  twenty rows of beams, so the dashes are the roof's footprint on the floor, with a mark on the end of
+  each low wall. In Level 2's language: paint while nothing is judged, red and blinking while the card
+  held out would be no roof, green and steady while it would be one, and for as long as it lies there
+  as one. 1872 scripted tries: green and no roof, 0.
+- **The card is held square** (`PropOptions.SquareOnGrab`, a shared engine option: four degrees askew
+  misses a wall) and **finds its seat:** let go flat above the walls, within 2.0 sideways, 2.4 short of
+  the far wall and 9° of square, it is slid, turned and pushed home as it falls; one narrower than 5 is
+  set down on the walls instead of slapping onto them.
+- **Window 4.3 to 7.0** (text 4.7 to 7; a card of 4.29 to 4.38 wedges between the walls a hand under
+  their tops and is a roof too). Pitch from the start 8° to 25° (text 9° to 22°), yaw 0° to 6°.
+- A zap with the card in the hand sends the card back to its table and says why (`HeldLine`): carried
+  on, it came back five units wide a hand from the eyes. A card no heavier than the player lets the
+  player through (no hat to sprint under). One that looks under 0.26 from every dry place goes back
+  after 1.5 s. Seventeen lines; Level 7's mirror sentence for a pick-up from too near.
+- **A second way through, accepted:** a card too narrow for both walls (4.2 to 4.36), let go a step off
+  the middle, stays leaning on one wall, and the strip under its high side is dry to the far wall; its
+  low side is then across the door and is picked up from the last dry step. It needs the card seven to
+  eight times its size and let go over the rain, which is the level's idea; it skips only "wider than
+  the gap". The level's lines call it a miss when it forms.
+- Shared code it brought: a pinpoint of beam light on the underside of whatever roofs a beam
+  (`LaserVisuals`, "Laser Glow"); the dimension callout goes when its toy is sent back; the Flat
+  shader's multiply blend is written `Zero, SrcColor` (the lane under the roof came out paler, not
+  darker, on Direct3D 12 with MSAA).
+- Not built: the spade as a dark silhouette overhead (the card's underside is its plain back with the
+  beams' pinpoints). Still open: the gauge is shy at the very bottom of the window (4.29 to 4.38 held
+  dead straight is red in the hand and a roof once it lies).
 
 ---
 
@@ -2230,6 +2321,40 @@ yield return bot.WalkTo(new Vector3(0, 0.45f, 22.5f));
 **Fallback.** Give the pit a `Socket`: a spool released over the pit with scale 8.35–9.9 is eased onto
 the pit's centre line and lowered to the floor.
 
+**As built (2026-10-05, reviewed to 2026-10-11; `Level12Keyhole.cs`, `Level12Set.cs`, `Level12Tests`,
+`Level12UiTests`; 100 test cases).** Solved by its bot in **13.97 s**: the key 8 → **0.582** on the
+little shelf (picked up from the start, `k` 0.53), the spool 1 → **9.162** in the drawer, the key again
+→ **0.341** at the keyhole (the lock holds it at 0.15); nothing is said. The fallback is in use in part:
+a spool that fills the drawer is drawn to the door before it falls. Where the game departs from the text:
+
+- `GroundY` −9.5 (the sock tops stay at −9); walls drawn to 13, sky cap at 15. **Keyhole at Y 1.25**
+  (text 1.65: at eye height the held key is seen end-on). The spool's outline is painted on the door
+  wall from Y 3.4 to 12.5 (text 0 to 9.1): the crosshair has to be above the chest's far edge.
+- **The paint is the spool's gauge** (outline, a dashed line along the atlas, the chest's edge line):
+  green while the spool held there would fill the drawer, red while it would not, green while it
+  stands there. **Window 8.35 to 9.9** as in Appendix B, a ratio of 1.19, and the size depends on the
+  pick-up distance: shoe prints right behind the spool (3, 0, 2.1) and a second mark at (0, 0, 0.7) are
+  where it holds; from the prints the spool is 9.9, from a step short of them the outline's 9.1.
+- The spool is `FrozenUntilGrabbed`, cannot be pitched, and starts at (3, 0.5, 3). One of 8.35 or more
+  let go with its middle over the drawer and no key across it is driven to the door and falls; a
+  smaller one goes back to where it stood with the line for why, and lifts a key that lies there onto
+  its own top.
+- **No ledge is a hold.** The spool cannot tip (`KeepUpright`), so it hung by its rim from a sill 0.015
+  deep at the shut door and from the chest's edge - and a player hopped onto it from the key, took the
+  key and opened the door with the drawer empty. The door's collider is flush with the wall, and a
+  spool at rest over the drawer that the key does not hold up slips off what its rim rests on.
+- The key: clamps 0.06 to 8; the lock takes 0.06 to 0.5 within a 1.2 box round the keyhole. A key that
+  is lost among the socks or too small to find goes back to the little shelf at 0.5.
+- **Nobody is high over the empty drawer:** feet above 3.3 between the chest's edge and the door wall
+  send the player back with `HighLine` (off while a spool fills the drawer). "Jump, pick the key up in
+  the air, let go at the keyhole, land inside" is kept out by the door's timing (it starts 0.85 s after
+  the lock takes the key; the longest jump there is over the sill for 0.8 s) and by a test.
+- Twenty lines; blurb "The door is locked. The only key is the bridge." (the text's line is said at the
+  door); hint 3 names the little shelf, the outline and the green paint.
+- Still open: a first try with the spool picked up from a few steps away is red until one steps back;
+  the first green while stepping back is the smallest spool that will do (2.8 across and 0.65 down
+  from the chest, then 1.1 up to the sill); red only means "not like this".
+
 
 ---
 
@@ -2370,6 +2495,42 @@ everything wet is bookkeeping. The risk is feel — the ride must not jitter, wh
 kinematic.
 **Fallback.** Drop the ride. The tower becomes a dry moat (`Area` 40, floor −2) between the bowl floor
 and a deck with the exit; a cork raft in it rises 2 when the moat is flooded and bridges it.
+
+**As built (2026-10-05, reviewed to 2026-10-11; `Level13Fishbowl.cs`, `Level13Shapes.cs`,
+`Level13Tests`, `Level13UiTests`; 70 test cases).** Solved by its bot in **14.32 s**: the sponge 2.0 →
+**9.593** (`k` 1.20) from the castle's edge, the bowl dry 2 s later (405 units), picked up again from
+the cork through the tower's doorway (`k` 1.23) and let go at the feet at **1.862**; the flap is shut 0.4 s
+later and the cork is at the rim 3.9 s after the let-go; nothing is said. The ride is built (no fallback). Where
+the game departs from the text:
+
+- **The sponge drinks the whole bowl:** it holds **0.48** a unit of scale cubed (text 0.315, "90 % of
+  its bulk") and drinks at 200 a second (text 150). With the text's numbers the solution left the bowl
+  a third full where the fantasy says the bowl is drunk, and the crosshair on the middle of the dashed
+  footprint gave 6.6 to 6.8 where 8.44 was needed. Now the least sponge that works is **6.09**, the
+  intended 9.5 drinks the bowl dry, and the bowl can be waded at **1.1** deep (text 0.8). Window 6.09
+  to 12 (text 8.4 to 12).
+- `GroundY` −0.6 (the bowl stands on a foot; the tower's floor is recessed). **Start** (0, 3, −8.2),
+  pitch −19, the crosshair on the sponge's far edge with the tower and the exit mark above it (text
+  (0, 3, −9): from there the battlements stop the player and the best sponge is a knife-edge 8.7). The
+  sponge is `FrozenUntilGrabbed` (at 2.0 it weighs 0.42 and lay on the edge).
+- **The tower has a bay:** above its doorway the front stands 1.3 forward from Y 2.6 up, so a sponge
+  held toward the tower stops there (9.75 to 9.9) and not against the doorway, and there is room to
+  walk in under it.
+- **The second pick-up is from the cork,** through the doorway, with shoe prints at the back of the
+  cork (text: pick up outside and carry it in: at `k` 1.2 the held sponge covers the picture; carrying
+  it in still works). From inside the tower the sponge can only be let go inside it.
+- **Water:** drawn pool blue, not in the den's peach (`WaterVolumeOptions.Dip`, shared), with a
+  waterline and fish-food flakes; its ripples stay on the water they are on. Depth is judged by the
+  level, not by the bowl's volume. The tower holds its water for 3 s after the sponge stops and then
+  runs empty at 24 a second (text: 3 a second throughout); a sponge wrung out in the tower with nobody
+  on the cork is seen to run over, is told (`TowerLine`), lets go four times as fast and everything is
+  put back 3.07 s later. Nothing is put back while the player is above the rim; the flap waits for a
+  player in the doorway and the level says so.
+- Fourteen lines; a sponge turned in the hand or stopped on the castle has its own. Hint 3 names the
+  castle's edge, the tower and the cork.
+- Still open: the sponge is Lagoon on pool-blue water, the art bible's banned pair (mint water read as
+  pond slime); held at pick-up size it hides the dashes it is aimed at (the text's design); an aim at
+  the near third of the bowl (under 6.09) is told and takes a second go, which keeps what was drunk.
 
 ---
 
@@ -2516,6 +2677,40 @@ turn-around), controller tuning at `P` = 0.3 and 3.2, the bot's tolerances at sm
 **Fallback.** Quantize: when the doorway settles its scale snaps to the nearest of 0.3 / 1.0 / 3.2 and
 the frame changes colour (with 1.0 the exit opening stays as specified). Three well-tested player
 sizes instead of a continuum.
+
+**As built (2026-10-05, reviewed to 2026-10-11; `Level14InfiniteHallway.cs`, `Level14Tests`,
+`Level14UiTests`; 113 test cases, twelve of them episodes of random play).** Solved by its bot in
+**9.95 s** in three trips: the door 1.0 → **0.281** (picked up from the start, six units off, `k`
+0.166; let go at the first shoe prints looking 45° down), 0.281 → **3.2** (the mouse picks it up from
+0.41 away, `k` 0.687, and lets go looking 80° up), 3.2 → **1.319** (from the ledge, `k` 0.343, 60°
+down); the level says its one tip on the way ("Cannot see past the door? Turn it edge-on ..."). The
+continuum works; the fallback is not used. Where the game departs from the text:
+
+- **A jump into the door comes out as the new size's own jump** (shared, `PortalDoorway.Carried`): the
+  velocity carried through scales with the size ratio along the floor and with its square root up and
+  down (section 2.3 says so now). As first specified (velocity × r throughout) a mouse's hop into a door of 1.1 to 2.0
+  became a leap of four to eight units and landed on the ledge at a size that fits the way out: the
+  level in two trips, 8 of 18 scripted tries. A door is entered feet first (`FootSlack`) and never out
+  onto a spot with no floor (`MaxDrop`: the player is turned back).
+- **The ledge is 3.4** with a kerb of 0.25 (text 3.0; a player of 2.2 got up a 3.0 ledge: the capsule's
+  round foot rolls over an edge 1.36 × its size up). Gates as measured: the mouse-hole passes 0.47, the
+  ledge is climbed from 2.48, the way out passes 2.00.
+- `GroundY` −0.2 (a floor board on the room's floor). **Stations:** shoe prints at Z 11.2 / 17.8 / 26.75
+  and lime dashes for the door's foot at 12.3 / 18.6 / 28.65 (text: the first at Z 3 and 3.7 - a mouse
+  then carried a door that hides a third of the picture ten units to a hole it could not see; now it
+  is three).
+- The door is `SquareOnGrab`, cannot be laid flat, and has a pane across its opening so that a click
+  at its middle picks it up. "Any aim at the end wall works" for the last trip is not so: a door
+  against the end wall stands where a giant cannot get into it (told, and the next let-go at the feet
+  works).
+- Sixteen lines, by what the last trip left: still too big for the mouse-hole, not tall enough for the
+  ledge, too tall for the way out, no room, out of reach (the round plates call it back).
+- Still open: carried, the door hides the middle of the picture (its opening is an opaque card by
+  design; edge-on it is still a post up to 26° wide); the second trip has a window (pick up from 0.31
+  to 0.8 away, let go above about 62°) that is told, not designed out; a player of 2.2 to 2.47 can
+  scramble onto the ledge with sprint and jump and is then too tall for the way out (no way round,
+  but the margin to "fits" is 6 % of size); from the ledge, walking through the top of a big door that
+  stands edge-on at its foot puts the player down in the hall at the door's size, and nothing is said.
 
 
 ---
@@ -2843,6 +3038,40 @@ failing link. Same puzzle, same messages, no physics inside a run.
 **Fallback B (three toys).** If the level runs long, ship the ruler already seated and not grabbable:
 grow (dominoes), grow to a weight (ball), shrink (fan); about a minute shorter.
 
+**As built (2026-10-05, reviewed to 2026-10-10; `Level15RubeGoldberg.cs`, `Level15Stage.cs`,
+`Level15Set.cs`, `Level15Tests`, `Level15UiTests`; 96 test cases).** Solved by its bot in **40.75 s**,
+most of it walking: dominoes 0.6 → **3.103**, ball 0.6 → **3.000** (the clamp), ruler 1.0 → **1.012**
+turned onto the marker, fan 5 → **0.924**, then the pedal and one unbroken run of about ten seconds
+(marble apex about 6.8 against the 6.25 it needs); the only line is the last one ("The alarm rings ...").
+Neither fallback is used: all four toys are the player's and the run is live. Where the game departs
+from the text:
+
+- **Start** (14, 3, 4.3), a step from the dominoes on their book, the crosshair on them and their
+  outline on the wall behind (text (0, 3, 0)).
+- **Two approach sockets** in front of the hopper and the lane take a ball or a set that is big enough
+  but hangs short of its station (picked up from beside its pedestal it is at its largest before it
+  gets there) and hand it on; a set that caught on the plinth's edge at 1.7 to 1.8 is not taken, falls
+  into the trench and is told.
+- **The dominoes' outline is painted 1.6 above the lane** with chevrons down to it: aimed at the lane
+  itself the set's foot catches the plinth's edge. Lane yaw tolerance 45° (text 20°).
+- The hopper is a quarter collar of blocks with a gate that sinks; hopper socket radius 2.5; the chute
+  floor lies under the ball's line; drum radius 1.75; hoop at X −3.3; `HoopNeed` 6.25 (text 6.3): the
+  ball works from 2.25, the dominoes from 2.2 (they seat from 1.0, and a seated set that is too small
+  is found out by running the machine, as the text has it). The ruler starts at (−8.1, 0.04, 14.2) and
+  seats within 40° (text 30°). Only the baseball breaks the clock; only the player presses the pedal.
+- **The machine keeps its toys while it runs** and while it sets itself up again, and a run that stops
+  with the ball in the air still lifts the ball back (a ball left on the ruler's short arm made every
+  later press say "The gate opens. Nothing rolls.").
+- Thirty lines: one for every link the run can stop at and one for every let-go a station does
+  not take. Hints shortened to five lines; hint 3 says where each toy is picked up from.
+- **The dawn** is the lighting rig's (`LightingRig.Dawn`, shared): when the machine is done the night
+  turns to morning over four seconds - the sunny-rug's sun through the same window, the day's ambient
+  on the plum walls, the toys' night-light glow handed back - and the player walks out of a room that
+  is waking. The room itself stays the Plum room. After it comes the ending screen (Appendix F).
+- Still open: from the stand mark the bottom quarter of the dominoes' outline still catches the
+  plinth's edge (told; one more pick-up from the edge does it); dominoes picked up on a slant seat at
+  2.0 to 2.2 and are only found out by the run; the baseball is small seen from the pedal, 20 units off.
+
 
 ---
 
@@ -3103,5 +3332,96 @@ Still open after phase 2 (none of it stops a level from being solved):
 - `Gadgets/Funnel.cs`: the chamber floor is a zero-thickness sheet (Level 8 has its own blocks and a
   net under it; Level 15's hopper needs the same or a fix in the gadget).
 - Not checked: a WebGL build of these levels.
+
+## Appendix F — As built: phase 3 (Levels 10–15) and the end of the game
+
+Measured in the Unity simulation on 2026-10-11 with each level's own bot solver. Times are game seconds
+from the load to `LevelCompleted`; `Phase3CampaignTests` plays the six in one `Game`, forwards and
+backwards, and gets the same times to the tick - and plays the whole campaign, 1 to 15, by autoplay
+through the real runner in one game, to the ending. The details are in each level's "As built" note and
+in `tools/out/notes/level1N-build.md`, `level1N-review.md` and `phase-3-campaign.md`; contact sheets are
+in `tools/out/shots/phase-3`.
+
+| Level | Toy: start → solver's let-go (text) | Works from → to | Solve | Pick-up `k` (solver) | Said in the solve |
+|---|---|---|---|---|---|
+| 10 Matryoshka Boxes | Boxes 1.2 / 0.9 / 0.6 → **1.912 / 0.971 / 1.081** (1.9 / 1.0 / 1.0) | 1.52–2.0 / 0.61–1.15 / 0.69–1.15 (clamps) | **17.53 s** | 0.434 / 0.323 / 0.211 | nothing |
+| 11 Blocking Lasers | Card 0.5 → **5.947** (5.9) | 4.3 → 7 (clamp) | **6.10 s** | 0.377 | nothing |
+| 12 The Keyhole | Key 8 → **0.582** on the shelf, **0.341** at the lock (0.31); spool 1.0 → **9.162** (9.1) | key 0.06 → 0.5; spool 8.35 → 9.9 (clamp) | **13.97 s** | 0.53 / 0.62 | nothing |
+| 13 Escaping the Fishbowl | Sponge 2.0 → **9.593** (9.5) → **1.862** (1.9) | soak 6.09 → 12 (clamp); wring 0.5 → about 2.3 | **14.32 s** | 1.20 / 1.23 | nothing |
+| 14 The Infinite Hallway | Doorway 1.0 → **0.281 / 3.2 / 1.319** (0.28 / 3.2 / 1.35) | to 0.47 / from 2.48 / to 2.00 | **9.95 s** | 0.166 / 0.687 / 0.343 | the tip about turning the door edge-on |
+| 15 The Rube Goldberg Machine | Dominoes 0.6 → **3.103** (3.0); ball 0.6 → **3.000** (3.0); ruler 1.0 → **1.012** (1.1); fan 5 → **0.924** (0.94) | 2.2–3.5 / 2.25–3.0 / 0.8–1.2 / 0.6–1.2 | **40.75 s** | 0.353 / 0.398 / 0.285 / 0.206 | "The alarm rings ..." |
+
+The whole campaign by its solvers is 207.9 s of play (Appendix D and E for Levels 1 to 9).
+
+In Play Mode (the real `GameRunner` loop, `?level=N&autoplay=1`, wall-clock seconds from the start of
+the check to the load of the next level, start-up frames included) on the final code of 2026-10-11:
+16.0 / 12.5 / 7.0 / 17.6 / 20.6 / 15.4 / 6.9 / 23.8 / 15.2 for Levels 1 to 9 and **20.9 / 9.5 / 17.5 /
+17.8 / 12.9 / 44.1** for Levels 10 to 15, every one completed, each loading the level after it - and
+Level 15 showing the ending instead of loading anything. With no address the game opens on the title
+over Level 1.
+
+What the six agree on, with each other and with the nine before them (and `Phase3CampaignTests` asserts):
+
+- **The hero toy is under the crosshair at the start and the first click picks it up.** Everything
+  that can be picked up wears a candy colour the room allows (Level 10's one box becomes three, Level
+  12 has the key and the spool, Level 15 the machine's four parts).
+- **One sentence for a pick-up from too far away,** Level 1's, in all six. Three hints: the first
+  names no place to stand, the third begins with the pick-up and says when to let go. Every hint and
+  every blurb of the campaign is set at full size (five lines of the pause card; two of the level
+  card). Lines are plain ASCII, toys are *picked up* and *let go*, a toast is at most 110 characters.
+- **Dashed paint in the toy's colour is where it goes:** the three boxes' outlines on the shelf, the
+  rug and the chart (10), the roof's footprint on the floor (11), the spool on the door wall (12), the
+  sponge's footprint on the gravel (13), the door's foot at each station (14), the four toys at their
+  stations (15). Where the paint can judge, it does, in Level 2's colours: red for "not like this",
+  green for "let go" (11, 12, and the lamps of 15). **Shoe prints are where to stand**; nothing else
+  looks like either.
+- **A toy that is of no use where it lies comes back by itself,** every try that fails gets one line
+  saying why, and nothing the player can do leaves a level that cannot be finished.
+
+Shared code that phase 3 changed (each with a regression test next to the area's tests):
+
+| File | Change | For |
+|---|---|---|
+| `Engine/Prop.cs`, `Engine/PerspectiveGrabber.cs` | `PropOptions.SquareOnGrab`: on a pick-up the toy's heading eases to the nearest quarter turn of the view | 10, 11, 14 |
+| `Gadgets/PortalDoorway.cs` | `Carried`: the velocity through the door scales with the size ratio along the floor and with its root vertically; `FootSlack`, `MaxDrop` | 14 |
+| `Gadgets/WaterVolume.cs`, `Render/GadgetVisuals/WaterVisuals.cs` | `WaterVolumeOptions.Dip` (water in a dip of its own); ripples stay inside their volume | 13 |
+| `Render/GadgetVisuals/LaserVisuals.cs` | "Laser Glow": a pinpoint of beam light under whatever roofs a beam | 11 |
+| `Render/DimensionCallout.cs` | the callout goes when the toy it stands beside is sent back | 11 |
+| `Art/RoomRecipe.cs`, `Shaders/Flat.shader` | the multiply blend is written `Zero, SrcColor` (the same product; it came out brighter on Direct3D 12 with MSAA) | 11 |
+| `Render/LightingRig.cs` | `LightingValues.Dawn` / `Blend`, `LightingRig.Dawn`: in a night room the night turns to morning when the room's machine is done | 15 |
+| `Platform/GameFlow.cs`, `Platform/Progress.cs`, `UI/EndingScreen.cs`, `UI/MenuPresenter.cs`, `UI/MenuScreens.cs`, `Audio/AudioPresenter.cs` | the end of the game (below) | all |
+
+**The end of the game.** The campaign does not wrap round. The complete card of Level 15 says "Finish"
+on its Cherry pill, and that leads to the ending screen (`FlowState.Ending`, `EndingMenu`), in the
+menus' own sticker style on the catalogue's Paper surface:
+
+- "THE END" and the count ("15 OF 15 COLLECTED"); the fifteen blister cards of the campaign stick on
+  one after the other, each in its room's colour with its hero toy; when every level is collected a
+  "COLLECTED" stamp punches on and paper confetti in the candy colours falls; then a result card with
+  "THANK YOU FOR PLAYING", the total time and the pick-ups of the campaign (the best run of each level,
+  added up) and three ways on: **Play again** (the first level), **Levels** (the catalogue; Back
+  returns to the ending) and **Title** (also Esc). Nothing can be pressed before the result card is up,
+  and nothing moves on by itself.
+- What is saved: every completion with its best time and that run's pick-ups, how often the ending was
+  reached, and the bookmark, which goes back to Level 1 - a fresh game after the ending starts at the
+  beginning with the catalogue kept.
+- Somebody who went straight to the last level by its address gets an honest ending ("1 OF 15
+  COLLECTED", Kraft cards with a "?", no stamp, "14 toys are still waiting in the catalogue.").
+  While a bot plays, the ending is the bot's ("15 OF 15 PLAYED", "THE BOT PLAYED IT THROUGH") and
+  nothing of it is kept.
+- The level keys (`[` and `]`) still step round the list; they are for looking at levels.
+
+Still open after phase 3 (none of it stops a level from being solved):
+
+- Level 11: the beams are the art bible's magenta, not the brief's red (decided for the art bible; one
+  colour constant if the owner wants red). The lean-to is a second way through that is kept.
+- Level 10: the inner boxes' limit makes a top box picked up from very near tumble and knock the step.
+- Level 12: the spool's window is narrow (ratio 1.19) and rests on the paint to be found.
+- Level 13: Lagoon sponge on pool-blue water; the held sponge hides its own target.
+- Level 14: the carried door hides the middle of the picture; the walk off the ledge through the top
+  of a big door is not explained.
+- Level 15: about 41 s of solving is mostly walking between four stations; the dawn is a change of
+  light only (the room stays plum).
+- Not checked: a WebGL build of these levels (builds were not allowed in these sessions).
 
 END OF LEVELS.md

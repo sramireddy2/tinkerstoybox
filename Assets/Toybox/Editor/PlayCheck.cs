@@ -17,7 +17,9 @@ namespace Toybox.EditorTools
     /// the GameRunner, turns autoplay on and watches the bot solve the first level through the real
     /// Update loop, takes pictures through the game's own camera, leaves Play Mode again and writes what it
     /// saw to tools/out/playcheck/result.txt. -toyboxPlain plays with the debug look; -toyboxUrl "?level=3"
-    /// gives Play Mode the query string a page address would carry.
+    /// gives Play Mode the query string a page address would carry. What it waits for is the completion
+    /// and what the runner does next: the load of the following level, or - after the campaign's last
+    /// level - the ending.
     ///
     /// CAUTION: Run returns as soon as Play Mode has been requested; the check itself takes many editor
     /// frames (about 15 seconds). While it runs, the editor is in Play Mode and must not be asked to run
@@ -31,8 +33,9 @@ namespace Toybox.EditorTools
         const string StateKey = "Toybox.PlayCheck.State";
         const string DeadlineKey = "Toybox.PlayCheck.Deadline";
         const string OutputDirectory = "tools/out/playcheck";
-        const double TimeoutSeconds = 100.0;
-        const float WatchSeconds = 45f;
+        // Level 15's own solution takes 41 s of game time; tools/unity.ps1 waits 180 s for the result.
+        const double TimeoutSeconds = 140.0;
+        const float WatchSeconds = 70f;
 
         static readonly List<string> Report = new List<string>();
         static readonly List<string> Problems = new List<string>();
@@ -215,6 +218,16 @@ namespace Toybox.EditorTools
                 Report.Add("autoplay completed the level after " + elapsed.ToString("0.0", CultureInfo.InvariantCulture) +
                            " s and the runner loaded level " + runner.LevelId + " (sim scene now '" + game.Scene.name + "', was '" + firstScene + "')");
                 Shoot("play-next-level.png");
+            }
+            // After the campaign's last level nothing is loaded: the game shows its ending.
+            else if (!wrapped && completions >= 1 && runner.Flow != null && runner.Flow.State == FlowState.Ending)
+            {
+                wrapped = true;
+                CampaignReport told = runner.Flow.Report();
+                Report.Add("autoplay completed the level after " + elapsed.ToString("0.0", CultureInfo.InvariantCulture) +
+                           " s and the game showed its ending (level " + runner.LevelId + " is the campaign's last; nothing was loaded; the ending counts " +
+                           told.CollectedCount + " of " + told.Total + (told.Watched ? " played by the bot)" : " collected)"));
+                Shoot("play-ending.png");
             }
 
             if (wrapped || elapsed > WatchSeconds)

@@ -135,7 +135,11 @@ namespace Toybox.UI
             // filter, the one thing in it that needs the canvas's inverse matrix, is what gives out.)
             // The overlay camera clears the depth before it draws, so nothing of the world gets in front
             // of the canvas at any distance.
-            float distance = (camera.nearClipPlane * 1.5f + (Canvas.sortingOrder > 15 ? 0f : camera.nearClipPlane * 0.1f)) * (size.y / UiTheme.ReferenceHeight);
+            // The same goes for a player made small (Level 14): the rig brings the near plane in with them
+            // (0.05 times their size), and a canvas that followed it there would be scaled by 3e-5 at a
+            // size of 0.3 - no words again. It stays where it is for a player of 1.
+            float near = Mathf.Max(camera.nearClipPlane, Toybox.Render.CameraRig.NearPlane);
+            float distance = (near * 1.5f + (Canvas.sortingOrder > 15 ? 0f : near * 0.1f)) * (size.y / UiTheme.ReferenceHeight);
             float height = 2f * distance * Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
             float scale = height / size.y;
             Transform view = camera.transform;
@@ -157,7 +161,8 @@ namespace Toybox.UI
     ///   tools\unity.ps1 exec -Method Toybox.EditorTools.Shots.Capture -UnityArgs '-toyboxLevel','0','-toyboxUi','pause'
     ///
     /// Screens: hud (the default), toast (the HUD with two sample hints), title, pause, hints, settings, select, catalogue (the level select with
-    /// the fifteen levels of the campaign plan and some progress, whatever is registered), complete.
+    /// the fifteen levels of the campaign plan and some progress, whatever is registered), complete, ending (the end of
+    /// the game with every registered campaign level collected).
     /// Outside Play Mode only.
     /// </summary>
     public static class UiCapture
@@ -313,6 +318,7 @@ namespace Toybox.UI
                 case "select":
                 case "catalogue": return FlowState.LevelSelect;
                 case "complete": return FlowState.LevelComplete;
+                case "ending": return FlowState.Ending;
                 default: return context.State;
             }
         }
@@ -357,6 +363,14 @@ namespace Toybox.UI
         {
             var progress = new Progress(new MemoryStore());
             for (int id = 1; id <= 6; id++) progress.RecordCompletion(id, 31f + id * 17.3f);
+            return progress;
+        }
+
+        /// <summary>Progress with every campaign level of the list collected: what the ending shows in a capture.</summary>
+        public static Progress FullProgress(LevelList levels)
+        {
+            var progress = new Progress(new MemoryStore());
+            foreach (int id in levels.Campaign) progress.RecordCompletion(id, 9.5f + (id * 37 % 11) * 2.3f, 1 + id * 5 % 4);
             return progress;
         }
 

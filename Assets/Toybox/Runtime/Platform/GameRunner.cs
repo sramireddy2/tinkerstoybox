@@ -177,6 +177,10 @@ namespace Toybox.Platform
                 case FlowState.LevelComplete:
                     if (keys.RestartPressed) Flow.Restart();
                     break;
+                case FlowState.Ending:
+                    // The ending's own buttons do the rest; without menus (the plain look) a click goes back to the title.
+                    if (!menus && keys.ClickPressed) Flow.ReturnToTitle();
+                    break;
             }
         }
 

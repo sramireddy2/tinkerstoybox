@@ -711,9 +711,13 @@ namespace Toybox.Engine
         /// What the capsule does not collide with - a prop let go around the player, a heavy prop on its way
         /// through them (PerspectiveGrabber), a gadget part that would have crushed them - is no ground to
         /// stand on and no face in the way either. The queries below see it all the same, because ignoring
-        /// a collision is a matter between two colliders and a query knows only one.
+        /// a collision is a matter between two colliders and a query knows only one. The same goes for a
+        /// collider that leaves the player's layer out for good (Collider.excludeLayers: the doorway's
+        /// frame) - a door frame no higher than the player's ankle would otherwise be a kerb to their foot,
+        /// though nothing of it ever touches them.
         /// </summary>
-        bool PassesThrough(Collider other) => Physics.GetIgnoreCollision(other, Collider);
+        bool PassesThrough(Collider other) =>
+            Physics.GetIgnoreCollision(other, Collider) || (other.excludeLayers.value & Layers.PlayerMask) != 0;
 
         // The first thing under the probe that the capsule can touch. Nearly always that is simply the
         // first thing; only when the capsule passes through that one are all of them looked at.
