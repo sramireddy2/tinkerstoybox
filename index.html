@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="description" content="Tinker's Toybox - a forced-perspective puzzle platformer where a tiny action figure resizes the playroom.">
+    <title>Tinker's Toybox</title>
+    <!-- The tab's icon: the four-pane mark in Ink, drawn here so that no file is fetched (and none is missing). -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cg fill='%232B2140'%3E%3Crect x='6' y='6' width='22' height='22' rx='5'/%3E%3Crect x='36' y='6' width='22' height='22' rx='5'/%3E%3Crect x='6' y='36' width='22' height='22' rx='5'/%3E%3Crect x='36' y='36' width='22' height='22' rx='5'/%3E%3C/g%3E%3C/svg%3E">
+    <!-- What a shared link shows. preview.png lies beside this page (the title screen, 1280 x 720). -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Tinker's Toybox">
+    <meta property="og:description" content="A first-person puzzle platformer about forced perspective: a tiny action figure resizes the playroom. For a desktop browser, with keyboard and mouse.">
+    <meta property="og:url" content="https://sramireddy2.github.io/tinkerstoybox/">
+    <meta property="og:image" content="https://sramireddy2.github.io/tinkerstoybox/preview.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <!-- The fonts' copyright notices and their licence (SIL OFL 1.1) travel with every build: licenses.txt beside this page. -->
+    <link rel="license" href="licenses.txt">
+    <style>
+      /* Loading screen per docs/ART_BIBLE.md 10.5: Paper background, the four-pane mark as an Ink spinner, a Cherry bar. */
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #FFFDF7; }
+      #unity-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #FFFDF7; outline: none; }
+      #loader { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px;
+        background: #FFFDF7; color: #2B2140; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; transition: opacity .32s ease; }
+      #loader.done { opacity: 0; pointer-events: none; }
+      #mark { width: 56px; height: 56px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; animation: turn 1.6s cubic-bezier(.6, 0, .4, 1) infinite; }
+      #mark i { background: #2B2140; border-radius: 6px; }
+      @keyframes turn { 0% { transform: rotate(0deg); } 50%, 100% { transform: rotate(90deg); } }
+      #bar { width: min(360px, 64vw); height: 10px; border-radius: 999px; background: rgba(43, 33, 64, .12); overflow: hidden; }
+      #fill { width: 0%; height: 100%; border-radius: 999px; background: #FF2E55; transition: width .18s ease; }
+      #note { font-size: 14px; font-weight: 600; letter-spacing: .04em; min-height: 1.2em; max-width: 32em; padding: 0 24px; line-height: 1.5; text-align: center; }
+      /* Not loading: held back for a visitor without keyboard and mouse, or it could not start. The mark stands still, the bar is gone. */
+      #loader.held #mark, #loader.failed #mark { animation: none; }
+      #loader.held #bar, #loader.failed #bar { display: none; }
+      #anyway { font: inherit; font-size: 14px; font-weight: 700; letter-spacing: .04em; color: #FFFDF7; background: #2B2140; border: 0; border-radius: 999px; padding: 12px 24px; cursor: pointer; }
+      #anyway[hidden] { display: none; }
+      #anyway:focus-visible { outline: 3px solid #FF2E55; outline-offset: 3px; }
+      #legal { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 12px; font-weight: 600; letter-spacing: .04em; opacity: .6; }
+      #legal a { color: inherit; }
+      @media (prefers-reduced-motion: reduce) { #mark { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="loader">
+      <div id="mark"><i></i><i></i><i></i><i></i></div>
+      <div id="bar"><div id="fill"></div></div>
+      <div id="note"></div>
+      <button id="anyway" type="button" hidden>Load anyway</button>
+      <div id="legal"><a href="licenses.txt" target="_blank" rel="noopener">Font licences</a></div>
+    </div>
+    <script src="Build/6c8d1695aa3fd75a9199e5639b7fb233.loader.js"></script>
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+      var loader = document.querySelector("#loader");
+      var fill = document.querySelector("#fill");
+      var note = document.querySelector("#note");
+      var anyway = document.querySelector("#anyway");
+      var started = false;
+
+      // The loader's own words say what is missing (WebGL 2, WebAssembly); the page stops looking busy.
+      function fail(message) {
+        var text = String(message);
+        if (!/[.!?]$/.test(text)) text += ".";
+        loader.classList.add("failed");
+        note.textContent = "Could not start: " + text + " Try a current Chrome, Edge or Firefox on a computer.";
+      }
+
+      function start() {
+        if (started) return;
+        started = true;
+        try {
+      createUnityInstance(canvas, {
+        arguments: [],
+        dataUrl: "Build/3f43447881285d6a8d462f5c84ebf185.data.unityweb",
+        frameworkUrl: "Build/4448f35f429455f662de3afce7b5d195.framework.js.unityweb",
+        codeUrl: "Build/343dfe9fcc787abe95374091de8e7d6f.wasm.unityweb",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "Tinker's Toybox",
+        productName: "Tinker's Toybox",
+        productVersion: "1.0.0",
+      }, function (progress) {
+        fill.style.width = Math.round(progress * 100) + "%";
+      }).then(function (unityInstance) {
+        window.unityInstance = unityInstance;
+        loader.classList.add("done");
+        canvas.focus();
+      }).catch(fail);
+        } catch (error) {
+          fail(error && error.message ? error.message : error);
+        }
+      }
+
+      // A phone or a tablet (it cannot hover and its first pointer is a finger): the menus would answer
+      // touch, the game needs a keyboard and a mouse and would not. Say so before the game is fetched.
+      // "Load anyway" is for a tablet with both attached. A laptop with a touch screen is not held (its
+      // first pointer is fine), nor is the bot (?autoplay=1 needs nobody's input). Whatever goes wrong
+      // in here, the game starts: this must never keep a computer from playing.
+      var hold = false;
+      try {
+        hold = !!(window.matchMedia && window.matchMedia("(hover: none) and (pointer: coarse)").matches) &&
+               !/[?&]autoplay(=(1|true|yes|on))?(&|$)/i.test(window.location.search);
+        if (hold) {
+          loader.classList.add("held");
+          note.textContent = "Tinker's Toybox needs a keyboard and a mouse. Open this page on a computer.";
+          anyway.hidden = false;
+          anyway.onclick = function () {
+            anyway.hidden = true;
+            loader.classList.remove("held");
+            note.textContent = "";
+            start();
+          };
+        }
+      } catch (error) {
+        hold = false;
+      }
+      if (!hold) start();
+    </script>
+  </body>
+</html>
