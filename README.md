@@ -1,6 +1,27 @@
+<div align="center">
+
 # Tinker's Toybox
 
-A first-person puzzle platformer where you play a tiny action figure in an oversized playroom.
+**A first-person puzzle platformer where a tiny action figure resizes the playroom.**
+
+![The game's seven candy colours](docs/media/candy-ribbon.png)
+
+[![Play it in your browser](https://img.shields.io/badge/%E2%96%B6%20%20Play%20it%20in%20your%20browser-FF2E55?style=for-the-badge)](https://sramireddy2.github.io/tinkerstoybox/)
+
+[![Unity 6](https://img.shields.io/badge/Unity-6000.6.4f1-2B2140?style=flat-square&logo=unity&logoColor=white)](https://unity.com/)
+![C#](https://img.shields.io/badge/C%23-9.0-8A4BFF?style=flat-square)
+![URP 17.6](https://img.shields.io/badge/URP-17.6-18A8FF?style=flat-square)
+![WebGL 2](https://img.shields.io/badge/WebGL%202-WebAssembly-FF7A1A?style=flat-square&logo=webassembly&logoColor=white)
+![PhysX](https://img.shields.io/badge/physics-PhysX-7FDB2E?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-2139%20passing-7FDB2E?style=flat-square)
+![60 fps](https://img.shields.io/badge/browser-60%20fps-FF5FB0?style=flat-square)
+[![MIT licence](https://img.shields.io/badge/licence-MIT-FFCE1F?style=flat-square)](LICENSE)
+
+![Level 1, played by the built-in bot: a crumb of cheese is picked up, held against the far wall, let go as a hillside, and climbed](docs/media/gameplay.gif)
+
+</div>
+
+You play a tiny action figure in an oversized playroom.
 Your only tool is **forced perspective**: pick up a toy, and it keeps its on-screen size while it lands on
 whatever is behind it. Pick up a block in front of your face, look across the room, let go — and it
 arrives as a building-sized monolith.
@@ -10,10 +31,43 @@ arrives as a building-sized monolith.
 It runs in a current desktop browser (Chrome, Edge or Firefox with WebGL 2) and needs a keyboard and a
 mouse. Fifteen levels and an ending; progress and settings are kept in the browser.
 
+No imported art or audio: meshes, textures, shaders and sounds are all generated in code (the fonts are
+the one exception, see [Credits](#credits)).
+
+## Screenshots
+
+Straight from the published build, each a few seconds into its level.
+
+<table>
+  <tr>
+    <td><img src="docs/media/level-02.jpg" alt="Level 2: a silver thimble the size of a water tower drops into the hole in the floor"></td>
+    <td><img src="docs/media/level-04.jpg" alt="Level 4: a purple domino grown to eight times its size stands in front of a wall of blocks"></td>
+    <td><img src="docs/media/level-09.jpg" alt="Level 9: a plank held out over a circling toy train toward the lighthouse"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/level-11.jpg" alt="Level 11: a playing card lies as a roof on two low walls under a rain of red laser beams"></td>
+    <td><img src="docs/media/level-13.jpg" alt="Level 13: a blue sponge the size of a room held over the fishbowl"></td>
+    <td><img src="docs/media/level-15.jpg" alt="Level 15: a row of green dominoes, five times their size, in the night-time machine room"></td>
+  </tr>
+</table>
+
 ![The title screen: the first room, the cheese wedge on its pedestal](docs/media/title.png)
 
-Built with **Unity 6** (URP, WebGL). No imported art or audio: meshes, textures, shaders and sounds are
-all generated in code (the fonts are the one exception, see [Credits](#credits)).
+## Tech stack
+
+| | |
+|---|---|
+| **Engine** | Unity 6 (6000.6.4f1), C# |
+| **Rendering** | Universal Render Pipeline 17.6 with five hand-written HLSL shaders (`ToyLit`, `RoomLit`, `Sticker`, `Flat`, `MacroBand`); three quality tiers with a governor that watches the frame rate |
+| **Physics** | PhysX, stepped by hand at 60 Hz in its own physics scene, so a run can be replayed tick for tick |
+| **Input** | Input System 1.20: keyboard, mouse, pointer lock |
+| **UI** | UGUI 2.6 with TextMesh Pro, laid out from code |
+| **Audio** | Synthesised at runtime: there is not one audio file in the project |
+| **Art** | Meshes, textures and materials generated in C#; no imported models or images |
+| **Platform** | WebGL 2 and WebAssembly (IL2CPP), hosted on GitHub Pages |
+| **Tests** | Unity Test Framework 1.8 (NUnit): about 2200 EditMode tests, with a scripted bot that solves every level through the same input a player has |
+| **Tooling** | PowerShell (a headless editor that serves compile, test and picture requests; build; deploy), Unity's own Roslyn for a seconds-long typecheck, Python with Playwright for a full-speed check of the build in a real browser |
+| **Fonts** | Unbounded and Figtree (SIL Open Font License) |
 
 ## How the mechanic works
 
@@ -30,23 +84,23 @@ away you were when you picked it up decides how big it can get.
 
 ![Where each of the fifteen levels starts](docs/media/campaign-spawn-sheet.png)
 
-| Level | What it is about |
-|---|---|
-| 1 The Cheese Wedge | Far away means big: a crumb of plastic cheese, let go across the toy chest, lands as a hillside. |
-| 2 The Thimble Chasm | A size has to fit: a silver thimble the size of a water tower corks the hole in the floor. |
-| 3 Shrinking the Apple | Near means small: an apple the size of a boulder comes off the shelf small enough for a button. |
-| 4 Domino Effect | Size is weight: one domino, made as tall as a house, brings down a wall of blocks. |
-| 5 The Fan and the Feather | Size is area: a feather wide enough to catch a desk fan's wind is the raft across the canyon. |
-| 6 Bouncing Eraser | Size is bounce: an eraser as big as a bus is the trampoline to the top of the cabinet. |
-| 7 The Teeter-Totter | A lever: stand on one end of a ruler while a pebble grown into a boulder lands on the other. |
-| 8 Funnel Physics | Exact sizes, three times: three marbles, three funnels, none of them the right size. |
-| 9 The Moving Train | Timing: a plank let go onto a train that never stops is the bridge to the lighthouse. |
-| 10 Matryoshka Boxes | Several toys from one: a gift box turns out to be three, and three boxes are a stair. |
-| 11 Blocking Lasers | A held toy is not in the world: a playing card is a roof against the laser rain once you let go. |
-| 12 The Keyhole | One toy, two jobs: the only key to the door is also the bridge to it. |
-| 13 Escaping the Fishbowl | Size is capacity: a sponge carries a fishbowl's water through a change of size. |
-| 14 The Infinite Hallway | The toy resizes you: a loose door frame makes whoever walks through it its own size. |
-| 15 The Rube Goldberg Machine | Everything at once: four toys, four outlines, one pedal, judged by running the machine. |
+| | Level | What it is about |
+|---|---|---|
+| 🧀 | 1 The Cheese Wedge | Far away means big: a crumb of plastic cheese, let go across the toy chest, lands as a hillside. |
+| 🧵 | 2 The Thimble Chasm | A size has to fit: a silver thimble the size of a water tower corks the hole in the floor. |
+| 🍎 | 3 Shrinking the Apple | Near means small: an apple the size of a boulder comes off the shelf small enough for a button. |
+| 🧱 | 4 Domino Effect | Size is weight: one domino, made as tall as a house, brings down a wall of blocks. |
+| 🪶 | 5 The Fan and the Feather | Size is area: a feather wide enough to catch a desk fan's wind is the raft across the canyon. |
+| ✏️ | 6 Bouncing Eraser | Size is bounce: an eraser as big as a bus is the trampoline to the top of the cabinet. |
+| 📏 | 7 The Teeter-Totter | A lever: stand on one end of a ruler while a pebble grown into a boulder lands on the other. |
+| 🔮 | 8 Funnel Physics | Exact sizes, three times: three marbles, three funnels, none of them the right size. |
+| 🚂 | 9 The Moving Train | Timing: a plank let go onto a train that never stops is the bridge to the lighthouse. |
+| 🎁 | 10 Matryoshka Boxes | Several toys from one: a gift box turns out to be three, and three boxes are a stair. |
+| 🃏 | 11 Blocking Lasers | A held toy is not in the world: a playing card is a roof against the laser rain once you let go. |
+| 🗝️ | 12 The Keyhole | One toy, two jobs: the only key to the door is also the bridge to it. |
+| 🧽 | 13 Escaping the Fishbowl | Size is capacity: a sponge carries a fishbowl's water through a change of size. |
+| 🚪 | 14 The Infinite Hallway | The toy resizes you: a loose door frame makes whoever walks through it its own size. |
+| ⚙️ | 15 The Rube Goldberg Machine | Everything at once: four toys, four outlines, one pedal, judged by running the machine. |
 
 Every level has three hints (on the pause card, one at a time; the third is the recipe), and a level
 you have finished stays in the catalogue (**Levels**) with your best time.
@@ -269,5 +323,6 @@ out with every build as `licenses.txt` next to the page (the loading screen link
 
 ## Licence
 
-No licence has been chosen for the game's own code and content yet. Until a `LICENSE` file says
-otherwise, all rights are reserved.
+The game's own code and content are under the [MIT License](LICENSE): use them, change them, ship them,
+as long as the copyright notice stays. The three typefaces above keep their own licence, the SIL Open
+Font License.

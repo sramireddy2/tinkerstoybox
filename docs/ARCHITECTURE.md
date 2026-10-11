@@ -1661,16 +1661,15 @@ has to find it again.
   and the pause card lists every key.
 - **Level 10 keeps a guard of its own** on top of the engine's rule: from up on a box no other box is
   picked up either. It is wider than `Player.Underfoot` on purpose.
-- **The tools' defaults** (`tools/` was not changed in the review): `build-clone.ps1` defaults to
-  `-Opt BuildTimes`, also with `-Deploy`; `webgl_check.py` watches 40 s by default, one second less
-  than the bot needs for the last level, its example stops at level 9, it does not judge whether the
-  bot finished, and it still lists "favicon" as console noise although the page has an icon now;
-  `unity.ps1`, `typecheck.ps1` and `editor-check.ps1` expect Unity in the Hub's default folder; and the
-  build copy has no README or `docs/`, so `ReleaseTests` skip themselves there. "Releasing" says what
-  to type until they change.
-- **No licence has been chosen** for the game's own code and content (the README says so; the fonts'
-  licences are in place), and the game itself shows no credits: the notices are on the page and in
-  the README.
+- **The tools** (changed after the review, where it had found their defaults wanting): `build-clone.ps1`
+  builds with `RuntimeSpeed` when it deploys and with `BuildTimes` otherwise; `webgl_check.py` watches
+  48 s by default, has `--all` for the fifteen levels and `--phone` for the page as a touch-only device
+  sees it. Still so: it does not judge whether the bot finished a level (look at its pictures), and it
+  lists "favicon" as console noise although the page has an icon now; `unity.ps1`, `typecheck.ps1` and
+  `editor-check.ps1` expect Unity in the Hub's default folder; and the build copy has no README or
+  `docs/`, so `ReleaseTests` skip themselves there.
+- **The licence** of the game's own code and content is MIT (`LICENSE`); the fonts keep the SIL Open
+  Font License. The game itself shows no credits: the notices are on the page and in the README.
 - **The pictures in the repository are captures of the game as it stood at the close:**
   `docs/media/title.png` and the page's `preview.png` (the same picture, in the WebGL template
   folder), and the two contact sheets beside it (the fifteen starts, the end of the game). Capture
